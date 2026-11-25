@@ -8,3 +8,6 @@ blob-report/
 *.log
 .DS_Store
 .vite/
+
+# Agent worktrees (temporary checkouts, not project files)
+.claude/worktrees/
