@@ -262,6 +262,29 @@ test('selection rings, drag box, bars, carried marker, rally flag and order mark
   }, { timeout: 5000 }).toBe(0);
 
   // Carried marker: send the villagers to the nearest tree and let them work for a while.
+  // Random maps may have no tree in view: first centre the camera between the Town Center and its nearest tree.
+  const nearest = await page.evaluate(
+    ([cx, cy]) => {
+      let best: { x: number; y: number } | null = null;
+      let bestD = Infinity;
+      for (const e of window.__game!.state!.entities) {
+        if (e.kind !== 'node' || e.typeId !== 'tree') continue;
+        const d = Math.hypot(e.tile.tx + 0.5 - cx!, e.tile.ty + 0.5 - cy!);
+        if (d < bestD) {
+          bestD = d;
+          best = { x: e.tile.tx + 0.5, y: e.tile.ty + 0.5 };
+        }
+      }
+      return best;
+    },
+    [tc.cx, tc.cy] as const,
+  );
+  expect(nearest).not.toBeNull();
+  await page.evaluate(([x, y]) => window.__game!.worldToScreen(x!, y!), [nearest!.x, nearest!.y] as const);
+  const mid = { x: (tc.cx + nearest!.x) / 2, y: (tc.cy + nearest!.y) / 2 };
+  const mm = await page.evaluate(([x, y]) => window.__game!.minimapToPage(x!, y!), [mid.x, mid.y] as const);
+  await page.mouse.click(mm.x, mm.y);
+  await page.waitForTimeout(300);
   const tree = await page.evaluate(
     ([cx, cy]) => {
       const g = window.__game!;
