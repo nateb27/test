@@ -10,8 +10,8 @@ import { dropOffOrderHandler } from './dropOff';
 import { gatherOrderHandler } from './gather';
 import { moveOrderHandler } from './move';
 import { findEntity } from '../../entities';
-import type { CommandHandler } from '../common';
-import type { Order, OrderState, OrderType, SimContext, UnitEntity } from '../../types';
+import { reject, type CommandHandler } from '../common';
+import type { Command, EntityId, Order, OrderState, OrderType, SimContext, UnitEntity } from '../../types';
 
 export type OrderOf<T extends OrderType> = Extract<Order, { type: T }>;
 export type OrderStateOf<T extends OrderType> = Extract<OrderState, { type: T }>;
@@ -43,12 +43,26 @@ export interface OrderHandler<T extends OrderType> {
 
 type HandlerTable = { [T in OrderType]: OrderHandler<T> };
 
+/**
+ * Getters keep the table lazy: order files import helpers from this module,
+ * and a lazy table makes that import cycle safe in any load order.
+ */
 export const orderHandlers: HandlerTable = {
-  move: moveOrderHandler,
-  gather: gatherOrderHandler,
-  build: buildOrderHandler,
-  assist: assistOrderHandler,
-  dropOff: dropOffOrderHandler,
+  get move() {
+    return moveOrderHandler;
+  },
+  get gather() {
+    return gatherOrderHandler;
+  },
+  get build() {
+    return buildOrderHandler;
+  },
+  get assist() {
+    return assistOrderHandler;
+  },
+  get dropOff() {
+    return dropOffOrderHandler;
+  },
 };
 
 function handlerFor(type: OrderType): OrderHandler<OrderType> {
@@ -108,11 +122,44 @@ export function runOrders(ctx: SimContext): void {
   }
 }
 
+/**
+ * Resolve a command's unit ids to the issuing player's units, ascending id,
+ * duplicates removed. All-or-nothing: if any id is unknown (`unknownEntity`),
+ * owned by someone else (`notOwner`) or not a unit (`cannotPerform`), the
+ * command is rejected with that reason (first failing id in ascending order)
+ * and `null` is returned. An empty list returns `[]` without rejecting
+ * (shape validation is command intake's job).
+ */
+export function validateOwnUnits(ctx: SimContext, cmd: Command, ids: readonly EntityId[]): UnitEntity[] | null {
+  const sorted = [...ids].sort((a, b) => a - b);
+  const units: UnitEntity[] = [];
+  let last = -1;
+  for (const id of sorted) {
+    if (id === last) continue;
+    last = id;
+    const entity = findEntity(ctx.state, id);
+    if (entity === undefined) {
+      reject(ctx, cmd, 'unknownEntity');
+      return null;
+    }
+    if (entity.owner !== cmd.playerId) {
+      reject(ctx, cmd, 'notOwner');
+      return null;
+    }
+    if (entity.kind !== 'unit') {
+      reject(ctx, cmd, 'cannotPerform');
+      return null;
+    }
+    units.push(entity);
+  }
+  return units;
+}
+
+/** Clears current order and queue of the issuing player's units; they idle where they stand. */
 export const applyStopCommand: CommandHandler<'stop'> = (ctx, cmd) => {
-  // TODO(WP2): validate ownership; reject unknown/foreign units.
-  for (const id of cmd.unitIds) {
-    const unit = findEntity(ctx.state, id);
-    if (unit === undefined || unit.kind !== 'unit' || unit.owner !== cmd.playerId) continue;
+  const units = validateOwnUnits(ctx, cmd, cmd.unitIds);
+  if (units === null) return;
+  for (const unit of units) {
     endCurrentOrder(ctx, unit);
     unit.orderQueue = [];
   }
