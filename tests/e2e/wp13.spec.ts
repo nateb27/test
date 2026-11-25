@@ -113,6 +113,7 @@ test('F3 debug overlay: stats, draw toggles, cheats and state hash', async ({ pa
   await page.keyboard.press('F3');
   await expect(page.getByTestId('debug-overlay')).toBeVisible();
   await setPaused(page, false);
+  await frames(page, 10); // the profiler needs rendered frames; the panel shows them on its own 4 Hz poll
   await expect.poll(async () => Number.parseFloat((await page.getByTestId('debug-fps').textContent()) ?? '0')).toBeGreaterThan(0);
   await expect(page.getByTestId('debug-tick-ms')).toContainText('ms');
   await expect(page.getByTestId('debug-path-queue')).toHaveText(/^\d+$/);
