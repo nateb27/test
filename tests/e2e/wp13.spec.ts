@@ -46,6 +46,9 @@ test('Delete: the last Town Center is protected; buildings need a second Delete;
   await expect(page.getByTestId('toast').filter({ hasText: 'last Town Center cannot be demolished' })).toBeVisible();
   expect((await buildingsOf(page, 'townCenter')).length).toBe(1);
   await shot(page, 'wp13-1-last-tc');
+  // The toasts above stay live on the frozen clock; let them lapse so the House's own toast starts fresh
+  // (an identical live toast would be merged into one with a count).
+  await advanceClock(page, 5000);
 
   // A House: Delete asks, a second Delete within 2 s demolishes it.
   await page.keyboard.press('Escape'); // nothing to cancel: opens the menu

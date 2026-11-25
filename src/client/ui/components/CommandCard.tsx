@@ -16,10 +16,10 @@ function CostRow({ button }: { button: CardButtonVM }) {
   const costs = nonZeroCosts(button.cost);
   if (costs.length === 0) return null;
   return (
-    <span class={`cost-row ${costs.length >= 3 ? 'dense' : ''}`}>
+    <span class="cost-row" data-costs={costs.length}>
       {costs.map((c) => (
         <span key={c.resource} class={`cost cost-${c.resource} ${(button.shortfall?.[c.resource] ?? 0) > 0 ? 'short' : ''}`}>
-          <Icon id={resourceIconId(c.resource)} size={11} />
+          <Icon id={resourceIconId(c.resource)} size={9} />
           {compact(c.amount)}
         </span>
       ))}
@@ -99,7 +99,7 @@ export function CommandCard({
               onFocus={() => setHover(slot)}
               onBlur={() => setHover((h) => (h === slot ? null : h))}
             >
-              <Icon id={b.icon} size={36} />
+              <Icon id={b.icon} size={nonZeroCosts(b.cost).length > 0 ? 24 : 36} />
               <span class="hotkey">{hotkey}</span>
               <CostRow button={b} />
             </button>

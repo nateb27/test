@@ -160,9 +160,16 @@ export interface ToastVM {
   /** Unique, increasing; used as a key. */
   id: number;
   kind: ToastKind;
+  /** What is shown: the message, followed by " ×N" once N identical toasts have been merged into it. */
   text: string;
   /** Client time (ms) at which it should disappear. */
   expiresAt: number;
+  /** How many identical toasts were merged into this one (absent: just one). */
+  count?: number;
+  /** The message without the count; what identical toasts are matched on. */
+  baseText?: string;
+  /** Routine news (a unit finished training) that yields its slot to anything else. */
+  routine?: boolean;
 }
 
 export interface BannerVM {

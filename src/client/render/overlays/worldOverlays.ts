@@ -18,7 +18,7 @@ import type { PlacementGhost } from '../../input/placement/types';
 import { footprintOf } from '../entities';
 import { worldToScreen } from '../iso';
 import type { WorldRendererApi } from '../renderer';
-import { barFor, markerForCommand, markerLook, MarkerRing, MARKER_COLOR, MAX_MARKERS, RESOURCE_COLOR } from './logic';
+import { barCentreY, barFor, markerForCommand, markerLook, MarkerRing, MARKER_COLOR, MAX_MARKERS, RESOURCE_COLOR } from './logic';
 import { SpritePool } from './pool';
 import { OverlayTextures } from './textures';
 
@@ -177,10 +177,11 @@ export class WorldOverlays {
       if (selected) this.outline(d.wx, d.wy, size, own ? OWN_COLOR : ENEMY_COLOR);
       const bar = barFor(e, playerId);
       if (bar !== null) {
-        // Just above the roof: sprite textures have empty padding on top, so measure from the footprint centre instead.
+        // Just above the visible top of the art (sprite textures have empty rows above it; without a measurement
+        // the footprint gives an estimate). The offset is in world pixels so it scales with the building.
         const c = worldToScreen(d.wx, d.wy);
-        const rise = e.kind === 'building' && e.constructed ? 28 * size + 24 : 14 * size + 12;
-        this.bar(c.x, c.y - rise, bar.fraction, bar.kind === 'construction' ? CONSTRUCTION_COLOR : PRODUCTION_COLOR, inv);
+        const y = barCentreY(c.y, d.top, size, e.kind === 'building' && e.constructed, (BAR_H / 2 + 4) * inv);
+        this.bar(c.x, y, bar.fraction, bar.kind === 'construction' ? CONSTRUCTION_COLOR : PRODUCTION_COLOR, inv);
       }
     }
 

@@ -181,7 +181,7 @@ export interface PlayerState {
   /** Integers >= 0. Fractions live in per-building/per-order accumulators. */
   resources: ResourceAmounts;
   age: AgeNumber;
-  /** Sum of popCost of living units plus units queued in production. */
+  /** Sum of popCost of living units. Units still in a production queue do not count (they are checked against `popCap` when they finish). */
   popUsed: number;
   /** min(POP_HARD_CAP, sum of popProvided of completed buildings). */
   popCap: number;
@@ -531,7 +531,11 @@ export interface ResearchCommand extends CommandBase {
   techId: TechId;
 }
 
-/** Remove the queue item at `index` (0 = in progress) and refund it in full. */
+/**
+ * Remove the queue item at `index` (0 = in progress) and refund it in full. `index` is read against the queue as
+ * it is when this command applies, so several cancels in one tick are applied in order and each shifts the items
+ * behind it; a client sending more than one must adjust the later indexes (the HUD does).
+ */
 export interface CancelQueueCommand extends CommandBase {
   type: 'cancelQueue';
   buildingId: EntityId;

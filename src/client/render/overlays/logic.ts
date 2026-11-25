@@ -112,3 +112,15 @@ export class MarkerRing {
 export function markerLook(a: number): { scale: number; alpha: number } {
   return { scale: 1.25 - 0.6 * a, alpha: 1 - a * a };
 }
+
+/**
+ * World-pixel y (iso screen space at 1x) of the centre of a building's progress bar. It sits `gap` above the top of
+ * the art when that is known, else at an estimate from the footprint. Both are world pixels, so the bar moves with the
+ * building at every zoom; only `gap` (half the bar plus a little air) is scaled by the caller to stay a fixed number of
+ * screen pixels.
+ */
+export function barCentreY(anchorY: number, top: number | null, size: number, constructed: boolean, gap: number): number {
+  if (top !== null) return top - gap;
+  const rise = constructed ? 28 * size + 24 : 14 * size + 12;
+  return anchorY - rise;
+}

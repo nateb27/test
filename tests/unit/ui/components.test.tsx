@@ -171,7 +171,7 @@ describe('CommandCard', () => {
     render(<CommandCard vm={vm} actions={actions} />);
     const slot = screen.getByTestId(`slot-${house.slot}`);
     const row = slot.querySelector('.cost-row')!;
-    expect(row.classList.contains('dense')).toBe(true);
+    expect(row.getAttribute('data-costs')).toBe('3');
     const costs = Array.from(row.querySelectorAll('.cost'));
     expect(costs).toHaveLength(3);
     // An icon in every cost (placeholder initials here, since no manifest is mounted), never a CSS dot.

@@ -112,7 +112,49 @@ export interface DrawnEntity extends Drawable {
   hit: WorldPxRect;
   /** Sprite box in world pixels. */
   bounds: WorldPxRect;
+  /**
+   * World-pixel y of the highest visible pixel of the building or node sprite (the texture box has empty rows above the
+   * art), or `null` when it cannot be measured. Overlays that sit on top of a building (progress bars) use it.
+   */
+  top: number | null;
   owner: number;
+}
+
+const opaqueTops = new WeakMap<Texture, number | null>();
+
+/**
+ * Empty rows at the top of a texture, in texture (world) pixels, found by scanning the canvas it was uploaded from.
+ * `null` when the texture is not backed by a readable 2D canvas (the caller then falls back to an estimate).
+ */
+export function emptyRowsAbove(tex: Texture): number | null {
+  const cached = opaqueTops.get(tex);
+  if (cached !== undefined) return cached;
+  let pad: number | null = null;
+  try {
+    const source = tex.source as unknown as { resource?: unknown; resolution?: number };
+    const canvas = source.resource as { getContext?: (id: string) => unknown } | undefined;
+    const ctx = typeof canvas?.getContext === 'function' ? (canvas.getContext('2d') as CanvasRenderingContext2D | null) : null;
+    if (ctx !== null && ctx !== undefined) {
+      const res = source.resolution ?? 1;
+      const x = Math.round(tex.frame.x * res);
+      const y = Math.round(tex.frame.y * res);
+      const w = Math.max(1, Math.round(tex.frame.width * res));
+      const h = Math.max(1, Math.round(tex.frame.height * res));
+      const px = ctx.getImageData(x, y, w, h).data;
+      for (let row = 0; row < h && pad === null; row++) {
+        for (let col = 0; col < w; col++) {
+          if (px[(row * w + col) * 4 + 3]! > 40) {
+            pad = row / res;
+            break;
+          }
+        }
+      }
+    }
+  } catch {
+    pad = null;
+  }
+  opaqueTops.set(tex, pad);
+  return pad;
 }
 
 function isTeamManifest(m: AssetManifest): m is TeamAssetManifest {
@@ -170,6 +212,7 @@ function newEntry(registry: DataRegistry | null, e: ReadonlyEntity): Entry {
     size,
     hit: { minX: 0, minY: 0, maxX: 0, maxY: 0 },
     bounds: { minX: 0, minY: 0, maxX: 0, maxY: 0 },
+    top: null,
     owner: e.owner,
   };
   return { e, drawn, sx, sy, z: 0, sprite: null, asset: null, gen: 0, tex: null, mirror: false };
@@ -392,6 +435,10 @@ export class EntityLayer {
         d.hit.maxY = entry.sy + h * 0.06;
       } else {
         d.hit = hitBox(e.kind, e.kind === 'node' ? e.typeId : '', b, { x: entry.sx, y: entry.sy }, w, h, d.size);
+        if (e.kind === 'building') {
+          const pad = emptyRowsAbove(tex);
+          d.top = pad === null ? null : b.minY + pad;
+        }
       }
     }
     spr.zIndex = entry.z;

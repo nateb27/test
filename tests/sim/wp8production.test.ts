@@ -121,6 +121,27 @@ describe('cost, refund and queue progress', () => {
     expect(tc.queue).toHaveLength(0);
   });
 
+  it('cancels in one command batch apply in order, each against the queue left by the one before', () => {
+    const g = makeGame();
+    giveResources(g, 1, 1000);
+    const tc = townCenter(g);
+    const ctx = ctxOf(g);
+    for (const t of ['villager', 'villager', 'villager']) apply(g, ctx, { type: 'train', buildingId: tc.id, unitType: t });
+    tc.queue[0]!.costPaid.food = 51;
+    tc.queue[1]!.costPaid.food = 52;
+    tc.queue[2]!.costPaid.food = 53;
+    const before = g.state.players[1]!.resources.food;
+    ctx.events = [];
+    // Cancel original items 1 and 2: the second index is already shifted down by the first removal.
+    applyCommands(ctx, [
+      { type: 'cancelQueue', buildingId: tc.id, index: 1, playerId: 1, seq: g.seq++ },
+      { type: 'cancelQueue', buildingId: tc.id, index: 1, playerId: 1, seq: g.seq++ },
+    ] as never);
+    expect(reasons(ctx.events)).toEqual([]);
+    expect(tc.queue.map((i) => i.costPaid.food)).toEqual([51]);
+    expect(g.state.players[1]!.resources.food).toBe(before + 52 + 53);
+  });
+
   it('refund uses the cost paid, not the cost now (Themata applied after enqueue changes nothing)', () => {
     const g = makeGame();
     giveResources(g, 1, 1000);

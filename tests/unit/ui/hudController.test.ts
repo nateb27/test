@@ -292,4 +292,32 @@ describe('WP13 UX rules', () => {
     hud.cancelQueueItem(tc, 0);
     expect(hud.vm.toasts).toEqual([]);
   });
+
+  it('several cancels in one tick remove exactly the clicked items, whatever the click order', () => {
+    const tc = match.fx.townCenter;
+    match.selection.set([tc]);
+    const building = match.fx.state.entities.find((e) => e.id === tc)!;
+    if (building.kind !== 'building') throw new Error('not a building');
+    match.loop.paused = true;
+    const orders: number[][] = [[1, 2], [0, 1], [0, 1, 2], [2, 0], [2, 1, 0], [1, 0], [0, 2], [2, 1], [1, 2, 0]];
+    for (const clicks of orders) {
+      match.issued.length = 0;
+      const queue = ['a', 'b', 'c'];
+      building.queue.length = 0;
+      for (const [n] of queue.entries()) {
+        building.queue.push({ kind: 'unit', unitType: 'villager', costPaid: { food: 50 + n, wood: 0, gold: 0, stone: 0 }, ticksDone: 0, ticksTotal: 400, popCapNotified: false });
+      }
+      hud.refresh();
+      for (const index of clicks) hud.cancelQueueItem(tc, index);
+      // Apply the issued commands the way the sim does: in order, each against the queue as it then is.
+      const removed: string[] = [];
+      for (const c of match.issued) {
+        if (c.type !== 'cancelQueue') throw new Error('unexpected command');
+        expect(c.index).toBeLessThan(queue.length);
+        removed.push(...queue.splice(c.index, 1));
+      }
+      expect(removed.slice().sort(), `clicks ${clicks.join(',')}`).toEqual(clicks.map((i) => 'abc'[i]!).sort());
+      match.fx.state.tick += 1; // next click batch is a new tick
+    }
+  });
 });

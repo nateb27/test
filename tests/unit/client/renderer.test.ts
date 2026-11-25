@@ -239,7 +239,7 @@ describe('entity helpers', () => {
 describe('picking', () => {
   const rect = (x: number, y: number, w: number, h: number) => ({ minX: x, minY: y, maxX: x + w, maxY: y + h });
   const mk = (id: number, kind: DrawnEntity['kind'], depth: number, hit: ReturnType<typeof rect>, size = 0): DrawnEntity => ({
-    id, kind, depth, wx: 0, wy: 0, size, hit, bounds: hit, owner: 1,
+    id, kind, depth, wx: 0, wy: 0, size, hit, bounds: hit, top: null, owner: 1,
   });
 
   it('prefers units over buildings over nodes, then the front-most', () => {
@@ -261,7 +261,7 @@ describe('picking', () => {
     const c = footprintCenter(tx, ty, size);
     const s = worldToScreen(c.x, c.y);
     const bounds = { minX: s.x - w / 2, maxX: s.x + w / 2, minY: s.y - ay, maxY: s.y + (h - ay) };
-    return { id, kind, depth: c.x + c.y, wx: c.x, wy: c.y, size, bounds, hit: hitBox(kind, typeId, bounds, s, w, h, size), owner: 0 };
+    return { id, kind, depth: c.x + c.y, wx: c.x, wy: c.y, size, bounds, hit: hitBox(kind, typeId, bounds, s, w, h, size), top: null, owner: 0 };
   };
   const at = (x: number, y: number) => worldToScreen(x, y);
 
