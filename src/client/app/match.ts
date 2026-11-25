@@ -5,7 +5,8 @@
 
 import { hashState } from '../../sim/hash';
 import type { EntityId, Sim, SimEvent } from '../../sim/types';
-import type { WorldRenderer } from '../render/renderer';
+import { GameInput } from '../input';
+import type { WorldRendererApi } from '../render/renderer';
 import { CommandBuffer } from './commandBuffer';
 import { FixedTickLoop } from './loop';
 
@@ -17,8 +18,8 @@ export type SimEventListener = (events: readonly SimEvent[]) => void;
 export class Match {
   readonly loop = new FixedTickLoop();
   readonly commands = new CommandBuffer(LOCAL_PLAYER_ID);
-  /** Selected entity ids (client state; WP5 owns selection logic). */
-  selection: EntityId[] = [];
+  /** Pointer/keyboard handling, selection and control groups (WP5). */
+  readonly input: GameInput;
   private readonly listeners = new Set<SimEventListener>();
   private rafId: number | null = null;
   private lastFrameMs: number | null = null;
@@ -26,8 +27,21 @@ export class Match {
 
   constructor(
     readonly sim: Sim,
-    readonly renderer: WorldRenderer,
-  ) {}
+    readonly renderer: WorldRendererApi,
+  ) {
+    this.input = new GameInput({ sim, renderer, commands: this.commands, loop: this.loop, playerId: LOCAL_PLAYER_ID });
+  }
+
+  /** Selected entity ids (client state, ascending). */
+  get selection(): readonly EntityId[] {
+    return this.input.selection.ids;
+  }
+
+  private renderFrame(alpha: number): void {
+    this.input.update();
+    this.renderer.render(this.sim.state, alpha);
+    this.input.afterRender();
+  }
 
   /** Subscribe to the events of every tick. Returns an unsubscribe function. */
   onEvents(listener: SimEventListener): () => void {
@@ -44,7 +58,7 @@ export class Match {
   /** Run n ticks immediately (debug / tests). */
   stepTicks(n: number): void {
     for (let i = 0; i < n; i++) this.tick();
-    this.renderer.render(this.sim.state, this.alpha);
+    this.renderFrame(this.alpha);
   }
 
   hash(): string {
@@ -59,7 +73,7 @@ export class Match {
       const { ticks, alpha } = this.loop.advance(dt);
       for (let i = 0; i < ticks; i++) this.tick();
       this.alpha = alpha;
-      this.renderer.render(this.sim.state, alpha);
+      this.renderFrame(alpha);
       this.rafId = requestAnimationFrame(frame);
     };
     this.rafId = requestAnimationFrame(frame);
@@ -74,6 +88,7 @@ export class Match {
   destroy(): void {
     this.stop();
     this.listeners.clear();
+    this.input.destroy();
     this.renderer.destroy();
   }
 }
