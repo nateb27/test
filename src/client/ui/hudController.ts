@@ -26,6 +26,7 @@ import type {
 } from '../../sim/types';
 import type { GameSpeed } from '../app/loop';
 import type { HotkeyAction } from '../input/hotkeys';
+import { perf } from '../debug/perf';
 import { buildHudViewModel, type HudClientState } from './buildViewModel';
 import type { HudQueries } from './commandCard';
 import { NotificationCenter } from './notifications';
@@ -67,6 +68,40 @@ export interface HudControllerOptions {
 }
 
 type Listener = (vm: HudViewModel) => void;
+
+/** Structural equality of plain view-model data (primitives, arrays, plain objects). */
+export function sameData(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a)) {
+    const bb = b as unknown[];
+    if (a.length !== bb.length) return false;
+    for (let i = 0; i < a.length; i++) if (!sameData(a[i], bb[i])) return false;
+    return true;
+  }
+  const ra = a as Record<string, unknown>;
+  const rb = b as Record<string, unknown>;
+  const keys = Object.keys(ra);
+  if (keys.length !== Object.keys(rb).length) return false;
+  for (const k of keys) if (!(k in rb) || !sameData(ra[k], rb[k])) return false;
+  return true;
+}
+
+/**
+ * `next` with every top-level part that equals the one in `prev` replaced by
+ * the old object, so components can skip re-rendering parts that did not
+ * change. Returns `prev` itself when nothing changed.
+ */
+export function shareUnchanged(prev: HudViewModel, next: HudViewModel): HudViewModel {
+  let changed = false;
+  const out = { ...next } as Record<string, unknown>;
+  for (const key of Object.keys(next) as (keyof HudViewModel)[]) {
+    if (sameData(prev[key], next[key])) out[key] = prev[key];
+    else changed = true;
+  }
+  return changed ? (out as unknown as HudViewModel) : prev;
+}
 
 export class HudController {
   /** Replaceable after construction (the integrator wires WP10 in). */
@@ -142,8 +177,14 @@ export class HudController {
 
   /** Rebuild the view-model now and notify subscribers. */
   refresh(): void {
-    this.current = this.build();
+    const t0 = perf.start();
+    const next = shareUnchanged(this.current, this.build());
+    const t1 = perf.start();
+    perf.end('hud.build', t0);
+    if (next === this.current) return; // nothing the HUD shows changed: no notification, no re-render
+    this.current = next;
     for (const l of [...this.listeners]) l(this.current);
+    perf.end('hud.notify', t1);
   }
 
   private build(): HudViewModel {

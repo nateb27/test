@@ -13,6 +13,7 @@
 
 import type { DataRegistry } from '../../../data/schema';
 import type { PlayerId, ReadonlyGameState, Vec2 } from '../../../sim/types';
+import { perf } from '../../debug/perf';
 import { footprintOf } from '../../render/entities';
 import {
   cameraOutline,
@@ -214,11 +215,14 @@ export function mountMinimap(deps: MinimapDeps): Minimap {
   };
 
   const drawMain = (): void => {
+    const t0 = perf.start();
     const state = deps.getState();
     const key = staticSignature(state);
     if (key !== staticKey) {
       staticKey = key;
+      const t1 = perf.start();
       drawStatics(state);
+      perf.end('minimap.statics', t1);
     }
     const g = main.g;
     g.clearRect(0, 0, view.width, view.height);
@@ -233,12 +237,17 @@ export function mountMinimap(deps: MinimapDeps): Minimap {
     g.lineWidth = 1;
     g.strokeStyle = 'rgba(8,10,6,0.9)';
     g.stroke();
+    perf.end('minimap.main', t0);
   };
 
   const drawOutline = (force: boolean): void => {
+    const t0 = perf.start();
     const pts = cameraOutline(view, deps.renderer.visibleWorldCorners());
     const key = pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(';');
-    if (!force && key === lastOutline) return;
+    if (!force && key === lastOutline) {
+      perf.end('minimap.outlineCheck', t0);
+      return;
+    }
     lastOutline = key;
     const g = top.g;
     g.clearRect(0, 0, view.width, view.height);
@@ -257,6 +266,7 @@ export function mountMinimap(deps: MinimapDeps): Minimap {
     g.strokeStyle = '#ffffff';
     g.stroke();
     g.restore();
+    perf.end('minimap.outline', t0);
   };
 
   const redraw = (): void => {

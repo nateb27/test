@@ -16,6 +16,7 @@ export function App({ host, hooks }: { host: AppHost; hooks?: GameHooks }) {
     },
     [host],
   );
+  host.navigate = navigate;
 
   switch (screen.name) {
     case 'menu':

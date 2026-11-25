@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { HudController } from '../../../src/client/ui/hudController';
+import { HudController, sameData } from '../../../src/client/ui/hudController';
 import { fakeMatch, type FakeMatch } from './helpers';
 
 let match: FakeMatch;
@@ -186,5 +186,42 @@ describe('menu and top bar actions', () => {
     match.fx.state.tick = 20 * 5;
     vi.advanceTimersByTime(100);
     expect(seen.at(-1)).toBe(5);
+  });
+});
+
+describe('refreshing an unchanged view-model (WP12)', () => {
+  it('does not notify subscribers, and keeps the same object', () => {
+    const seen: unknown[] = [];
+    hud.subscribe((vm) => seen.push(vm));
+    const before = hud.vm;
+    hud.refresh();
+    hud.refresh();
+    expect(seen).toHaveLength(0);
+    expect(hud.vm).toBe(before);
+  });
+
+  it('notifies once for a change and keeps the parts that did not change as the same objects', () => {
+    const seen: unknown[] = [];
+    hud.subscribe((vm) => seen.push(vm));
+    const before = hud.vm;
+    match.selection.set([match.fx.townCenter]);
+    expect(seen.length).toBeGreaterThan(0);
+    expect(hud.vm).not.toBe(before);
+    expect(hud.vm.topBar).toBe(before.topBar); // the top bar did not change with the selection
+    expect(hud.vm.selection).not.toBe(before.selection);
+    const count = seen.length;
+    hud.refresh();
+    expect(seen).toHaveLength(count);
+  });
+});
+
+describe('sameData', () => {
+  it('compares plain data structurally', () => {
+    expect(sameData({ a: [1, { b: 2 }], c: null }, { c: null, a: [1, { b: 2 }] })).toBe(true);
+    expect(sameData({ a: 1 }, { a: 2 })).toBe(false);
+    expect(sameData([1, 2], [1, 2, 3])).toBe(false);
+    expect(sameData({ a: 1 }, { a: 1, b: 2 })).toBe(false);
+    expect(sameData([], {})).toBe(false);
+    expect(sameData(null, {})).toBe(false);
   });
 });

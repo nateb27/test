@@ -11,3 +11,4 @@ blob-report/
 
 # Agent worktrees (temporary checkouts, not project files)
 .claude/worktrees/
+dist-perf/

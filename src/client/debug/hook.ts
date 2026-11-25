@@ -5,6 +5,7 @@
 
 import type { EntityId, ReadonlyGameState, ResourceAmounts } from '../../sim/types';
 import type { GameSpeed } from '../app/loop';
+import type { PerfSnapshotEntry } from './perf';
 
 export const DEBUG_HOOKS_ENABLED: boolean = import.meta.env.DEV || import.meta.env.MODE === 'e2e';
 
@@ -51,6 +52,20 @@ export interface GameDebugHook {
     addResources(amounts: Partial<ResourceAmounts>): void;
     instantBuild(enabled: boolean): void;
     instantResearch(enabled: boolean): void;
+  };
+  /**
+   * WP12, additive. Start the plan 9.4 stress match (200 villagers, 150
+   * buildings, about 1,800 resource nodes, a scripted player keeping units
+   * moving) through the normal loading screen. Poll `screen === 'game'`.
+   */
+  startStress(seed?: number): void;
+  /** WP12, additive. Set the camera zoom (0.5 to 2) about the centre of the view. Throws outside a match. */
+  setZoom(zoom: number): void;
+  /** WP12, additive. Frame-cost counters (see `debug/perf.ts`); off until `enable(true)`. */
+  readonly perf: {
+    enable(on: boolean): void;
+    reset(): void;
+    snapshot(): Record<string, PerfSnapshotEntry>;
   };
 }
 

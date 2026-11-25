@@ -18,7 +18,9 @@ export function Loading({ source, host, navigate }: { source: LoadSource; host: 
       setLabel(source.kind === 'new' ? 'Generating the map' : 'Restoring the game');
       await nextFrame(); // let the loading screen paint first
       if (cancelled) return;
+      performance.mark('rts.mapgen.start');
       const sim: Sim = source.kind === 'new' ? createGame(source.config) : source.sim;
+      performance.measure('rts.mapgen', 'rts.mapgen.start');
       setProgress(0.3);
       setLabel('Drawing the art');
       await nextFrame();

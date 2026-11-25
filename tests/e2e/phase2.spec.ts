@@ -78,17 +78,34 @@ test('scenario 3: right-click a tree, wood rises after a round trip; ground besi
       const t = ents.find((e) => e.id === id)!;
       if (t.kind !== 'node') throw new Error('not a node');
       const sizes: Record<string, number> = { townCenter: 4, goldDeposit: 2, stoneDeposit: 2 };
-      // Prefer a neighbour with no other entity around it at all; on a crowded stand any free neighbouring tile will do.
+      // A click is ground only when no entity's footprint or sprite body is under it. A tree's body is a narrow column
+      // that rises about two tiles up-screen from its footprint, so skip tiles straight up-screen of any node, and
+      // prefer a tile next to the tree with nothing else around it (in a crowded stand settle for less).
+      const inBody = (tx: number, ty: number): boolean =>
+        ents.some((e) => {
+          if (e.kind !== 'node') return false;
+          const n = sizes[e.typeId] ?? 1;
+          const ax = tx + 0.5 - (e.tile.tx + n / 2);
+          const ay = ty + 0.5 - (e.tile.ty + n / 2);
+          const sx = (ax - ay) * 32;
+          const sy = (ax + ay) * 16;
+          return Math.abs(sx) < (n >= 2 ? 52 : 26) && sy > -72 && sy < 24 + n * 8;
+        });
       for (const margin of [1, 0]) {
-        for (const [dx, dy] of [[0, 1], [1, 0], [-1, 0], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]] as const) {
-          const tx = t.tile.tx + dx;
-          const ty = t.tile.ty + dy;
-          const taken = ents.some((e) => {
-            if (e.kind === 'unit' || e.id === id) return false;
-            const n = sizes[e.typeId] ?? 1;
-            return tx + 1 > e.tile.tx - margin && tx < e.tile.tx + n + margin && ty + 1 > e.tile.ty - margin && ty < e.tile.ty + n + margin;
-          });
-          if (!taken) return { x: tx + 0.5, y: ty + 0.5 };
+        for (const ring of [1, 2, 3]) {
+          for (let dy = -ring; dy <= ring; dy++) {
+            for (let dx = -ring; dx <= ring; dx++) {
+              if (Math.max(Math.abs(dx), Math.abs(dy)) !== ring) continue;
+              const tx = t.tile.tx + dx;
+              const ty = t.tile.ty + dy;
+              const taken = ents.some((e) => {
+                if (e.kind === 'unit' || e.id === id) return false;
+                const n = sizes[e.typeId] ?? 1;
+                return tx + 1 > e.tile.tx - margin && tx < e.tile.tx + n + margin && ty + 1 > e.tile.ty - margin && ty < e.tile.ty + n + margin;
+              });
+              if (!taken && !inBody(tx, ty)) return { x: tx + 0.5, y: ty + 0.5 };
+            }
+          }
         }
       }
       return null;
