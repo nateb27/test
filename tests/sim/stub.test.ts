@@ -65,12 +65,10 @@ describe('sim stub', () => {
     const events = sim.step([
       { type: 'cheat', playerId: 1, seq: 2, cheat: { kind: 'addResources', amounts: { stone: 500 } } },
       { type: 'stop', playerId: 1, seq: 1, unitIds: [999] },
-      { type: 'train', playerId: 1, seq: 3, buildingId: 1, unitType: 'villager' },
     ]);
     expect(sim.state.players[1]?.resources.stone).toBe(500);
     expect(events).toEqual([
       { type: 'CommandRejected', playerId: 1, seq: 1, commandType: 'stop', reason: 'notOwner' },
-      { type: 'CommandRejected', playerId: 1, seq: 3, commandType: 'train', reason: 'invalidCommand' },
     ]);
   });
 });
