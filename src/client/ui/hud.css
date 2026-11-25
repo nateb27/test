@@ -403,11 +403,22 @@
 
 .queue-items {
   display: flex;
-  flex-wrap: wrap;
+  /* One row, however long the queue (up to MAX_PRODUCTION_QUEUE): items shrink to share the panel width instead of
+     wrapping below the visible area. */
+  flex-wrap: nowrap;
   gap: 5px;
 }
 
+.queue-item .icon {
+  width: 100% !important;
+  height: auto !important;
+  aspect-ratio: 1;
+}
+
 .queue-item {
+  /* Full size (40 px) while there is room, shrinking evenly when the queue is long. */
+  flex: 0 1 40px;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 3px;

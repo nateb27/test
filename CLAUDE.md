@@ -13,7 +13,7 @@ npm run build      # typecheck + production build to dist/ (relative paths, base
 npm run e2e        # Playwright against `vite build --mode e2e` (dist-e2e/), with window.__game
 ```
 
-Run Playwright with `--trace off` (the script already does). Do not run `playwright install` in the dev container; the config uses `/opt/pw-browsers/chromium` when present.
+Run Playwright with `--trace off` (the script already does). E2E tests pin the map with `?seed=N`, start paused and move time only with `__game.step` / `__game.advanceClock` (see "E2E determinism" in `docs/DESIGN.md`); never add sleeps, retries or fixed click positions. Do not run `playwright install` in the dev container; the config uses `/opt/pw-browsers/chromium` when present.
 
 ## Architecture in one paragraph
 

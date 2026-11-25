@@ -165,10 +165,7 @@ export class HudController {
         this.refresh();
       }),
     );
-    this.timer = setInterval(() => {
-      this.notifications.tick();
-      this.refresh();
-    }, 1000 / HUD_REFRESH_HZ);
+    this.timer = setInterval(() => this.sync(), 1000 / HUD_REFRESH_HZ);
     this.refresh();
   }
 
@@ -178,6 +175,12 @@ export class HudController {
     for (const c of this.cleanup.splice(0)) c();
     if (this.pausedByMenu) this.match.loop.paused = false;
     this.pausedByMenu = false;
+  }
+
+  /** What the refresh timer does, on demand: expire toasts, advance banners, rebuild the view-model. */
+  sync(): void {
+    this.notifications.tick();
+    this.refresh();
   }
 
   /** Rebuild the view-model now and notify subscribers. */

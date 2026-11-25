@@ -6,17 +6,20 @@ import {
   clickBuilding,
   collectErrors,
   entities,
+  advanceClock,
   buildingsOf,
   frames,
   groupVillagers,
   inputMode,
   overHud,
+  pickableTree,
   placeViaCard,
   player,
   recallVillagers,
   resources,
   selection,
   selectVillager,
+  settled,
   shot,
   startMatch,
   step,
@@ -36,31 +39,8 @@ import {
  * Screenshots go to the git-ignored test-results/screenshots/ (s03-... to s11-...).
  */
 
-/** The nearest tree to a point (at least 6 tiles away), as a world centre. */
-async function treeNear(page: Page, cx: number, cy: number): Promise<{ id: number; x: number; y: number }> {
-  const t = await page.evaluate(
-    ([x0, y0]) => {
-      const g = window.__game!;
-      let best: { id: number; x: number; y: number } | null = null;
-      let bestD = Infinity;
-      for (const e of g.state!.entities) {
-        if (e.kind !== 'node' || e.typeId !== 'tree') continue;
-        const x = e.tile.tx + 0.5;
-        const y = e.tile.ty + 0.5;
-        const d = Math.hypot(x - x0!, y - y0!);
-        if (d < 6) continue;
-        if (d < bestD) {
-          bestD = d;
-          best = { id: e.id, x, y };
-        }
-      }
-      return best;
-    },
-    [cx, cy] as const,
-  );
-  if (t === null) throw new Error('no tree on screen');
-  return t;
-}
+/** The nearest tree to a point (at least 6 tiles away) that a click verifiably picks; the camera ends up centred on it. */
+const treeNear = (page: Page, cx: number, cy: number): Promise<{ id: number; x: number; y: number }> => pickableTree(page, cx, cy);
 
 test('scenario 3: right-click a tree, wood rises after a round trip; ground beside a tree is ground', async ({ page }) => {
   const errors = collectErrors(page);
@@ -333,6 +313,13 @@ async function reachCitadel(page: Page, tc: Pt): Promise<void> {
   await expect(page.getByTestId('age')).toContainText('Citadel Age');
 }
 
+/** The resource kind each own villager is gathering (null when it has no gather order). */
+const gatherTargets = (page: Page): Promise<(string | null)[]> =>
+  page.evaluate(() => {
+    const es = window.__game!.state!.entities;
+    return es.filter((e) => e.kind === 'unit' && e.owner === 1).map((e) => (e.kind === 'unit' && e.currentOrder?.type === 'gather' ? (es.find((t) => t.id === (e.currentOrder as { targetId: number }).targetId)?.typeId ?? null) : null));
+  });
+
 test('scenario 7: research Iron Axes at the Lumber Camp; the wood gather rate rises by 15%', async ({ page }) => {
   test.setTimeout(120_000);
   const errors = collectErrors(page);
@@ -347,9 +334,13 @@ test('scenario 7: research Iron Axes at the Lumber Camp; the wood gather rate ri
   const tree = await treeNear(page, tc.x, tc.y);
   await centreCamera(page, tree.x, tree.y);
   await recallVillagers(page);
+  expect(await selection(page)).toHaveLength(6);
   const tp = await toScreen(page, tree.x, tree.y);
   await page.mouse.click(tp.x, tp.y, { button: 'right' });
   await step(page, 2); // the order applies on the next tick
+  expect(await gatherTargets(page)).toEqual(Array(6).fill('tree'));
+  // Harvest rate in wood per second per harvesting villager, over unit-ticks in which the villager was harvesting at
+  // both ends of the tick (so walking, delivering and retargeting never dilute the figure, on any map).
   const measure = async (): Promise<number> => {
     await stepUntil(
       page,
@@ -359,27 +350,32 @@ test('scenario 7: research Iron Axes at the Lumber Camp; the wood gather rate ri
     );
     return page.evaluate(() => {
       const g = window.__game!;
-      const eff = (e: { carried: { amount: number } | null; currentOrder: { type: string; harvestAccumulator?: number } | null }): number =>
-        (e.carried?.amount ?? 0) + (e.currentOrder?.type === 'gather' ? (e.currentOrder.harvestAccumulator ?? 0) : 0);
-      const pick = g.state!.entities.filter(
-        (e) => e.kind === 'unit' && e.owner === 1 && e.currentOrder?.type === 'gather' && e.currentOrder.phase === 'harvesting' && (e.carried === null || e.carried.amount <= 4),
-      );
-      const t0 = new Map(pick.map((e) => [e.id, e.kind === 'unit' ? eff(e) : 0]));
-      g.step(100);
-      let total = 0;
-      let n = 0;
-      for (const e of g.state!.entities) {
-        if (e.kind !== 'unit' || !t0.has(e.id) || e.currentOrder?.type !== 'gather' || e.currentOrder.phase !== 'harvesting') continue;
-        const gained = eff(e) - t0.get(e.id)!;
-        if (gained < 0) continue; // delivered in between
-        total += gained;
-        n++;
+      type U = { id: number; kind: string; owner: number; carried: { amount: number } | null; currentOrder: { type: string; phase?: string; harvestAccumulator?: number } | null };
+      const snap = (): Map<number, number> => {
+        const m = new Map<number, number>();
+        for (const e of g.state!.entities as unknown as U[]) {
+          if (e.kind !== 'unit' || e.owner !== 1 || e.currentOrder?.type !== 'gather' || e.currentOrder.phase !== 'harvesting') continue;
+          m.set(e.id, (e.carried?.amount ?? 0) + (e.currentOrder.harvestAccumulator ?? 0));
+        }
+        return m;
+      };
+      let gained = 0;
+      let unitTicks = 0;
+      let prev = snap();
+      for (let i = 0; i < 100; i++) {
+        g.step(1, false);
+        const now = snap();
+        for (const [id, v] of now) {
+          const was = prev.get(id);
+          if (was === undefined || v < was) continue;
+          gained += v - was;
+          unitTicks++;
+        }
+        prev = now;
       }
-      if (n === 0) {
-        const now = g.state!.entities.filter((e) => e.kind === 'unit' && e.owner === 1).map((e) => (e.kind === 'unit' ? [e.id, e.currentOrder?.type, e.currentOrder?.type === 'gather' ? e.currentOrder.phase : '', e.carried?.amount ?? 0] : []));
-        throw new Error(`nobody kept harvesting: ${JSON.stringify([...t0])} now ${JSON.stringify(now)}`);
-      }
-      return total / n / (100 / 20);
+      g.step(0);
+      if (unitTicks < 40) throw new Error(`too few harvesting unit-ticks: ${unitTicks}`);
+      return gained / (unitTicks / 20);
     });
   };
   const before = await measure();
@@ -470,7 +466,13 @@ test('scenario 8: with cheats, advance through all four ages; the Cataphract and
   await shot(page, 's08-5-empire');
 
   // Banners queue one at a time (5 s each): the objective banner shows with the elapsed game time.
-  await expect(page.getByTestId('banner').filter({ hasText: 'Objective complete' })).toBeVisible({ timeout: 25_000 });
+  // The client clock is frozen, so the test moves it: each poll lets one more second of banner time pass.
+  const objective = page.getByTestId('banner').filter({ hasText: 'Objective complete' });
+  for (let i = 0; i < 20 && (await objective.count()) === 0; i++) {
+    await advanceClock(page, 5000); // the age banners (one per age reached) each give way to the next
+    await frames(page, 2);
+  }
+  await expect(objective).toBeVisible();
   await shot(page, 's08-6-objective-banner');
   const completions = await page.evaluate(() => window.__game!.state!.objectives.entries.filter((o) => o.completedTick !== null).length);
   expect(completions).toBe(1);
@@ -645,15 +647,9 @@ test('scenario 11: minimap click and drag move the camera; pan, zoom and bounds 
 
   // Bounds: hold the arrow until the view stops; the map's corner stays within 96 px of the window edge.
   await page.keyboard.down('ArrowRight');
-  let last = (await toScreen(page, 120, 0)).x;
-  for (let i = 0; i < 40; i++) {
-    await page.waitForTimeout(250);
-    const now = (await toScreen(page, 120, 0)).x;
-    if (Math.abs(now - last) < 0.01) break;
-    last = now;
-  }
+  await expect.poll(async () => Math.abs((await toScreen(page, 120, 0)).x - (1280 - 96 * 0.5)), { timeout: 60_000 }).toBeLessThan(2);
   await page.keyboard.up('ArrowRight');
-  expect(Math.abs((await toScreen(page, 120, 0)).x - (1280 - 96 * 0.5))).toBeLessThan(2);
+  expect(Math.abs((await settled(page, async () => (await toScreen(page, 120, 0)).x)) - (1280 - 96 * 0.5))).toBeLessThan(2);
   await shot(page, 's11-5-clamped');
   expect(errors).toEqual([]);
 });

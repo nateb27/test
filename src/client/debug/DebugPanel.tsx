@@ -70,7 +70,7 @@ export function DebugPanel({ controller }: { controller: DebugController }) {
             <h3>Performance</h3>
             <dl class="debug-stats">
               <dt>Frame rate</dt>
-              <dd data-testid="debug-fps">{profile.fps.toFixed(0)} fps</dd>
+              <dd data-testid="debug-fps">{profile.fps.toFixed(profile.fps < 10 ? 1 : 0)} fps</dd>
               <dt>Tick (avg / max)</dt>
               <dd data-testid="debug-tick-ms">
                 {ms(profile.tickAvgMs)} / {ms(profile.tickMaxMs)} ms

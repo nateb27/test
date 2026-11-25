@@ -111,11 +111,24 @@ function createDebugHook(host: AppHost): GameDebugHook {
       const rect = match.renderer.canvas.getBoundingClientRect();
       return { x: rect.left + p.x, y: rect.top + p.y };
     },
-    step(n) {
-      host.requireMatch().stepTicks(n);
+    step(n, present = true) {
+      host.requireMatch().stepTicks(n, present);
+    },
+    freezeClock() {
+      host.requireMatch().clock.freeze();
+    },
+    advanceClock(ms) {
+      const match = host.requireMatch();
+      match.clock.advance(ms);
+      match.afterStep?.();
     },
     hash() {
       return hashState(host.requireMatch().sim.state);
+    },
+    pickAt(x, y) {
+      const match = host.requireMatch();
+      const rect = match.renderer.canvas.getBoundingClientRect();
+      return match.renderer.pickEntity(x - rect.left, y - rect.top);
     },
     inputMode() {
       return host.match?.modes.active?.kind ?? null;

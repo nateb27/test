@@ -1,5 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import {
+  advanceClock,
+  SEPARATE_MS,
   buildingsOf,
   card,
   centreCamera,
@@ -74,6 +76,7 @@ async function groupAll(page: Page): Promise<void> {
   const vs = await villagers(page);
   const front = [...vs].sort((a, b) => b.x + b.y - (a.x + a.y))[0]!;
   const p = await toScreen(page, front.x, front.y);
+  await advanceClock(page, SEPARATE_MS);
   await page.mouse.dblclick(p.x, p.y - 14);
 }
 
@@ -110,7 +113,8 @@ test('F3 debug overlay: stats, draw toggles, cheats and state hash', async ({ pa
   await page.keyboard.press('F3');
   await expect(page.getByTestId('debug-overlay')).toBeVisible();
   await setPaused(page, false);
-  await expect.poll(async () => Number((await page.getByTestId('debug-fps').textContent())?.replace(/[^0-9]/g, '') ?? 0)).toBeGreaterThan(0);
+  await frames(page, 10); // the profiler needs rendered frames; the panel shows them on its own 4 Hz poll
+  await expect.poll(async () => Number.parseFloat((await page.getByTestId('debug-fps').textContent()) ?? '0')).toBeGreaterThan(0);
   await expect(page.getByTestId('debug-tick-ms')).toContainText('ms');
   await expect(page.getByTestId('debug-path-queue')).toHaveText(/^\d+$/);
   await expect(page.getByTestId('debug-entities')).toContainText('6 units, 1 buildings');
@@ -326,8 +330,10 @@ for (const [w, h] of [
     await startMatch(page, { paused: true });
     await cheat.resources(page, { food: 3000, wood: 3000 });
     await page.keyboard.press('KeyH');
-    for (let i = 0; i < 6; i++) await page.keyboard.press('KeyQ');
+    // A full production queue (10): every item must stay on screen, whatever the window size.
+    for (let i = 0; i < 10; i++) await page.keyboard.press('KeyQ');
     await step(page, 2);
+    await expect(page.locator('[data-testid^="queue-item-"]')).toHaveCount(10);
     const report = await page.evaluate(() => {
       const bad: string[] = [];
       const vw = window.innerWidth;

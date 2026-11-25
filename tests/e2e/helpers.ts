@@ -1,7 +1,8 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 
 /** Screenshots of every scenario go here (git-ignored); the curated gallery in docs/screenshots/ is regenerated from it by scripts/screenshots.mjs. */
-export const SHOTS = 'test-results/screenshots';
+const PORT_SUFFIX = process.env.E2E_PORT !== undefined && process.env.E2E_PORT !== '4173' ? `-${process.env.E2E_PORT}` : '';
+export const SHOTS = `test-results${PORT_SUFFIX}/screenshots`;
 
 export interface Pt {
   x: number;
@@ -17,19 +18,39 @@ export function collectErrors(page: Page): string[] {
   return errors;
 }
 
-/** Menu -> New Game -> civilization select -> Start; waits until the match, HUD and minimap are up. */
-export async function startMatch(page: Page, opts: { paused?: boolean } = {}): Promise<void> {
-  await page.goto('/');
+/** The map seed every test uses unless it asks for another (a fixed map, so no test depends on luck). */
+export const DEFAULT_SEED = 1;
+
+/**
+ * Menu -> New Game -> civilization select -> Start; waits until the match, HUD and minimap are up.
+ * The map seed is pinned (`?seed=`, honoured by dev and e2e builds only). The match starts paused (`?paused=1`, unless `paused: false`),
+ * so not a single tick runs before the test takes over; time then only advances through `step`.
+ */
+export async function startMatch(page: Page, opts: { paused?: boolean; seed?: number } = {}): Promise<void> {
+  const query = new URLSearchParams({ seed: String(opts.seed ?? DEFAULT_SEED) });
+  if (opts.paused !== false) query.set('paused', '1');
+  await page.goto(`/?${query.toString()}`);
   await expect(page.getByTestId('main-menu')).toBeVisible();
   await page.getByTestId('new-game').click();
   await page.getByTestId('start-match').click();
-  await expect(page.locator('canvas.world-canvas')).toBeVisible({ timeout: 5_000 });
-  await expect.poll(() => page.evaluate(() => window.__game?.state?.entities.length ?? 0)).toBeGreaterThan(10);
-  await expect(page.getByTestId('hud')).toBeVisible();
-  await expect(page.getByTestId('minimap')).toBeVisible();
+  // Booting generates the art and the map, which takes real time on a loaded machine: wait for the state, not a delay.
+  await expect(page.locator('canvas.world-canvas')).toBeVisible({ timeout: BOOT_MS });
+  await expect.poll(() => page.evaluate(() => window.__game?.state?.entities.length ?? 0), { timeout: BOOT_MS }).toBeGreaterThan(10);
+  await expect(page.getByTestId('hud')).toBeVisible({ timeout: BOOT_MS });
+  await expect(page.getByTestId('minimap')).toBeVisible({ timeout: BOOT_MS });
+  // Double-click, double-tap and demolish windows, toast lifetimes: the test, not the machine's speed, decides when they pass.
+  await page.evaluate(() => window.__game!.freezeClock());
   await frames(page, 2);
-  if (opts.paused) await setPaused(page, true);
 }
+
+/** Longest a match may take to boot (art and map generation) before a test gives up. */
+const BOOT_MS = 60_000;
+
+/** Client-clock time that makes the next click or key tap a fresh one, never the second half of a double. */
+export const SEPARATE_MS = 1000;
+
+/** Let the frozen client clock run `ms` forward, e.g. to expire a double-click window on purpose. */
+export const advanceClock = (page: Page, ms: number): Promise<void> => page.evaluate((n) => window.__game!.advanceClock(n), ms);
 
 export const frames = (page: Page, n = 2): Promise<unknown> =>
   page.evaluate(
@@ -115,6 +136,7 @@ export async function townCenter(page: Page): Promise<Entry> {
 
 /** Click a unit at its body (a little above the feet) with the real mouse. */
 export async function clickUnit(page: Page, e: { x: number; y: number }): Promise<void> {
+  await advanceClock(page, SEPARATE_MS);
   const p = await toScreen(page, e.x, e.y);
   await page.mouse.click(p.x, p.y - 14);
 }
@@ -124,6 +146,7 @@ export async function selectAllVillagers(page: Page): Promise<number[]> {
   const vs = await villagers(page);
   const front = [...vs].sort((a, b) => b.x + b.y - (a.x + a.y))[0]!;
   const p = await toScreen(page, front.x, front.y);
+  await advanceClock(page, SEPARATE_MS);
   await page.mouse.dblclick(p.x, p.y - 14);
   const sel = await selection(page);
   expect(sel).toHaveLength(vs.length);
@@ -203,10 +226,14 @@ export async function stepUntil(page: Page, expr: string, max = 6000, chunk = 20
       const test = new Function('g', `return (${code});`) as (g: unknown) => boolean;
       let n = 0;
       while (!test(g)) {
-        if (n >= (limit as number)) return -1;
-        g.step(size as number);
+        if (n >= (limit as number)) {
+          g.step(0);
+          return -1;
+        }
+        g.step(size as number, false);
         n += size as number;
       }
+      g.step(0);
       return n;
     },
     [expr, max, chunk] as const,
@@ -223,6 +250,7 @@ export async function groupVillagers(page: Page): Promise<number[]> {
 }
 
 export async function recallVillagers(page: Page): Promise<void> {
+  await advanceClock(page, SEPARATE_MS); // a second tap inside the window would also centre the camera on the group
   await page.keyboard.press('Digit1');
 }
 
@@ -269,10 +297,13 @@ async function candidates(page: Page, cx: number, cy: number, size: number, minR
 export async function validGhostSpot(page: Page, cx: number, cy: number, size: number, minRing = 3): Promise<Pt> {
   const list = await candidates(page, cx, cy, size, minRing);
   for (const p of list) {
+    // The ghost is recomputed by the pointer-move handler itself, which has run when the move resolves: no frame wait.
     await page.mouse.move(p.x, p.y);
-    await frames(page, 1);
     const g = await page.evaluate(() => window.__game!.ghost());
-    if (g !== null && g.visible && g.ok) return p;
+    if (g !== null && g.visible && g.ok) {
+      await frames(page, 1); // let the green ghost be drawn (screenshots)
+      return p;
+    }
   }
   throw new Error(`no valid ${size}x${size} spot near ${cx},${cy} (${list.length} candidates)`);
 }
@@ -345,6 +376,7 @@ const typeIdOf = (label: string): string => {
 
 /** Select an own building by clicking it on the canvas (a point on its footprint). */
 export async function clickBuilding(page: Page, b: Entry): Promise<void> {
+  await advanceClock(page, SEPARATE_MS);
   const p = await toScreen(page, b.x, b.y);
   await page.mouse.click(p.x, p.y);
   expect(await selection(page)).toEqual([b.id]);
@@ -361,4 +393,50 @@ export async function centreCamera(page: Page, x: number, y: number): Promise<vo
   const m = await toMinimap(page, x, y);
   await page.mouse.click(m.x, m.y);
   await frames(page, 3);
+}
+
+/**
+ * Read `read()` after each rendered frame until two consecutive reads agree (the camera or another animation has
+ * stopped). Condition-based: no sleeping, bounded by `maxFrames` rendered frames.
+ */
+export async function settled<T>(page: Page, read: () => Promise<T>, maxFrames = 3000): Promise<T> {
+  let last = await read();
+  for (let i = 0; i < maxFrames; i += 3) {
+    await frames(page, 3);
+    const now = await read();
+    if (JSON.stringify(now) === JSON.stringify(last)) return now;
+    last = now;
+  }
+  throw new Error('value never settled');
+}
+
+/** True when a click at this page point lands on the canvas (not under a HUD panel) and picks exactly entity `id`. */
+export async function picks(page: Page, p: Pt, id: number): Promise<boolean> {
+  const inside = await page.evaluate(([x, y]) => x! >= 0 && y! >= 0 && x! < window.innerWidth && y! < window.innerHeight, [p.x, p.y] as const);
+  if (!inside || (await overHud(page, p.x, p.y))) return false;
+  return (await page.evaluate(([x, y]) => window.__game!.pickAt(x!, y!), [p.x, p.y] as const)) === id;
+}
+
+/**
+ * The tree nearest to (cx, cy) (at least `minDist` tiles away) on which a click is verified to pick exactly that
+ * tree: the camera is centred on each candidate in turn and the game's own picker is asked what a click at the tree
+ * would hit, so a neighbouring tree or building drawn over it is detected instead of guessed at. The camera is left
+ * centred on the returned tree. Throws when no candidate passes.
+ */
+export async function pickableTree(page: Page, cx: number, cy: number, minDist = 6): Promise<{ id: number; x: number; y: number }> {
+  const candidates = await page.evaluate(
+    ([x0, y0, min]) =>
+      window.__game!.state!.entities
+        .flatMap((e) => (e.kind === 'node' && e.typeId === 'tree' ? [{ id: e.id, x: e.tile.tx + 0.5, y: e.tile.ty + 0.5 }] : []))
+        .map((t) => ({ ...t, d: Math.hypot(t.x - x0!, t.y - y0!) }))
+        .filter((t) => t.d >= min!)
+        .sort((a, b) => a.d - b.d || a.id - b.id)
+        .slice(0, 60),
+    [cx, cy, minDist] as const,
+  );
+  for (const t of candidates) {
+    await centreCamera(page, t.x, t.y);
+    if (await picks(page, await toScreen(page, t.x, t.y), t.id)) return { id: t.id, x: t.x, y: t.y };
+  }
+  throw new Error(`none of the ${candidates.length} nearest trees can be picked by a click`);
 }
