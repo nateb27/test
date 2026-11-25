@@ -1,0 +1,53 @@
+html,
+body,
+#app {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #10170c;
+  color: #f1e9d2;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  user-select: none;
+}
+
+.screen {
+  position: absolute;
+  inset: 0;
+}
+
+.screen.menu {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+}
+
+.screen.menu h1 {
+  font-size: 48px;
+  letter-spacing: 0.04em;
+  margin: 0 0 24px;
+}
+
+.screen.menu button {
+  min-width: 220px;
+  padding: 12px 24px;
+  font-size: 18px;
+  color: inherit;
+  background: #3d2a52;
+  border: 2px solid #d4af37;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.screen.menu button:hover {
+  background: #553a73;
+}
+
+.world-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
