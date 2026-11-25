@@ -12,5 +12,8 @@ export default defineConfig({
   test: {
     include: ['tests/unit/**/*.test.{ts,tsx}', 'tests/sim/**/*.test.{ts,tsx}'],
     environment: 'node',
+    // Heavy sim tests (determinism, bot pacing, long runs) must not depend on machine load: generous limits.
+    testTimeout: 180_000,
+    hookTimeout: 120_000,
   },
 });

@@ -138,8 +138,14 @@ function reachable(ctx: SimContext, unit: UnitEntity, tile: TilePos, size: numbe
  * GATHER_RETARGET_RADIUS tiles of `anchor` (centre to centre, straight line)
  * that has a free slot, that the unit can gather and walk to. Ties: lowest id.
  */
-export function findRetarget(ctx: SimContext, unit: UnitEntity, anchor: Vec2, resource: ResourceType): GatherTarget | null {
-  const maxD2 = GATHER_RETARGET_RADIUS * GATHER_RETARGET_RADIUS;
+export function findRetarget(
+  ctx: SimContext,
+  unit: UnitEntity,
+  anchor: Vec2,
+  resource: ResourceType,
+  radius: number = GATHER_RETARGET_RADIUS,
+): GatherTarget | null {
+  const maxD2 = radius * radius;
   let best: GatherTarget | null = null;
   let bestD = 0;
   for (const e of ctx.state.entities) {

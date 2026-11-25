@@ -80,7 +80,7 @@ export class NotificationCenter {
       switch (ev.type) {
         case 'CommandRejected':
           if (ev.playerId !== this.playerId) break;
-          this.push('error', rejectionText(ev.reason, { unavailable: ev.unavailable, shortfall: ev.shortfall }, this.registry));
+          this.push('error', rejectionText(ev.reason, { unavailable: ev.unavailable, shortfall: ev.shortfall, commandType: ev.commandType }, this.registry));
           break;
         case 'PopulationCapped':
           if (ev.playerId === this.playerId) this.push('error', POP_CAPPED_TEXT);

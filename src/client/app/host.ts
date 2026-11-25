@@ -6,7 +6,7 @@
 import { registry } from '../../data';
 import { hashState } from '../../sim/hash';
 import type { TeamAssetManifest } from '../art/procedural';
-import { DEBUG_HOOKS_ENABLED, type GameDebugHook, type ScreenName } from '../debug/hook';
+import { type GameDebugHook, type ScreenName } from '../debug/hook';
 import type { Platform } from '../platform';
 import { perf } from '../debug/perf';
 import type { Match } from './match';
@@ -141,13 +141,15 @@ function createDebugHook(host: AppHost): GameDebugHook {
       host.requireMatch().loop.speed = speed;
     },
     startStress(seed = 1) {
-      if (!DEBUG_HOOKS_ENABLED) return;
-      if (host.navigate === null) throw new Error('The app is not mounted');
-      void import('../../sim/stress').then(({ createStressScenario }) => {
-        const scenario = createStressScenario(seed);
-        host.stress = scenario;
-        host.navigate?.({ name: 'loading', source: { kind: 'sim', sim: scenario.sim } });
-      });
+      // Written out (not via DEBUG_HOOKS_ENABLED) so the bundler drops the stress chunk from production builds.
+      if (import.meta.env.DEV || import.meta.env.MODE === 'e2e') {
+        if (host.navigate === null) throw new Error('The app is not mounted');
+        void import('../../sim/stress').then(({ createStressScenario }) => {
+          const scenario = createStressScenario(seed);
+          host.stress = scenario;
+          host.navigate?.({ name: 'loading', source: { kind: 'sim', sim: scenario.sim } });
+        });
+      }
     },
     setZoom(zoom) {
       const { camera, canvas } = host.requireMatch().renderer;

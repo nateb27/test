@@ -17,6 +17,7 @@
 import { registry } from '../../src/data';
 import { CommandRecorder, createGame, hashState, type CommandLog } from '../../src/sim';
 import { createRng, rngInt } from '../../src/sim/rng';
+import { MAX_PRODUCTION_QUEUE } from '../../src/sim/types';
 import {
   type BuildingEntity,
   type Command,
@@ -231,14 +232,16 @@ class Agent {
 
   private research(buildings: BuildingEntity[]): void {
     for (const b of buildings) {
-      if (!b.constructed || b.queue.length > 1 || !this.chance(30)) continue;
+      if (!b.constructed || b.queue.length >= MAX_PRODUCTION_QUEUE || !this.chance(30)) continue;
       const def = registry.building(b.typeId);
       const options = def.researches.filter((id) => {
         const av = this.sim.query.availability(ME, id);
         return av.available && av.affordable;
       });
-      // Age advances first: they are the long pole.
+      // Age advances first: they are the long pole. They go into any queue with room, because since
+      // WP13 (population counts living units only) villager queues are rarely short.
       const age = options.find((id) => registry.def(id)?.kind === 'tech' && registry.tech(id).advancesTo !== undefined);
+      if (age === undefined && b.queue.length > 1) continue;
       const choice = age ?? this.pick(options);
       if (choice !== undefined) this.issue({ type: 'research', buildingId: b.id, techId: choice });
     }

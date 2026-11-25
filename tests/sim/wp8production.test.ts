@@ -193,7 +193,7 @@ describe('cost, refund and queue progress', () => {
 });
 
 describe('population', () => {
-  it('cap is the sum of completed buildings, hard-capped at 200; used counts living units and queued units', () => {
+  it('cap is the sum of completed buildings, hard-capped at 200; used counts living units only', () => {
     const g = makeGame();
     const ctx = ctxOf(g);
     const p = g.state.players[1]!;
@@ -209,7 +209,7 @@ describe('population', () => {
     for (let i = 0; i < 25; i++) place(g, 'house');
     recomputePopulation(ctx);
     expect(p.popCap).toBe(200);
-    // queued units count, queued techs do not; siege weighs 3
+    // queued units and techs do not count; only living units do
     const ctx2 = ctxOf(g);
     giveResources(g);
     p.age = 3;
@@ -217,7 +217,7 @@ describe('population', () => {
     const ctx3 = ctxOf(g);
     apply(g, ctx3, { type: 'train', buildingId: sw.id, unitType: 'batteringRam' });
     apply(g, ctx3, { type: 'train', buildingId: townCenter(g).id, unitType: 'villager' });
-    expect(p.popUsed).toBe(living + 3 + 1);
+    expect(p.popUsed).toBe(living);
     expect(ctx2.state).toBe(ctx3.state);
   });
 

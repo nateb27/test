@@ -262,11 +262,14 @@ test('scenario 6: reach the population cap: the queue holds with a toast; a Hous
   await clickBuilding(page, tc);
   for (let i = 0; i < 5; i++) await page.keyboard.press('KeyQ');
   await step(page, 2);
-  await expect(page.getByTestId('pop')).toContainText('11/10');
-  await expect(page.getByTestId('pop')).toHaveClass(/capped/);
+  // Queued units do not count: the counter shows living units only (plan 4.6).
+  await expect(page.getByTestId('pop')).toContainText('6/10');
+  await expect(page.getByTestId('pop')).not.toHaveClass(/capped/);
   await shot(page, 's06-1-queued');
   await stepUntil(page, `g.state.entities.some((e) => e.kind === 'building' && e.owner === 1 && e.queue.some((q) => q.popCapNotified))`, 4000);
   await expect(page.getByTestId('toast').filter({ hasText: 'Build more houses' })).toBeVisible();
+  await expect(page.getByTestId('pop')).toContainText('10/10');
+  await expect(page.getByTestId('pop')).toHaveClass(/capped/);
   expect((await villagers(page)).length).toBe(10);
   await shot(page, 's06-2-capped');
   await step(page, 400);

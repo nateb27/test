@@ -1,0 +1,140 @@
+/* F3 debug overlay: a compact two-column panel in the top-left of the world. */
+
+.debug-root {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.debug-root .debug-panel {
+  position: absolute;
+  left: 8px;
+  top: calc(var(--topbar-h, 40px) + 8px);
+  width: min(520px, calc(100vw - 16px));
+  max-height: calc(100vh - var(--topbar-h, 40px) - var(--bottom-h, 188px) - 20px);
+  overflow: auto;
+  padding: 6px 10px 8px;
+  border-radius: 6px;
+  background: rgba(20, 11, 32, 0.9);
+  font-size: 12px;
+}
+
+.debug-title {
+  font-weight: 700;
+  color: var(--hud-gold);
+  margin-bottom: 2px;
+}
+
+.debug-key {
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid var(--hud-gold-dim);
+  border-radius: 3px;
+  font-size: 11px;
+  color: var(--hud-text);
+}
+
+.debug-cols {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.debug-col {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.debug-col h3 {
+  margin: 6px 0 3px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--hud-muted);
+}
+
+.debug-stats {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 1px 10px;
+  margin: 0;
+}
+
+.debug-stats dt {
+  color: var(--hud-muted);
+}
+
+.debug-stats dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.debug-types {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 4px;
+}
+
+.debug-chip {
+  padding: 0 5px;
+  border: 1px solid rgba(143, 116, 36, 0.5);
+  border-radius: 8px;
+  font-size: 11px;
+}
+
+.debug-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0;
+}
+
+.debug-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 3px 0;
+  align-items: center;
+}
+
+.debug-root button,
+.debug-root select {
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 8px;
+  color: var(--hud-text);
+  background: #3d2a52;
+  border: 1px solid var(--hud-gold-dim);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.debug-root button:hover {
+  background: #553a73;
+}
+
+.debug-root button.active {
+  background: var(--hud-gold);
+  color: #2a1a3d;
+  font-weight: 700;
+}
+
+.debug-hint {
+  color: var(--hud-muted);
+  font-size: 11px;
+}
+
+.debug-hash {
+  display: block;
+  margin-top: 3px;
+  word-break: break-all;
+  font-size: 11px;
+  color: #cde7ff;
+  user-select: text;
+}
+
+.debug-cursor {
+  margin-top: 3px;
+  font-variant-numeric: tabular-nums;
+}

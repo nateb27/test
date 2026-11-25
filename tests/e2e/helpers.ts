@@ -1,6 +1,6 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 
-/** Screenshots of every scenario go here (git-ignored); the reviewed gallery is copied to docs/screenshots/phase2/. */
+/** Screenshots of every scenario go here (git-ignored); the curated gallery in docs/screenshots/ is regenerated from it by scripts/screenshots.mjs. */
 export const SHOTS = 'test-results/screenshots';
 
 export interface Pt {

@@ -2,7 +2,7 @@
 
 import { findEntity, removeEntities } from '../entities';
 import { footprintOf, setFootprint } from '../map/occupancy';
-import { RESOURCE_TYPES, type Entity, type EntityId, type SimContext } from '../types';
+import { RESOURCE_TYPES, type Entity, type EntityId, type ResourceType, type SimContext } from '../types';
 import { emit, reject, type CommandHandler } from './common';
 import { endCurrentOrder } from './orders';
 import { recomputePopulation } from './population';
@@ -19,6 +19,32 @@ function removeAll(list: EntityId[], ids: ReadonlySet<EntityId>): void {
   for (let i = list.length - 1; i >= 0; i--) {
     if (ids.has(list[i] as EntityId)) list.splice(i, 1);
   }
+}
+
+/** Radius (tiles) around a depleted rally target searched for a replacement node of the same resource. */
+const RALLY_FOLLOW_RADIUS = 16;
+
+/** Nearest surviving node of `from.resource` within RALLY_FOLLOW_RADIUS of it (ties: lowest id). */
+function nearestNodeOf(
+  ctx: SimContext,
+  from: { resource: ResourceType; cx: number; cy: number },
+  removed: ReadonlySet<EntityId>,
+): { id: EntityId; cx: number; cy: number } | null {
+  let best: { id: EntityId; cx: number; cy: number } | null = null;
+  let bestD = RALLY_FOLLOW_RADIUS * RALLY_FOLLOW_RADIUS;
+  for (const e of ctx.state.entities) {
+    if (e.kind !== 'node' || removed.has(e.id) || e.amount <= 0) continue;
+    const def = ctx.data.node(e.typeId);
+    if (def.resource !== from.resource) continue;
+    const cx = e.tile.tx + def.footprint / 2;
+    const cy = e.tile.ty + def.footprint / 2;
+    const d = (cx - from.cx) * (cx - from.cx) + (cy - from.cy) * (cy - from.cy);
+    if (d < bestD || (best === null && d <= bestD)) {
+      best = { id: e.id, cx, cy };
+      bestD = d;
+    }
+  }
+  return best;
 }
 
 /**
@@ -56,11 +82,17 @@ export function runCleanup(ctx: SimContext): void {
   }
 
   let freedBlocking = false;
+  const removedNodes = new Map<EntityId, { resource: ResourceType; cx: number; cy: number }>();
   for (const id of removedIds) {
     const e = findEntity(state, id);
     if (e === undefined) continue;
     if (e.kind === 'node') {
       const def = ctx.data.node(e.typeId);
+      removedNodes.set(id, {
+        resource: def.resource,
+        cx: e.tile.tx + def.footprint / 2,
+        cy: e.tile.ty + def.footprint / 2,
+      });
       emit(ctx, {
         type: 'ResourceNodeDepleted',
         nodeId: e.id,
@@ -88,7 +120,12 @@ export function runCleanup(ctx: SimContext): void {
     if (e.kind === 'building') {
       removeAll(e.builderIds, removed);
       if (e.rally !== null && e.rally.targetId !== null && removed.has(e.rally.targetId)) {
-        e.rally.targetId = null;
+        const gone = removedNodes.get(e.rally.targetId);
+        const next = gone === undefined ? null : nearestNodeOf(ctx, gone, removed);
+        // A rally onto a depleted node follows the resource to the nearest node of the same kind, else it
+        // becomes a ground rally at the old spot.
+        if (next !== null) e.rally = { x: next.cx, y: next.cy, targetId: next.id };
+        else e.rally.targetId = null;
       }
     }
   }
@@ -99,7 +136,8 @@ export function runCleanup(ctx: SimContext): void {
  * Delete own units and buildings. The whole command is rejected (nothing
  * changes) if any id is unknown or not owned by the player (neutral nodes never are). Unfinished
  * buildings refund `costPaid` in full and a building's queued items are refunded in full
- * (same rule as `cancelQueue`); everything else refunds nothing.
+ * (same rule as `cancelQueue`); everything else refunds nothing. A command that would remove
+ * the player's last completed Town Center is rejected whole with `cannotPerform`.
  * Removal itself happens in the cleanup step of the same tick.
  */
 export const applyDeleteCommand: CommandHandler<'delete'> = (ctx, cmd) => {
@@ -109,6 +147,19 @@ export const applyDeleteCommand: CommandHandler<'delete'> = (ctx, cmd) => {
     if (e === undefined) return reject(ctx, cmd, 'unknownEntity');
     if (e.owner !== cmd.playerId) return reject(ctx, cmd, 'notOwner');
     targets.push(e);
+  }
+  // A player's last completed Town Center cannot be deleted: the match could not be recovered.
+  const isTownCenter = (e: Entity): boolean =>
+    e.kind === 'building' && e.constructed && ctx.data.building(e.typeId).tags.includes('townCenter');
+  const doomed = new Set<EntityId>(targets.filter(isTownCenter).map((e) => e.id));
+  if (doomed.size > 0) {
+    let remaining = 0;
+    for (const e of ctx.state.entities) {
+      if (e.owner === cmd.playerId && isTownCenter(e) && !doomed.has(e.id) && !ctx.runtime.pendingRemoval.includes(e.id)) {
+        remaining++;
+      }
+    }
+    if (remaining === 0) return reject(ctx, cmd, 'cannotPerform');
   }
   const player = ctx.state.players[cmd.playerId];
   for (const e of targets) {

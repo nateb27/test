@@ -101,6 +101,23 @@ describe('SelectionPanel', () => {
     expect(actions.cancelQueueItem).toHaveBeenCalledWith(fx.townCenter, 1);
   });
 
+  it('a queue item with a pending cancel is marked, and facts render with icons', () => {
+    const fx = createFixture();
+    enqueue(fx.state.entities.find((e) => e.id === fx.townCenter) as BuildingEntity, [
+      { kind: 'unit', id: 'villager', ticksDone: 100, ticksTotal: 400 },
+      { kind: 'unit', id: 'villager', ticksDone: 0, ticksTotal: 400 },
+    ]);
+    const vm = vmFor(fx, [fx.townCenter], { pendingCancels: [{ buildingId: fx.townCenter, index: 1 }] }).selection;
+    render(<SelectionPanel vm={vm} actions={actions} />);
+    expect(screen.getByTestId('queue-item-0').getAttribute('data-pending')).toBe('false');
+    expect(screen.getByTestId('queue-item-1').getAttribute('data-pending')).toBe('true');
+    expect(screen.getByTestId('queue-item-1').classList.contains('pending')).toBe(true);
+    const drop = screen.getByTestId('sel-fact-dropOff');
+    expect(drop.querySelectorAll('.icon')).toHaveLength(4);
+    expect(drop.getAttribute('title')).toBe('Drop-off for food, wood, gold, stone');
+    expect(screen.getByTestId('sel-fact-pop').textContent).toBe('+10 population');
+  });
+
   it('multi selection: an icon per entity, clicking narrows', () => {
     const fx = createFixture();
     render(<SelectionPanel vm={vmFor(fx, [fx.villagers[0]!, fx.villagers[2]!, fx.spearman]).selection} actions={actions} />);
@@ -142,6 +159,26 @@ describe('CommandCard', () => {
     };
     expect(slotFor('house').querySelector('.cost-wood')!.classList.contains('short')).toBe(true); // 50 > 45
     expect(slotFor('farm').querySelector('.cost-wood')!.classList.contains('short')).toBe(false); // Themata farm: 40 <= 45
+  });
+
+  it('every cost shows its resource icon, three costs keep their icons, and shortage is colour only', () => {
+    const fx = createFixture({ resources: { food: 10, wood: 10, gold: 10, stone: 0 } });
+    const vm = vmFor(fx, [fx.villagers[0]!], { page: 'economy' }).commandCard!;
+    // Force a three-resource cost on one button.
+    const house = vm.buttons.find((b) => b.defId === 'house')!;
+    house.cost = { food: 100, wood: 50, gold: 25, stone: 0 };
+    house.shortfall = { food: 90, wood: 40, gold: 15, stone: 0 };
+    render(<CommandCard vm={vm} actions={actions} />);
+    const slot = screen.getByTestId(`slot-${house.slot}`);
+    const row = slot.querySelector('.cost-row')!;
+    expect(row.classList.contains('dense')).toBe(true);
+    const costs = Array.from(row.querySelectorAll('.cost'));
+    expect(costs).toHaveLength(3);
+    // An icon in every cost (placeholder initials here, since no manifest is mounted), never a CSS dot.
+    for (const c of costs) expect(c.querySelector('.icon')).not.toBeNull();
+    expect(costs.every((c) => c.classList.contains('short'))).toBe(true);
+    // Each resource has its own icon id, so food is never confused with the red shortage colour.
+    expect(costs.map((c) => c.className)).toEqual(['cost cost-food short', 'cost cost-wood short', 'cost cost-gold short']);
   });
 
   it('greyed out buttons are marked disabled, with the reason in the tooltip', () => {

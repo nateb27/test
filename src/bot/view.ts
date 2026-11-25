@@ -85,6 +85,7 @@ export interface BotView {
   playerId: PlayerId;
   age: number;
   resources: ResourceAmounts;
+  /** Living population plus units queued for training (the bot plans against committed population). */
   popUsed: number;
   popCap: number;
   researched: ReadonlySet<string>;
@@ -113,6 +114,7 @@ export function readView(sim: Sim, playerId: PlayerId, data: DataRegistry = regi
   const player = state.players[playerId];
   if (player === undefined) throw new Error(`no player ${playerId}`);
 
+  let queuedPop = 0;
   const villagers: VillagerView[] = [];
   const buildings: BuildingView[] = [];
   const nodes: NodeView[] = [];
@@ -139,6 +141,7 @@ export function readView(sim: Sim, playerId: PlayerId, data: DataRegistry = regi
     } else if (e.kind === 'building') {
       if (e.owner !== playerId) continue;
       const def = data.building(e.typeId);
+      for (const q of e.queue) if (q.kind === 'unit') queuedPop += data.unit(q.unitType).popCost;
       buildings.push({
         id: e.id,
         typeId: e.typeId,
@@ -191,7 +194,7 @@ export function readView(sim: Sim, playerId: PlayerId, data: DataRegistry = regi
     playerId,
     age: player.age,
     resources: { ...player.resources },
-    popUsed: player.popUsed,
+    popUsed: player.popUsed + queuedPop,
     popCap: player.popCap,
     researched: new Set(player.researched),
     mapWidth: state.map.width,

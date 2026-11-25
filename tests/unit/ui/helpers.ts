@@ -1,3 +1,4 @@
+import type { UiAction } from '../../../src/client/input/gameInput';
 import { SelectionStore } from '../../../src/client/input/selection';
 import type { HudMatch } from '../../../src/client/ui/hudController';
 import { createFixture, fakeQueries, type Fixture, type FixtureOptions } from '../../../src/client/ui/fixtures';
@@ -10,7 +11,7 @@ export interface FakeMatch extends HudMatch {
   emit(events: SimEvent[]): void;
   /** Simulate a hotkey press (what `GameInput` does on keydown). */
   pressSlot(slot: number): void;
-  uiAction(action: 'menu' | 'toggleDebug'): void;
+  uiAction(action: UiAction): void;
   performed: unknown[];
 }
 
@@ -21,7 +22,7 @@ export function fakeMatch(opts: FixtureOptions = {}): FakeMatch {
   const issued: CommandInput[] = [];
   const performed: unknown[] = [];
   const cardListeners = new Set<(slot: number) => void>();
-  const uiListeners = new Set<(a: 'menu' | 'toggleDebug') => void>();
+  const uiListeners = new Set<(a: UiAction) => void>();
   const eventListeners = new Set<(events: readonly SimEvent[]) => void>();
   const queries = fakeQueries(fx.state);
   const entityById = (id: EntityId): ReadonlyEntity | undefined => fx.state.entities.find((e) => e.id === id);

@@ -100,12 +100,22 @@ export const REJECT_TEXT: Readonly<Record<RejectReason, string>> = {
   unknownDef: 'Unknown item',
 };
 
+/** Toast shown when a queue item is cancelled while the game is paused. */
+export const CANCEL_PAUSED_TEXT = 'Cancel will apply when the game resumes';
+
+/** Toast shown by the first Delete press on a completed building. */
+export const DEMOLISH_PROMPT_TEXT = 'Press Delete again to demolish';
+
+/** Toast for a refused `delete` (the sim only refuses a player's last Town Center with `cannotPerform`). */
+export const LAST_TOWN_CENTER_TEXT = 'Your last Town Center cannot be demolished';
+
 /** Toast text for a rejected command, using the extra detail the event carries. */
 export function rejectionText(
   reason: RejectReason,
-  detail: { unavailable?: readonly UnavailableReason[]; shortfall?: Readonly<ResourceAmounts> },
+  detail: { unavailable?: readonly UnavailableReason[]; shortfall?: Readonly<ResourceAmounts>; commandType?: string },
   registry: DataRegistry,
 ): string {
+  if (reason === 'cannotPerform' && detail.commandType === 'delete') return LAST_TOWN_CENTER_TEXT;
   if (reason === 'cannotAfford') return shortfallText(detail.shortfall);
   if (reason === 'notAvailable') {
     const first = detail.unavailable?.[0];

@@ -21,7 +21,7 @@ function Single({ vm, actions }: { vm: SingleSelectionVM; actions: Pick<HudActio
     <div class="single" data-testid="selection-single">
       <div class="single-head">
         <div class="portrait" style={{ borderColor: hex(vm.ownerColor) }} data-testid="owner-color" data-color={hex(vm.ownerColor)}>
-          <Icon id={vm.icon} size={64} />
+          <Icon id={vm.icon} size={56} />
         </div>
         <div class="single-info">
           <div class="single-name">
@@ -44,6 +44,18 @@ function Single({ vm, actions }: { vm: SingleSelectionVM; actions: Pick<HudActio
               <span class="stat-value">
                 Carrying {vm.carrying.amount} {vm.carrying.resource}
               </span>
+            </div>
+          )}
+          {vm.facts.length > 0 && (
+            <div class="facts" data-testid="sel-facts">
+              {vm.facts.map((f) => (
+                <div class="stat fact" key={f.id} data-testid={`sel-fact-${f.id}`} title={f.title}>
+                  {f.resources.map((r) => (
+                    <Icon key={r} id={resourceIconId(r)} size={14} />
+                  ))}
+                  <span class="stat-value">{f.text}</span>
+                </div>
+              ))}
             </div>
           )}
           {vm.remaining !== null && (
@@ -75,12 +87,13 @@ function Single({ vm, actions }: { vm: SingleSelectionVM; actions: Pick<HudActio
               <button
                 type="button"
                 key={`${q.index}-${q.defId}`}
-                class={`queue-item ${q.popBlocked ? 'blocked' : ''}`}
+                class={`queue-item ${q.popBlocked ? 'blocked' : ''} ${q.cancelPending ? 'pending' : ''}`}
                 data-testid={`queue-item-${q.index}`}
-                title={`${q.name}: click to cancel`}
+                title={q.cancelPending ? `${q.name}: cancelling` : `${q.name}: click to cancel`}
+                data-pending={q.cancelPending ? 'true' : 'false'}
                 onClick={() => actions.cancelQueueItem(vm.entityId, q.index)}
               >
-                <Icon id={q.icon} size={36} />
+                <Icon id={q.icon} size={32} />
                 <Bar value={q.progress} class="queue-bar" label={`${q.name} progress`} />
               </button>
             ))}

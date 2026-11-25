@@ -268,9 +268,9 @@ Each unit has a queue of orders (shift-click appends) and a state machine for th
 ### 4.6 Production, population and rally points
 
 - Each producing building has a queue of up to 10 items (units and techs share it). Cost is deducted on enqueue and refunded in full on cancel.
-- A unit finishing while the player is at the population cap holds at 100% and emits `PopulationCapped` once; it spawns as soon as room exists.
-- Spawn at the free tile adjacent to the building nearest the rally point. Rally on ground → move there. Rally on a resource node or farm → villagers gather it.
-- Population cap = sum of completed buildings' `popProvided`, hard-capped at 200. Population used = sum of `popCost` of living units plus units in production.
+- A unit finishing while `popUsed + popCost > popCap` holds at 100% and emits `PopulationCapped` once; it spawns as soon as room exists. Buildings are resolved in ascending building id within a tick, so two buildings finishing together never both exceed the cap.
+- Spawn at a free tile adjacent to the building, nearest the rally point (or the building front without one), that does not hold an idle unit, so successive units stand on distinct tiles; a full ring spreads outward. Rally on ground → move there. Rally on a resource node or farm → villagers gather it; if it is full the nearest free node of the same resource within 16 tiles of the rally target is used, and if there is none the unit walks to the rally point and is reported idle once. When a rally node is depleted the rally follows the resource to the nearest node of the same kind within 16 tiles, else it becomes a ground rally.
+- Population cap = sum of completed buildings' `popProvided`, hard-capped at 200. Population used = sum of `popCost` of living units only (queued units do not count, so the display never shows more than the cap). A player's last completed Town Center cannot be deleted (`cannotPerform`).
 
 ### 4.7 Technologies, ages and modifiers
 

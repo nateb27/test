@@ -15,7 +15,7 @@ export function livingPopulation(ctx: SimContext, playerId: PlayerId): number {
 }
 
 /**
- * Recompute every player's `popUsed` (living units + units in queues) and
+ * Recompute every player's `popUsed` (living units only; queued units do not count) and
  * `popCap` (min(POP_HARD_CAP, completed buildings' popProvided)).
  * Called from cleanup (tick step 8) and after load.
  */
@@ -30,9 +30,6 @@ export function recomputePopulation(ctx: SimContext): void {
     } else if (e.kind === 'building') {
       if (ctx.data.def(e.typeId) === undefined) continue;
       if (e.constructed) cap[e.owner]! += resolvedStat(ctx, e.owner, e.typeId, 'popProvided');
-      for (const item of e.queue) {
-        if (item.kind === 'unit') used[e.owner]! += resolvedStat(ctx, e.owner, item.unitType, 'popCost');
-      }
     }
   }
   for (const p of state.players) {

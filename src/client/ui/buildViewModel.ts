@@ -22,6 +22,7 @@ import type {
   HudViewModel,
   MultiSelectionVM,
   QueueItemVM,
+  SelectionFactVM,
   SelectionVM,
   SingleSelectionVM,
   ToastVM,
@@ -37,6 +38,8 @@ export interface HudClientState {
   placing: BuildingId | null;
   toasts: readonly ToastVM[];
   banner: BannerVM | null;
+  /** Queue cancels issued but not yet applied by a tick (WP13). */
+  pendingCancels?: readonly { buildingId: EntityId; index: number }[];
 }
 
 export interface BuildViewModelInput {
@@ -99,6 +102,7 @@ function queueItems(input: BuildViewModelInput, e: Extract<ReadonlyEntity, { kin
       icon: def !== undefined && def.kind !== 'node' ? def.icon : UNKNOWN_ICON,
       progress: item.ticksTotal > 0 ? Math.min(1, item.ticksDone / item.ticksTotal) : 1,
       popBlocked: item.kind === 'unit' && item.popCapNotified,
+      cancelPending: input.client.pendingCancels?.some((p) => p.buildingId === e.id && p.index === index) ?? false,
     };
   });
 }
@@ -107,6 +111,42 @@ function entityName(registry: DataRegistry, e: ReadonlyEntity): { name: string; 
   const def = registry.def(e.typeId);
   if (def === undefined) return { name: e.typeId, icon: UNKNOWN_ICON };
   return { name: def.name, icon: def.icon };
+}
+
+/** Trim a rate to at most two decimals: 0.25 -> "0.25", 1 -> "1". */
+function formatRate(n: number): string {
+  return String(Math.round(n * 100) / 100);
+}
+
+/** Passive income, drop-off, population provided and gatherer counts (plan 7.3, WP13). */
+function selectionFacts(input: BuildViewModelInput, e: ReadonlyEntity): SelectionFactVM[] {
+  const { registry, query, playerId } = input;
+  const facts: SelectionFactVM[] = [];
+  if (e.kind === 'node') {
+    const def = registry.node(e.typeId);
+    const text = `Gatherers ${e.gathererIds.length}/${def.maxGatherers}`;
+    facts.push({ id: 'gatherers', text, title: text, resources: [def.resource] });
+    return facts;
+  }
+  if (e.kind !== 'building' || !e.constructed) return facts;
+  const def = registry.building(e.typeId);
+  if (def.income !== undefined) {
+    const rate = e.owner === playerId ? query.resolvedStat(playerId, e.typeId, 'incomeRate') : def.income.perSecond;
+    const text = `+${formatRate(rate)} ${def.income.resource}/s`;
+    facts.push({ id: 'income', text, title: `Passive income: ${text}`, resources: [def.income.resource] });
+  }
+  if (def.dropOff.length > 0) {
+    facts.push({ id: 'dropOff', text: 'Drop-off', title: `Drop-off for ${def.dropOff.join(', ')}`, resources: [...def.dropOff] });
+  }
+  if (def.popProvided > 0) {
+    const pop = e.owner === playerId ? query.resolvedStat(playerId, e.typeId, 'popProvided') : def.popProvided;
+    facts.push({ id: 'pop', text: `+${pop} population`, title: `Provides ${pop} population`, resources: [] });
+  }
+  if (def.farm !== undefined) {
+    const text = `Gatherers ${e.gathererIds.length}/${def.farm.maxGatherers}`;
+    facts.push({ id: 'gatherers', text, title: text, resources: [def.farm.resource] });
+  }
+  return facts;
 }
 
 function singleSelection(input: BuildViewModelInput, e: ReadonlyEntity): SingleSelectionVM {
@@ -133,6 +173,7 @@ function singleSelection(input: BuildViewModelInput, e: ReadonlyEntity): SingleS
     remaining: e.kind === 'node' ? e.amount : null,
     constructionProgress: e.kind === 'building' && !e.constructed ? e.progress : null,
     queue: e.kind === 'building' && e.owner === playerId ? queueItems(input, e) : [],
+    facts: selectionFacts(input, e),
   };
 }
 

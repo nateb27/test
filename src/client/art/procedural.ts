@@ -27,6 +27,7 @@ import {
   allSpriteIds,
   classifyIcon,
   classifySprite,
+  iconFacing,
   parseIconId,
   parseSpriteId,
   type BuildingKey,
@@ -245,7 +246,9 @@ export function createProceduralManifest(options: ProceduralManifestOptions = {}
       raw('unit', key, () => {
         const size = UNIT_SIZES[key as UnitKey];
         const s = makeSurface(size.w, size.h);
-        drawUnitFrame({ ctx: s.ctx, unit: key as UnitKey, facing: 1, state: 'idle', frame: 0, team: DEFAULT_TEAM });
+        // Mounted units are drawn side-on (facing 0): head-on, the horse is hidden behind its rider.
+        const facing = iconFacing(key);
+        drawUnitFrame({ ctx: s.ctx, unit: key as UnitKey, facing, state: 'idle', frame: 0, team: DEFAULT_TEAM });
         return s;
       }),
     building: (key) =>

@@ -201,3 +201,14 @@ export function allIconIds(): string[] {
     ...CIV_IDS.map((k) => `icon.civ.${k}`),
   ];
 }
+
+/** Unit keys with a horse. */
+const MOUNTED_UNITS: ReadonlySet<string> = new Set(['horseman', 'lancer', 'cataphract']);
+
+/**
+ * Facing the HUD icon of a unit is drawn at: 1 (towards the viewer) for foot units, 0 (side-on) for mounted
+ * ones, because head-on the horse is hidden behind its rider.
+ */
+export function iconFacing(unitKey: string): 0 | 1 {
+  return MOUNTED_UNITS.has(unitKey) ? 0 : 1;
+}
