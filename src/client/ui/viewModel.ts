@@ -34,6 +34,8 @@ export interface TopBarVM {
   popCapped: boolean;
   age: AgeNumber;
   ageName: string;
+  /** WP9 addition: `icon.age.N`. */
+  ageIcon: IconId;
   idleVillagers: number;
   /** Elapsed game time in whole seconds (tick / TICK_RATE). */
   clockSeconds: number;
@@ -131,6 +133,8 @@ export interface CardButtonVM {
 
 export interface CommandCardVM {
   page: CardPage;
+  /** WP9 addition: heading above the grid, e.g. "Commands" or "Build: Economy". */
+  title: string;
   buttons: CardButtonVM[];
 }
 
@@ -146,6 +150,8 @@ export interface ToastVM {
 }
 
 export interface BannerVM {
+  /** WP9 addition: unique, increasing; used as a key so a new banner replays its animation. */
+  id: number;
   kind: 'ageAdvanced' | 'objective';
   title: string;
   subtitle: string;

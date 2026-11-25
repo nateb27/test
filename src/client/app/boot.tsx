@@ -10,4 +10,6 @@ export function boot(root: HTMLElement): void {
   host.platform.window.setTitle('Untitled RTS');
   installDebugHook(host.createDebugHook());
   render(<App host={host} />, root);
+  // Draw the art in the background so menu icons are ready; the loading screen waits for it if not.
+  host.loadManifest().catch((err: unknown) => console.error('Art generation failed', err));
 }

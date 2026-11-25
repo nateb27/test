@@ -1,21 +1,33 @@
+import { useState } from 'preact/hooks';
+import { SaveLoadPanel } from '../../ui/components/SaveLoadPanel';
+import type { AppHost } from '../host';
 import type { Navigate } from './types';
-import { MAP_SIZE } from '../../../sim/types';
 
-/** Placeholder main menu. WP9 builds the real one (with Load Game). */
-export function MainMenu({ navigate }: { navigate: Navigate }) {
-  const newGame = (): void => {
-    // WP9: route through civ select. WP0 starts a Byzantine match directly.
-    navigate({
-      name: 'loading',
-      config: { seed: (Math.random() * 0x7fffffff) >>> 0, mapSize: MAP_SIZE, players: [{ civ: 'byzantines' }] },
-    });
-  };
+/** Title screen: New Game (-> civilization select) and Load Game. */
+export function MainMenu({ navigate, host }: { navigate: Navigate; host: AppHost }) {
+  const [loading, setLoading] = useState(false);
   return (
-    <div class="screen menu" data-testid="main-menu">
+    <div class="screen menu ui-root" data-testid="main-menu">
       <h1>Untitled RTS</h1>
-      <button type="button" data-testid="new-game" onClick={newGame}>
+      <p class="tagline">Build. Gather. Advance through the ages.</p>
+      <button type="button" class="primary" data-testid="new-game" onClick={() => navigate({ name: 'civSelect' })}>
         New Game
       </button>
+      <button type="button" data-testid="load-game" onClick={() => setLoading(true)}>
+        Load Game
+      </button>
+      {loading && (
+        <div class="modal-backdrop">
+          <div class="modal panel">
+            <SaveLoadPanel
+              storage={host.platform.storage}
+              mode="load"
+              onLoaded={(sim) => navigate({ name: 'loading', source: { kind: 'sim', sim } })}
+              onBack={() => setLoading(false)}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

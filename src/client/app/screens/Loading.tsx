@@ -1,21 +1,55 @@
-import { useEffect } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 import { createGame } from '../../../sim/sim';
-import type { GameConfig } from '../../../sim/types';
-import type { Navigate } from './types';
+import type { Sim } from '../../../sim/types';
+import type { AppHost } from '../host';
+import type { LoadSource, Navigate } from './types';
+import { configFromSim } from './types';
 
-/** Generates the match (and, from WP3 on, art) behind a progress bar. */
-export function Loading({ config, navigate }: { config: GameConfig; navigate: Navigate }) {
+const nextFrame = (): Promise<void> => new Promise((resolve) => requestAnimationFrame(() => resolve()));
+
+/** Generates the map (new games) and the art behind a progress bar, then starts the match. */
+export function Loading({ source, host, navigate }: { source: LoadSource; host: AppHost; navigate: Navigate }) {
+  const [progress, setProgress] = useState(0);
+  const [label, setLabel] = useState('Preparing');
+
   useEffect(() => {
-    // Defer one frame so the loading screen paints first.
-    const id = requestAnimationFrame(() => {
-      const sim = createGame(config);
-      navigate({ name: 'game', sim, civ: config.players[0]?.civ ?? 'byzantines' });
-    });
-    return () => cancelAnimationFrame(id);
-  }, [config, navigate]);
+    let cancelled = false;
+    void (async () => {
+      setLabel(source.kind === 'new' ? 'Generating the map' : 'Restoring the game');
+      await nextFrame(); // let the loading screen paint first
+      if (cancelled) return;
+      const sim: Sim = source.kind === 'new' ? createGame(source.config) : source.sim;
+      setProgress(0.3);
+      setLabel('Drawing the art');
+      await nextFrame();
+      if (cancelled) return;
+      await host.loadManifest((f) => {
+        if (!cancelled) setProgress(0.3 + 0.7 * f);
+      });
+      if (cancelled) return;
+      setProgress(1);
+      navigate({
+        name: 'game',
+        sim,
+        civ: sim.state.players[1]?.civ ?? 'byzantines',
+        config: source.kind === 'new' ? source.config : configFromSim(sim),
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [source, host, navigate]);
+
+  const pct = Math.round(progress * 100);
   return (
-    <div class="screen menu" data-testid="loading">
-      <p>Loading…</p>
+    <div class="screen menu ui-root" data-testid="loading">
+      <h2>Loading</h2>
+      <div class="progress" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} data-testid="loading-bar">
+        <div class="progress-fill" style={{ width: `${pct}%` }} />
+      </div>
+      <p class="muted" data-testid="loading-label">
+        {label}… {pct}%
+      </p>
     </div>
   );
 }

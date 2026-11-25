@@ -1,13 +1,13 @@
 import { useCallback, useState } from 'preact/hooks';
 import { CivSelect } from './screens/CivSelect';
-import { GameScreen } from './screens/GameScreen';
+import { GameScreen, type GameHooks } from './screens/GameScreen';
 import { Loading } from './screens/Loading';
 import { MainMenu } from './screens/MainMenu';
 import type { Screen } from './screens/types';
 import type { AppHost } from './host';
 
 /** Screen router: menu / civ select / loading / game. */
-export function App({ host }: { host: AppHost }) {
+export function App({ host, hooks }: { host: AppHost; hooks?: GameHooks }) {
   const [screen, setScreen] = useState<Screen>({ name: 'menu' });
   const navigate = useCallback(
     (next: Screen) => {
@@ -19,12 +19,12 @@ export function App({ host }: { host: AppHost }) {
 
   switch (screen.name) {
     case 'menu':
-      return <MainMenu navigate={navigate} />;
+      return <MainMenu navigate={navigate} host={host} />;
     case 'civSelect':
-      return <CivSelect navigate={navigate} />;
+      return <CivSelect navigate={navigate} host={host} />;
     case 'loading':
-      return <Loading config={screen.config} navigate={navigate} />;
+      return <Loading source={screen.source} navigate={navigate} host={host} />;
     case 'game':
-      return <GameScreen sim={screen.sim} host={host} />;
+      return <GameScreen sim={screen.sim} config={screen.config} host={host} navigate={navigate} hooks={hooks} />;
   }
 }
