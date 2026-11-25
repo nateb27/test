@@ -1,13 +1,21 @@
 /**
- * World renderer contract and the WP0 placeholder implementation (an empty,
- * full-window Pixi canvas). WP3 replaces the internals: terrain chunks,
- * entity layer with interpolation, camera, picking.
+ * World renderer (WP3): PixiJS v8 canvas with camera, cached terrain chunks,
+ * the depth-sorted entity layer and picking helpers.
+ *
+ * `WorldRenderer` is the contract; `WorldRendererApi` adds the camera, layers
+ * and picking that WP5 (input), WP9/WP10 (overlays, minimap) build on.
  */
 
-import { Application } from 'pixi.js';
+import { Application, Container } from 'pixi.js';
 import type { AssetManifest } from '../art/manifest';
-import type { ReadonlyGameState, Vec2 } from '../../sim/types';
-import { screenToWorld, worldToScreen, type ScreenPoint } from './iso';
+import { registry as defaultRegistry } from '../../data';
+import type { DataRegistry } from '../../data/schema';
+import type { EntityId, ReadonlyGameState, Vec2 } from '../../sim/types';
+import { Camera, CameraInput, type CameraInputOptions, type WorldPxRect } from './camera';
+import { EntityLayer, type DrawnEntity } from './entities';
+import { mapScreenBounds, screenToWorld, worldToScreen, type ScreenPoint } from './iso';
+import { pickDrawn, pickRect } from './picking';
+import { TerrainLayer } from './terrain';
 
 export interface WorldRenderer {
   readonly canvas: HTMLCanvasElement;
@@ -23,21 +31,61 @@ export interface WorldRenderer {
   destroy(): void;
 }
 
+/** The named containers, back to front, all in world-pixel space (they move with the camera). */
+export interface RenderLayers {
+  /** Cached terrain chunks. */
+  readonly terrain: Container;
+  /** Selection rings, rally lines, placement footprint: drawn above terrain, below entities. WP10 fills this. */
+  readonly groundOverlays: Container;
+  /** Depth-sorted entity sprites. */
+  readonly entities: Container;
+  /** Progress bars, carried-resource icons, click markers: drawn above entities. WP10 fills this. */
+  readonly worldOverlays: Container;
+}
+
+export interface WorldRendererApi extends WorldRenderer {
+  readonly camera: Camera;
+  readonly cameraInput: CameraInput;
+  readonly layers: RenderLayers;
+  /** Centre the camera on a world position (tiles). Used by the minimap and hotkeys. */
+  jumpTo(x: number, y: number): void;
+  /** Entity under a canvas point (CSS px) from the last rendered frame: units over buildings over nodes. */
+  pickEntity(cx: number, cy: number): EntityId | null;
+  /** Entities (units by default) whose anchor falls inside a canvas rectangle, for box select. */
+  entitiesInCanvasRect(x0: number, y0: number, x1: number, y1: number, kinds?: readonly DrawnEntity['kind'][]): EntityId[];
+  /** Canvas-space bounding box (CSS px) of an entity drawn last frame, or null if off screen. */
+  entityCanvasBounds(id: EntityId): { x: number; y: number; w: number; h: number } | null;
+  /** The four world-tile corners of the visible area (for the minimap's camera outline), clockwise from top. */
+  visibleWorldCorners(): [Vec2, Vec2, Vec2, Vec2];
+  /** Entities drawn on the last frame, back to front. */
+  readonly lastDrawn: readonly DrawnEntity[];
+}
+
 export interface RendererOptions {
   parent: HTMLElement;
   manifest: AssetManifest;
-  /** Map size in tiles, for the initial camera position. */
+  /** Map size in tiles, for the camera bounds and initial position. */
   mapWidth: number;
   mapHeight: number;
+  /** Content registry (defaults to the game data). Missing defs fall back gracefully. */
+  registry?: DataRegistry;
+  /** Initial camera centre in world tiles. Default: the first non-neutral player's first building, else the map centre. */
+  focus?: Vec2;
+  cameraInput?: CameraInputOptions;
+  /** Canvas size override (default: the window). Mainly for tests and screenshots. */
+  size?: { width: number; height: number };
+  /** Start with this zoom (0.5 - 2). */
+  zoom?: number;
 }
 
 const BACKGROUND = 0x10170c;
 
 /** Create the renderer. Resolves once the Pixi canvas is attached to `parent`. */
-export async function createWorldRenderer(options: RendererOptions): Promise<WorldRenderer> {
+export async function createWorldRenderer(options: RendererOptions): Promise<WorldRendererApi> {
+  const registry = options.registry ?? defaultRegistry;
   const app = new Application();
   await app.init({
-    resizeTo: window,
+    ...(options.size !== undefined ? { width: options.size.width, height: options.size.height } : { resizeTo: window }),
     background: BACKGROUND,
     antialias: false,
     autoDensity: true,
@@ -46,27 +94,85 @@ export async function createWorldRenderer(options: RendererOptions): Promise<Wor
   app.canvas.classList.add('world-canvas');
   options.parent.appendChild(app.canvas);
 
-  // Placeholder camera: map centre at canvas centre, zoom 1.
-  const centre = worldToScreen(options.mapWidth / 2, options.mapHeight / 2);
-  const offset = (): ScreenPoint => ({
-    x: app.screen.width / 2 - centre.x,
-    y: app.screen.height / 2 - centre.y,
-  });
+  const camera = new Camera();
+  const b = mapScreenBounds(options.mapWidth, options.mapHeight);
+  const pad = 96;
+  camera.setBounds({ minX: b.minX - pad, maxX: b.maxX + pad, minY: b.minY - pad, maxY: b.maxY + pad });
+  camera.setViewport(app.screen.width, app.screen.height);
+  camera.zoomAt(app.screen.width / 2, app.screen.height / 2, options.zoom ?? 1);
+  const focus = options.focus ?? { x: options.mapWidth / 2, y: options.mapHeight / 2 };
+  camera.jumpTo(focus.x, focus.y);
+  let needsAutoFocus = options.focus === undefined;
 
-  return {
+  const world = new Container();
+  const terrain = new TerrainLayer();
+  const groundOverlays = new Container();
+  const entities = new EntityLayer(options.manifest, registry);
+  const worldOverlays = new Container();
+  world.addChild(terrain.container, groundOverlays, entities.container, worldOverlays);
+  app.stage.addChild(world);
+  const cameraInput = new CameraInput(camera, app.canvas, options.cameraInput);
+
+  let lastNow = performance.now();
+
+  const api: WorldRendererApi = {
     canvas: app.canvas,
-    render: () => {
-      // Pixi's ticker renders the (empty) stage. WP3 draws the world here.
+    camera,
+    cameraInput,
+    layers: { terrain: terrain.container, groundOverlays, entities: entities.container, worldOverlays },
+    get lastDrawn() {
+      return entities.drawn;
     },
-    worldToCanvas: (x, y) => {
-      const s = worldToScreen(x, y);
-      const o = offset();
-      return { x: s.x + o.x, y: s.y + o.y };
+    render(state, alpha) {
+      const now = performance.now();
+      const dt = Math.min(0.1, (now - lastNow) / 1000);
+      lastNow = now;
+      camera.setViewport(app.screen.width, app.screen.height);
+      if (needsAutoFocus) {
+        needsAutoFocus = false;
+        const mine = state.entities.find((e) => e.kind === 'building' && e.owner !== 0);
+        if (mine !== undefined && mine.kind === 'building') {
+          const def = registry.def(mine.typeId);
+          const size = def !== undefined && def.kind === 'building' ? def.footprint : 4;
+          camera.jumpTo(mine.tile.tx + size / 2, mine.tile.ty + size / 2);
+        }
+      }
+      cameraInput.update(dt);
+      world.position.set(app.screen.width / 2 - camera.x * camera.zoom, app.screen.height / 2 - camera.y * camera.zoom);
+      world.scale.set(camera.zoom);
+      const rect = camera.visibleRect();
+      terrain.update(rect, state.map, state.mapSeed);
+      entities.update(state, alpha, rect, now);
     },
-    canvasToWorld: (cx, cy) => {
-      const o = offset();
-      return screenToWorld(cx - o.x, cy - o.y);
+    worldToCanvas: (x, y) => camera.worldToCanvas(x, y),
+    canvasToWorld: (cx, cy) => camera.canvasToWorld(cx, cy),
+    jumpTo: (x, y) => camera.jumpTo(x, y),
+    pickEntity(cx, cy) {
+      const p = camera.canvasToWorldPx(cx, cy);
+      return pickDrawn(entities.drawn, p.x, p.y);
     },
-    destroy: () => app.destroy({ removeView: true }, { children: true }),
+    entitiesInCanvasRect(x0, y0, x1, y1, kinds) {
+      const a = camera.canvasToWorldPx(Math.min(x0, x1), Math.min(y0, y1));
+      const c = camera.canvasToWorldPx(Math.max(x0, x1), Math.max(y0, y1));
+      return pickRect(entities.drawn, { minX: a.x, minY: a.y, maxX: c.x, maxY: c.y }, worldToScreen, kinds);
+    },
+    entityCanvasBounds(id) {
+      const d = entities.getDrawn(id);
+      if (d === undefined) return null;
+      const a = camera.worldPxToCanvas(d.bounds.minX, d.bounds.minY);
+      const c = camera.worldPxToCanvas(d.bounds.maxX, d.bounds.maxY);
+      return { x: a.x, y: a.y, w: c.x - a.x, h: c.y - a.y };
+    },
+    visibleWorldCorners() {
+      const r: WorldPxRect = camera.visibleRect();
+      return [screenToWorld(r.minX, r.minY), screenToWorld(r.maxX, r.minY), screenToWorld(r.maxX, r.maxY), screenToWorld(r.minX, r.maxY)];
+    },
+    destroy() {
+      cameraInput.destroy();
+      terrain.destroy();
+      entities.destroy();
+      app.destroy({ removeView: true }, { children: true });
+    },
   };
+  return api;
 }

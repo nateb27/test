@@ -20,3 +20,15 @@ Phase 0 (scaffold and contracts) only. No game rules are implemented yet; the si
 ## Rules
 
 (Filled in by Phase 1+ work packages.)
+
+## WP3: renderer and placeholder art
+
+- **Layers** (all in world-pixel space, moving with the camera, back to front): `terrain` (16x16-tile baked chunks, at most 30 live, off-screen ones hidden), `groundOverlays` (empty, for WP10 rings/placement/rally), `entities` (depth sorted), `worldOverlays` (empty, for WP10 bars/markers). Exposed as `renderer.layers`.
+- **Depth**: sprites sort by `x + y` of the anchor (unit interpolated position, footprint centre for buildings and nodes), ties by id. Footprints and sprite ids come from `registry.def(typeId)` and fall back to `DEFAULT_FOOTPRINT` / `'<kind>.<typeId>'` when a def is missing.
+- **Animation state** is derived from the unit: moving (pos differs from prevPos, or a path is being followed) is `walk`, or `carry` when carrying; gather `harvesting` and build/assist `building` phases are `work`; otherwise `idle`. Buildings under construction show `foundation` below 30% progress, `scaffold` after.
+- **Team colour**: sprites are generated per team colour on demand (`teamSprite(id, primary, secondary)`); the default purple/gold set is generated at load. `sprite(id)` returns the default team.
+- **Facings**: 5 views are drawn (S, SE, E, NE, N); SW, W and NW are mirrors. S and N are their own mirror images, so this is the minimum for 8 facings.
+- **Picking**: hit boxes are tighter than the textures; units win over buildings over nodes, then front-most. `pickEntity` uses the entities drawn on the last frame.
+- **Camera**: wheel zoom 0.5x-2x about the cursor, middle-drag, arrows and WASD, 6 px edge scroll, clamped to the map's screen bounds plus 96 px. WASD collides with the QWERT/ASDFG command-card hotkeys; `cameraInput.setWasd(false)` turns it off.
+- **Unknown ids** never throw: sprites fall back to a magenta "?" tile, icons to a magenta "?" icon; unknown `icon.tech.*` ids get a generic scroll glyph with initials.
+- Dev pages (not in the production build): `src/client/render/dev/scene.html` and `sheet.html` under `npm run dev`.
