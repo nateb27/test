@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
-/** Phase 1 scenarios (plan 9.3 scenarios 1, 2 and the camera half of 11). Screenshots go to docs/screenshots/phase1/. */
-const SHOTS = 'docs/screenshots/phase1';
+/** Phase 1 scenarios (plan 9.3 scenarios 1, 2 and the camera half of 11). Screenshots go to the git-ignored test-results/screenshots/phase1/. */
+const SHOTS = 'test-results/screenshots/phase1';
 
 interface Pt {
   x: number;
@@ -61,7 +61,7 @@ function clearGround(page: Page): Promise<Pt> {
     const tc = ents.find((e) => e.kind === 'building' && e.owner === 1)!;
     const cx = tc.kind === 'building' ? tc.tile.tx + 2 : 0;
     const cy = tc.kind === 'building' ? tc.tile.ty + 2 : 0;
-    for (const [dx, dy] of [[6, 7], [7, -6], [-7, 6], [-6, -7], [9, 3], [3, 9], [-9, -3], [-3, -9]]) {
+    for (const [dx, dy] of [[6, 7], [7, -6], [-7, 6], [-6, -7], [9, 3], [3, 9], [-9, -3], [-3, -9], [8, 8], [-8, -8], [8, -8], [-8, 8], [11, 0], [0, 11], [-11, 0], [0, -11], [10, 6], [6, 10], [-10, -6], [-6, -10], [10, -6], [-6, 10], [6, -10], [-10, 6]]) {
       const x = cx + dx!;
       const y = cy + dy!;
       const s = g.worldToScreen(x, y);

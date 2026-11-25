@@ -5,8 +5,14 @@
 
 import { hashState } from '../../sim/hash';
 import type { EntityId, Sim, SimEvent } from '../../sim/types';
+import { registry } from '../../data';
+import type { AssetManifest } from '../art/manifest';
 import { GameInput } from '../input';
+import { createModeController, type ModeController } from '../input/placement';
+import { installPlacementDebug, tempCanPlace } from '../input/placement/tempDev';
+import { WorldOverlays } from '../render/overlays';
 import type { WorldRendererApi } from '../render/renderer';
+import { mountTempMinimap } from '../ui/minimap';
 import { CommandBuffer } from './commandBuffer';
 import { FixedTickLoop } from './loop';
 
@@ -20,6 +26,11 @@ export class Match {
   readonly commands = new CommandBuffer(LOCAL_PLAYER_ID);
   /** Pointer/keyboard handling, selection and control groups (WP5). */
   readonly input: GameInput;
+  /** Placement and rally modes (WP10). HUD callbacks: `modes.startPlacement(type)`, `modes.startRally()`. */
+  readonly modes: ModeController;
+  /** Selection rings, bars, rally flags, order markers, placement ghost (WP10). */
+  readonly overlays: WorldOverlays;
+  private readonly cleanup: (() => void)[] = [];
   private readonly listeners = new Set<SimEventListener>();
   private rafId: number | null = null;
   private lastFrameMs: number | null = null;
@@ -28,8 +39,33 @@ export class Match {
   constructor(
     readonly sim: Sim,
     readonly renderer: WorldRendererApi,
+    manifest?: AssetManifest,
   ) {
     this.input = new GameInput({ sim, renderer, commands: this.commands, loop: this.loop, playerId: LOCAL_PLAYER_ID });
+    this.modes = createModeController({
+      input: this.input,
+      sim,
+      renderer,
+      commands: this.commands,
+      playerId: LOCAL_PLAYER_ID,
+      registry,
+      canPlace: tempCanPlace(sim, LOCAL_PLAYER_ID, registry), // TEMPORARY (WP10): drop once WP7's canPlace is merged
+    });
+    this.overlays = new WorldOverlays({
+      sim,
+      renderer,
+      registry,
+      playerId: LOCAL_PLAYER_ID,
+      selection: () => this.input.selection.ids,
+      dragBox: () => this.input.dragBox,
+      ghost: () => this.modes.ghost(),
+      ...(manifest !== undefined ? { manifest } : {}),
+    });
+    this.cleanup.push(this.commands.onIssue((c) => this.overlays.notifyCommand(c)));
+    // TEMPORARY (WP10): minimap before the HUD's `#minimap-slot` exists, and debug entry points for placement.
+    const tmp = mountTempMinimap({ getState: () => sim.state, registry, playerId: LOCAL_PLAYER_ID, renderer, input: this.input });
+    this.cleanup.push(() => tmp.dispose());
+    this.cleanup.push(installPlacementDebug(this.modes, (x, y) => tmp.minimap.worldToPage(x, y), () => ({ ...this.overlays.stats })));
   }
 
   /** Selected entity ids (client state, ascending). */
@@ -40,7 +76,7 @@ export class Match {
   private renderFrame(alpha: number): void {
     this.input.update();
     this.renderer.render(this.sim.state, alpha);
-    this.input.afterRender();
+    this.overlays.update();
   }
 
   /** Subscribe to the events of every tick. Returns an unsubscribe function. */
@@ -88,6 +124,9 @@ export class Match {
   destroy(): void {
     this.stop();
     this.listeners.clear();
+    for (const c of this.cleanup) c();
+    this.cleanup.length = 0;
+    this.overlays.destroy();
     this.input.destroy();
     this.renderer.destroy();
   }
