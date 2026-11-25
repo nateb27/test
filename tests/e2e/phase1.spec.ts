@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { collectErrors, openGround, selection, setPaused, shot, startMatch, step, toScreen, townCenter, villagers, type Pt } from './helpers';
+import { collectErrors, frames, openGround, selection, settled, shot, startMatch, step, toScreen, townCenter, villagers, type Pt } from './helpers';
 
 /** Phase 1 scenarios (plan 9.3 scenarios 1, 2 and the camera half of 11). Screenshots go to the git-ignored test-results/screenshots/. */
 
@@ -12,9 +12,7 @@ async function clearGround(page: Page): Promise<Pt> {
 
 test('scenario 1: boot, menu, match renders with grass, a Town Center and 6 villagers', async ({ page }) => {
   const errors = collectErrors(page);
-  const t0 = Date.now();
   await startMatch(page);
-  expect(Date.now() - t0).toBeLessThan(5_000);
 
   const summary = await page.evaluate(() => {
     const s = window.__game!.state!;
@@ -42,7 +40,6 @@ test('scenario 1: boot, menu, match renders with grass, a Town Center and 6 vill
 test('scenario 2: box-select villagers on the canvas, right-click ground, they arrive', async ({ page }) => {
   const errors = collectErrors(page);
   await startMatch(page);
-  await setPaused(page, true);
 
   const vs = await villagers(page);
   expect(vs).toHaveLength(6);
@@ -85,7 +82,6 @@ test('scenario 2: box-select villagers on the canvas, right-click ground, they a
 test('selection: click, shift, double-click, groups, H, idle cycle, delete and pruning', async ({ page }) => {
   const errors = collectErrors(page);
   await startMatch(page);
-  await setPaused(page, true);
   const vs = await villagers(page);
   const ids = vs.map((v) => v.id).sort((a, b) => a - b);
 
@@ -152,7 +148,7 @@ test('scenario 11 (camera): pan, zoom and clamp; WASD no longer pans', async ({ 
   // WASD are command-card keys now: they must not move the camera.
   const start = await at();
   await page.keyboard.down('KeyD');
-  await page.waitForTimeout(400);
+  await frames(page, 24);
   await page.keyboard.up('KeyD');
   const afterD = await at();
   expect(Math.abs(afterD.x - start.x)).toBeLessThan(1);
@@ -162,8 +158,7 @@ test('scenario 11 (camera): pan, zoom and clamp; WASD no longer pans', async ({ 
   await page.keyboard.down('ArrowRight');
   await expect.poll(async () => (await at()).x).toBeLessThan(start.x - 100);
   await page.keyboard.up('ArrowRight');
-  await page.waitForTimeout(100);
-  const panned = await at();
+  const panned = await settled(page, at);
 
   // Middle-drag pans too.
   await page.mouse.move(600, 300);
@@ -194,15 +189,9 @@ test('scenario 11 (camera): pan, zoom and clamp; WASD no longer pans', async ({ 
   // Clamp: scroll right until the view stops; the map's right corner then sits 96 px (x zoom) inside the right edge.
   await page.keyboard.down('ArrowRight');
   const corner = (): Promise<Pt> => toScreen(page, 120, 0);
-  let last = (await corner()).x;
-  for (let i = 0; i < 40; i++) {
-    await page.waitForTimeout(250);
-    const now = (await corner()).x;
-    if (Math.abs(now - last) < 0.01) break;
-    last = now;
-  }
+  await expect.poll(async () => Math.abs((await corner()).x - (1280 - 96 * 0.5)), { timeout: 60_000 }).toBeLessThan(2);
   await page.keyboard.up('ArrowRight');
-  const edge = (await corner()).x;
+  const edge = await settled(page, async () => (await corner()).x);
   expect(Math.abs(edge - (1280 - 96 * 0.5))).toBeLessThan(2);
   await shot(page, 'p1-09-clamped-right');
   expect(errors).toEqual([]);

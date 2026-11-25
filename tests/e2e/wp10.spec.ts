@@ -1,5 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import {
+  advanceClock,
+  pickableTree,
   collectErrors,
   frames as frame,
   openGround,
@@ -146,7 +148,7 @@ test('minimap: left click and drag move the camera; right click orders units the
 test('minimap shows the Town Center, resource nodes, units and the camera outline', async ({ page }) => {
   const errors = collectErrors(page);
   await startMatch(page);
-  await page.waitForTimeout(450); // the dynamic layer redraws at 5 Hz
+  await step(page, 0); // redraws the minimap's dynamic layer now (it otherwise redraws on a 5 Hz timer)
 
   const info = await page.evaluate(() => {
     const s = window.__game!.state!;
@@ -255,59 +257,15 @@ test('selection rings, drag box, bars, carried marker, rally flag and order mark
   await frame(page);
   expect((await stats(page)).markersAdded).toBe(addedBefore + 1);
   await shot(page, 'wp10-07-move-marker');
-  // The marker is brief: it disappears by itself.
-  await expect.poll(async () => {
-    await frame(page);
-    return (await stats(page)).markers;
-  }, { timeout: 5000 }).toBe(0);
+  // The marker is brief: it disappears by itself once its lifetime has passed (the test moves the frozen client clock).
+  await advanceClock(page, 5000);
+  await frame(page);
+  expect((await stats(page)).markers).toBe(0);
 
-  // Carried marker: send the villagers to the nearest tree and let them work for a while.
-  // Random maps may have no tree in view: first centre the camera between the Town Center and its nearest tree.
-  const nearest = await page.evaluate(
-    ([cx, cy]) => {
-      let best: { x: number; y: number } | null = null;
-      let bestD = Infinity;
-      for (const e of window.__game!.state!.entities) {
-        if (e.kind !== 'node' || e.typeId !== 'tree') continue;
-        const d = Math.hypot(e.tile.tx + 0.5 - cx!, e.tile.ty + 0.5 - cy!);
-        if (d < bestD) {
-          bestD = d;
-          best = { x: e.tile.tx + 0.5, y: e.tile.ty + 0.5 };
-        }
-      }
-      return best;
-    },
-    [tc.cx, tc.cy] as const,
-  );
-  expect(nearest).not.toBeNull();
-  await page.evaluate(([x, y]) => window.__game!.worldToScreen(x!, y!), [nearest!.x, nearest!.y] as const);
-  const mid = { x: (tc.cx + nearest!.x) / 2, y: (tc.cy + nearest!.y) / 2 };
-  const mm = await page.evaluate(([x, y]) => window.__game!.minimapToPage(x!, y!), [mid.x, mid.y] as const);
-  await page.mouse.click(mm.x, mm.y);
-  await page.waitForTimeout(300);
-  const tree = await page.evaluate(
-    ([cx, cy]) => {
-      const g = window.__game!;
-      let best: { x: number; y: number } | null = null;
-      let bestD = Infinity;
-      for (const e of g.state!.entities) {
-        if (e.kind !== 'node' || e.typeId !== 'tree') continue;
-        const x = e.tile.tx + 0.5;
-        const y = e.tile.ty + 0.5;
-        const s = g.worldToScreen(x, y);
-        if (s.x < 100 || s.x > 1180 || s.y < 120 || s.y > 480) continue;
-        const d = Math.hypot(x - cx!, y - cy!);
-        if (d < bestD) {
-          bestD = d;
-          best = { x, y };
-        }
-      }
-      return best;
-    },
-    [tc.cx, tc.cy] as const,
-  );
-  expect(tree).not.toBeNull();
-  const tp = await toScreen(page, tree!.x, tree!.y);
+  // Carried marker: send the villagers to the nearest tree a click verifiably picks (the camera is centred on it) and let them work.
+  await frame(page, 3);
+  const tree = await pickableTree(page, tc.cx, tc.cy, 3);
+  const tp = await toScreen(page, tree.x, tree.y);
   await page.mouse.click(tp.x, tp.y, { button: 'right' });
   await step(page, 500);
   await frame(page);

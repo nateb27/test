@@ -1,8 +1,8 @@
 node_modules/
 dist/
-dist-e2e/
+dist-e2e*/
 coverage/
-test-results/
+test-results*/
 playwright-report/
 blob-report/
 *.log
