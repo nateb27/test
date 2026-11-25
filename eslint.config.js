@@ -30,7 +30,7 @@ const CLIENT_IMPORT_PATTERNS = [
 
 export default tseslint.config(
   {
-    ignores: ['dist/**', 'dist-e2e/**', 'node_modules/**', 'coverage/**', 'test-results/**', 'playwright-report/**'],
+    ignores: ['.claude/**', 'dist/**', 'dist-e2e/**', 'node_modules/**', 'coverage/**', 'test-results/**', 'playwright-report/**'],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
