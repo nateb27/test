@@ -19,6 +19,7 @@ function CostRow({ button }: { button: CardButtonVM }) {
     <span class={`cost-row ${costs.length >= 3 ? 'dense' : ''}`}>
       {costs.map((c) => (
         <span key={c.resource} class={`cost cost-${c.resource} ${(button.shortfall?.[c.resource] ?? 0) > 0 ? 'short' : ''}`}>
+          <Icon id={resourceIconId(c.resource)} size={11} />
           {compact(c.amount)}
         </span>
       ))}

@@ -25,11 +25,12 @@ import type {
   SimQuery,
 } from '../../sim/types';
 import type { GameSpeed } from '../app/loop';
+import type { UiAction } from '../input/gameInput';
 import type { HotkeyAction } from '../input/hotkeys';
 import { buildHudViewModel, type HudClientState } from './buildViewModel';
 import type { HudQueries } from './commandCard';
 import { NotificationCenter } from './notifications';
-import { describeUnavailable } from './text';
+import { CANCEL_PAUSED_TEXT, DEMOLISH_PROMPT_TEXT, describeUnavailable } from './text';
 import { HUD_REFRESH_HZ, type CardButtonVM, type CardPage, type HudViewModel } from './viewModel';
 
 /** The slice of `GameInput` the HUD uses. */
@@ -41,7 +42,7 @@ export interface HudInput {
   };
   onCardSlot(listener: (slot: number) => void): () => void;
   triggerCardSlot(slot: number): void;
-  onUiAction(listener: (action: 'menu' | 'toggleDebug') => void): () => void;
+  onUiAction(listener: (action: UiAction) => void): () => void;
   perform(action: HotkeyAction): void;
 }
 
@@ -83,6 +84,8 @@ export class HudController {
   private menuOpen = false;
   private pausedByMenu = false;
   private placing: BuildingId | null = null;
+  /** Queue cancels issued at `tick` and not yet applied (a command applies on the next tick). */
+  private pendingCancels: { buildingId: EntityId; index: number; tick: number }[] = [];
   private timer: ReturnType<typeof setInterval> | null = null;
   private current: HudViewModel;
 
@@ -119,6 +122,8 @@ export class HudController {
       input.onCardSlot((slot) => this.activateSlot(slot)),
       input.onUiAction((action) => {
         if (action === 'menu') this.setMenuOpen(!this.menuOpen);
+        else if (action === 'togglePause') this.togglePause();
+        else if (action === 'confirmDemolish') this.toast('info', DEMOLISH_PROMPT_TEXT);
       }),
       this.match.onEvents((events) => {
         this.notifications.ingest(events, this.match.sim.state);
@@ -155,6 +160,7 @@ export class HudController {
       placing: this.placing,
       toasts: this.notifications.toasts,
       banner: this.notifications.banner,
+      pendingCancels: this.livePendingCancels(),
     };
     return buildHudViewModel({
       state: this.match.sim.state,
@@ -215,9 +221,23 @@ export class HudController {
     this.match.input.selection.set([id]);
   }
 
-  /** Click a queue item to cancel it (refunded by the sim). */
+  /** Pending cancels the sim has not applied yet; those from earlier ticks are dropped. */
+  private livePendingCancels(): { buildingId: EntityId; index: number }[] {
+    const tick = this.match.sim.state.tick;
+    this.pendingCancels = this.pendingCancels.filter((p) => p.tick === tick);
+    return this.pendingCancels;
+  }
+
+  /**
+   * Click a queue item to cancel it (refunded by the sim). Like every command it applies on the next tick,
+   * so the item is shown as pending until then; while paused that is until the game resumes, and a toast says so.
+   */
   cancelQueueItem(buildingId: EntityId, index: number): void {
+    if (this.livePendingCancels().some((p) => p.buildingId === buildingId && p.index === index)) return;
+    this.pendingCancels.push({ buildingId, index, tick: this.match.sim.state.tick });
     this.match.commands.issue({ type: 'cancelQueue', buildingId, index });
+    if (this.match.loop.paused) this.notifications.push('info', CANCEL_PAUSED_TEXT);
+    this.refresh();
   }
 
   /** Show a message to the player. */
@@ -303,11 +323,10 @@ export class HudController {
           if (e.kind === 'building' && !e.constructed) issue({ type: 'cancelConstruction', buildingId: e.id });
         }
         return;
-      case 'delete': {
-        const entityIds = this.selectedOwn().map((e) => e.id);
-        if (entityIds.length > 0) issue({ type: 'delete', entityIds });
+      case 'delete':
+        // Same path (and confirmation) as the Delete key.
+        this.match.input.perform({ type: 'deleteSelection' });
         return;
-      }
     }
   }
 }

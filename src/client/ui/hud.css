@@ -13,6 +13,7 @@
   --hud-red: #ff6a55;
   --hud-green: #8be28b;
   --bottom-h: 188px;
+  --topbar-h: 40px;
   color: var(--hud-text);
   font-size: 14px;
   line-height: 1.25;
@@ -70,11 +71,12 @@
   top: 0;
   left: 0;
   right: 0;
-  height: 40px;
+  min-height: var(--topbar-h);
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 4px 16px;
   padding: 0 12px;
   border-width: 0 0 2px 0;
 }
@@ -83,6 +85,8 @@
   display: flex;
   align-items: center;
   gap: 14px;
+  flex: none;
+  white-space: nowrap;
 }
 
 .res {
@@ -127,6 +131,7 @@
 }
 
 .age {
+  gap: 8px;
   font-weight: 600;
   color: var(--hud-gold);
   letter-spacing: 0.03em;
@@ -185,6 +190,42 @@
   font-weight: 700;
 }
 
+/*
+ * Narrower windows: tighten the bar first, then (below 1024 px) let it wrap onto a second row so no
+ * control is ever clipped. The toast and banner positions follow --topbar-h.
+ */
+@media (max-width: 1180px) {
+  .topbar {
+    gap: 4px 10px;
+    padding: 0 8px;
+  }
+  .topbar-group,
+  .topbar .controls {
+    gap: 8px;
+  }
+  .res {
+    min-width: 0;
+    gap: 4px;
+  }
+  .topbar .num {
+    font-size: 14px;
+  }
+}
+
+@media (max-width: 1023px) {
+  .ui-root {
+    --topbar-h: 76px;
+  }
+  .topbar {
+    padding: 4px 8px;
+    justify-content: center;
+  }
+  .topbar .resources {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+}
+
 /* --------------------------------------------------------- bottom bar */
 
 .bottom {
@@ -195,12 +236,14 @@
   height: var(--bottom-h);
   display: flex;
   align-items: stretch;
-  gap: 4px;
+  gap: 0;
   pointer-events: none;
 }
 
+/* The panels touch (no gap), so no strip of world shows between them and clicks never fall through. */
 .minimap-frame {
-  width: calc(var(--bottom-h) - 2px);
+  /* The map is a 2:1 diamond: a 2:1 slot lets it fill the panel. */
+  width: clamp(240px, 30vw, calc((var(--bottom-h) - 14px) * 2 + 4px));
   flex: none;
   padding: 4px;
   border-left: 0;
@@ -231,9 +274,13 @@
 .selection {
   flex: 1;
   min-width: 0;
-  padding: 8px 12px;
+  padding: 6px 12px;
+  border-left: 0;
   border-bottom: 0;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--hud-gold-dim) transparent;
 }
 
 .empty-hint {
@@ -260,7 +307,20 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  flex-wrap: nowrap;
+  gap: 3px;
+}
+
+/* Facts (income, drop-off, population, gatherers) sit side by side and wrap only when they must. */
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+}
+
+.fact {
+  gap: 4px;
+  font-size: 12px;
 }
 
 .single-name {
@@ -331,13 +391,13 @@
 }
 
 .queue {
-  margin-top: 8px;
+  margin-top: 4px;
 }
 
 .queue-title {
   font-size: 12px;
   color: var(--hud-muted);
-  margin-bottom: 4px;
+  margin-bottom: 3px;
   min-height: 15px;
 }
 
@@ -360,6 +420,27 @@
 .queue-item:hover {
   border-color: var(--hud-red);
   background: rgba(160, 30, 20, 0.35);
+}
+
+.queue-item.pending {
+  opacity: 0.55;
+  border-style: dashed;
+  border-color: var(--hud-red);
+}
+
+.queue-item.pending::after {
+  content: 'Cancelling';
+  position: absolute;
+  inset: auto 0 12px;
+  text-align: center;
+  font-size: 9px;
+  font-weight: 700;
+  color: #ffd9d2;
+  text-shadow: 0 0 3px #000, 0 0 3px #000;
+}
+
+.queue-item {
+  position: relative;
 }
 
 .queue-item.blocked {
@@ -405,6 +486,7 @@
   position: relative;
   flex: none;
   padding: 6px 8px 8px;
+  border-left: 0;
   border-right: 0;
   border-bottom: 0;
 }
@@ -477,60 +559,42 @@
   right: 0;
   bottom: 0;
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
-  gap: 3px;
+  align-items: center;
+  gap: 0 4px;
   padding: 1px 1px;
-  background: rgba(10, 4, 18, 0.78);
+  background: rgba(10, 4, 18, 0.82);
   border-radius: 0 0 4px 4px;
   font-size: 10px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
+  line-height: 12px;
   white-space: nowrap;
   overflow: hidden;
 }
 
-/* Three or more costs: drop the dots so they fit. */
-.cost-row.dense .cost::before {
-  display: none;
-}
-
+/* Three or more costs: keep the icons, wrap onto a second line and shrink the type. */
 .cost-row.dense {
   font-size: 9px;
-  gap: 4px;
+  gap: 0 3px;
 }
 
 .cost {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: 1px;
   color: #f4ecd6;
 }
 
-.cost::before {
-  content: '';
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: currentColor;
-  opacity: 0.9;
+.cost .icon {
+  width: 11px;
+  height: 11px;
 }
 
-.cost-food::before {
-  background: #e5484d;
-}
-.cost-wood::before {
-  background: #b9854a;
-}
-.cost-gold::before {
-  background: #ffd23f;
-}
-.cost-stone::before {
-  background: #aab2c5;
-}
-
+/* Unaffordable amounts are shown by text colour only. */
 .cost.short {
   color: var(--hud-red);
-  text-decoration: underline;
 }
 
 /* ------------------------------------------------------------- tooltip */
@@ -608,7 +672,7 @@
 
 .toasts {
   position: absolute;
-  top: 50px;
+  top: calc(var(--topbar-h) + 10px);
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -651,7 +715,7 @@
 
 .banner {
   position: absolute;
-  top: 214px;
+  top: calc(var(--topbar-h) + 174px);
   left: 50%;
   transform: translateX(-50%);
   min-width: 340px;

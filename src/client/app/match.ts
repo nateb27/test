@@ -9,6 +9,7 @@ import { registry } from '../../data';
 import type { AssetManifest } from '../art/manifest';
 import { GameInput } from '../input';
 import { createModeController, type ActiveMode, type ModeController } from '../input/placement';
+import type { FrameProfiler } from '../debug/profiler';
 import { WorldOverlays } from '../render/overlays';
 import type { WorldRendererApi } from '../render/renderer';
 import type { Minimap } from '../ui/minimap';
@@ -30,6 +31,9 @@ export class Match {
   readonly modes: ModeController;
   /** Selection rings, bars, rally flags, order markers, placement ghost (WP10). */
   readonly overlays: WorldOverlays;
+  /** Debug overlay hooks (F3, dev and e2e builds): both stay null, and cost nothing, while the overlay is closed. */
+  profiler: FrameProfiler | null = null;
+  debugFrame: (() => void) | null = null;
   /** The mounted minimap, set by the game screen once the HUD slot exists (null before). */
   minimap: Minimap | null = null;
   /** Receives the text of a refused placement or rally click; the game screen points it at the HUD toasts. */
@@ -87,6 +91,7 @@ export class Match {
     this.input.update();
     this.renderer.render(this.sim.state, alpha);
     this.overlays.update();
+    this.debugFrame?.();
   }
 
   /** Subscribe to the events of every tick. Returns an unsubscribe function. */
@@ -97,7 +102,10 @@ export class Match {
 
   /** Run one tick with the buffered commands. */
   tick(): void {
+    const profiler = this.profiler;
+    const t0 = profiler === null ? 0 : performance.now();
     const events = this.sim.step(this.commands.drain());
+    if (profiler !== null) profiler.recordTick(performance.now() - t0);
     if (events.length > 0) for (const l of this.listeners) l(events);
   }
 
@@ -116,6 +124,7 @@ export class Match {
     const frame = (nowMs: number): void => {
       const dt = this.lastFrameMs === null ? 0 : nowMs - this.lastFrameMs;
       this.lastFrameMs = nowMs;
+      this.profiler?.recordFrame(dt);
       const { ticks, alpha } = this.loop.advance(dt);
       for (let i = 0; i < ticks; i++) this.tick();
       this.alpha = alpha;

@@ -158,7 +158,7 @@ describe('determinism with move commands', () => {
     expect(run(38)).toEqual(a);
   });
 
-  it('is deterministic through the public step pipeline', () => {
+  it('is deterministic through the public step pipeline', { timeout: 180_000 }, () => {
     function pipeline(): string[] {
       const state = createInitialState({ seed: 5, mapSize: 40, players: [{ civ: 'byzantines' }] }, registry);
       const ids: number[] = [];

@@ -290,3 +290,42 @@ describe('hotkey slot mapping', () => {
     expect(vm.buttons.find((b) => b.defId === 'townshipAge')!.slot).toBe(0);
   });
 });
+
+describe('stable slots for the whole match (WP13)', () => {
+  /** slot per def id of a building's card, for a given player state. */
+  const slots = (fx: Fx, id: number): Record<string, number> => {
+    const vm = card(fx, [id]);
+    return Object.fromEntries(vm!.buttons.filter((b) => b.defId !== null).map((b) => [b.defId as string, b.slot]));
+  };
+
+  it('an item keeps its slot as ages advance and techs are researched', () => {
+    const base = createFixture({ age: 1 });
+    const first = slots(base, base.townCenter);
+    expect(first.villager).toBe(0);
+    for (const age of [2, 3, 4] as AgeNumber[]) {
+      const later = createFixture({ age });
+      const s = slots(later, later.townCenter);
+      for (const [def, slot] of Object.entries(s)) expect(slot, `${def} at age ${age}`).toBe(first[def]);
+    }
+    const done = createFixture({ age: 2, researched: ['townshipAge', 'irrigation'] });
+    const s = slots(done, done.townCenter);
+    expect(s.townshipAge).toBeUndefined();
+    for (const [def, slot] of Object.entries(s)) expect(slot, def).toBe(first[def]);
+    // the freed slot stays empty
+    expect(Object.values(s)).not.toContain(first.townshipAge);
+  });
+
+  it('Hand Carts stays on one hotkey whatever has been researched', () => {
+    const none = createFixture({ age: 1 });
+    const some = createFixture({ age: 3, researched: ['townshipAge', 'citadelAge'] });
+    expect(slots(some, some.townCenter).handCarts).toBe(slots(none, none.townCenter).handCarts);
+  });
+
+  it('a greyed (not yet available) item holds its slot', () => {
+    const fx = createFixture({ age: 1 });
+    const vm = card(fx, [fx.townCenter])!;
+    const citadel = vm.buttons.find((b) => b.defId === 'citadelAge')!;
+    expect(citadel.enabled).toBe(false);
+    expect(citadel.slot).toBe(2);
+  });
+});

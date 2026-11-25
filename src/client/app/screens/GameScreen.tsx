@@ -6,6 +6,8 @@ import { entityCentre, findTownCenter } from '../../input/selection';
 import { createWorldRenderer } from '../../render/renderer';
 import { Hud } from '../../ui/components/Hud';
 import { HudController } from '../../ui/hudController';
+import type { DebugController } from '../../debug/controller';
+import type { DebugPanel } from '../../debug/DebugPanel';
 import type { AppHost } from '../host';
 import { LOCAL_PLAYER_ID, Match } from '../match';
 import { configFromSim, type Navigate } from './types';
@@ -47,6 +49,9 @@ export function GameScreen({
 }) {
   const parentRef = useRef<HTMLDivElement>(null);
   const [hud, setHud] = useState<HudController | null>(null);
+  // F3 debug overlay: dev and e2e builds only. The module is imported on demand, so production builds never load it.
+  const [debug, setDebug] = useState<{ controller: DebugController; Panel: typeof DebugPanel } | null>(null);
+  const [debugOpen, setDebugOpen] = useState(false);
 
   useEffect(() => {
     const parent = parentRef.current;
@@ -54,6 +59,8 @@ export function GameScreen({
     let match: Match | null = null;
     let controller: HudController | null = null;
     let cleanupHook: (() => void) | void;
+    let debugController: DebugController | null = null;
+    let offUi: (() => void) | null = null;
     let disposed = false;
     void (async () => {
       const manifest = await host.loadManifest();
@@ -88,6 +95,17 @@ export function GameScreen({
       if (DEBUG_HOOKS_ENABLED && new URLSearchParams(window.location.search).has('paused')) match.loop.paused = true;
       match.start();
       setHud(controller);
+      // Written out (not via DEBUG_HOOKS_ENABLED) so the bundler drops the debug chunk from production builds.
+      if (import.meta.env.DEV || import.meta.env.MODE === 'e2e') {
+        const [{ DebugController }, { DebugPanel }] = await Promise.all([import('../../debug/controller'), import('../../debug/DebugPanel')]);
+        if (disposed) return;
+        const dc = new DebugController(m, parent, registry, LOCAL_PLAYER_ID);
+        debugController = dc;
+        offUi = m.input.onUiAction((action) => {
+          if (action === 'toggleDebug') setDebugOpen((open) => !open);
+        });
+        setDebug({ controller: dc, Panel: DebugPanel });
+      }
       // The HUD (and `#minimap-slot`) is rendered on the next frame.
       requestAnimationFrame(() => {
         if (!disposed && controller !== null) cleanupHook = hooks?.onMatchReady?.(ctx());
@@ -96,6 +114,10 @@ export function GameScreen({
     return () => {
       disposed = true;
       setHud(null);
+      setDebug(null);
+      setDebugOpen(false);
+      offUi?.();
+      debugController?.destroy();
       host.setMatch(null);
       if (typeof cleanupHook === 'function') cleanupHook();
       controller?.stop();
@@ -110,6 +132,7 @@ export function GameScreen({
   return (
     <div class="screen game" data-testid="game-screen" onContextMenu={(e) => e.preventDefault()}>
       <div class="canvas-host" ref={parentRef} />
+      {debug !== null && debugOpen && <debug.Panel controller={debug.controller} />}
       {hud !== null && (
         <Hud
           controller={hud}

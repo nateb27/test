@@ -170,6 +170,8 @@ export function baseStat(data: DataRegistry = defaultRegistry): HudQueries['reso
     if (stat === 'trainTime' && def.kind === 'unit') return def.trainTime;
     if (stat === 'buildTime' && def.kind === 'building') return def.buildTime;
     if (stat === 'researchTime' && def.kind === 'tech') return def.researchTime;
+    if (stat === 'popProvided' && def.kind === 'building') return def.popProvided;
+    if (stat === 'incomeRate' && def.kind === 'building' && def.income !== undefined) return def.income.perSecond;
     throw new Error(`no ${stat} for ${defId}`);
   };
 }

@@ -188,3 +188,71 @@ describe('menu and top bar actions', () => {
     expect(seen.at(-1)).toBe(5);
   });
 });
+
+describe('WP13 UX rules', () => {
+  it('the demolish prompt arrives as an info toast', () => {
+    match.uiAction('confirmDemolish');
+    expect(hud.vm.toasts.map((t) => [t.kind, t.text])).toEqual([['info', 'Press Delete again to demolish']]);
+  });
+
+  it('a refused delete says the last Town Center cannot be demolished', () => {
+    match.emit([{ type: 'CommandRejected', playerId: 1, seq: 1, commandType: 'delete', reason: 'cannotPerform' }]);
+    expect(hud.vm.toasts.map((t) => t.text)).toEqual(['Your last Town Center cannot be demolished']);
+    // other commands keep the generic text
+    match.emit([{ type: 'CommandRejected', playerId: 1, seq: 2, commandType: 'train', reason: 'cannotPerform' }]);
+    expect(hud.vm.toasts.map((t) => t.text)).toContain('That cannot do this');
+  });
+
+  it('the Pause hotkey action goes through the HUD and is ignored while the menu holds the game paused', () => {
+    match.uiAction('togglePause');
+    expect(match.loop.paused).toBe(true);
+    match.uiAction('togglePause');
+    expect(match.loop.paused).toBe(false);
+    hud.setMenuOpen(true);
+    match.uiAction('togglePause');
+    expect(match.loop.paused).toBe(true); // still paused by the menu, not toggled off
+    hud.setMenuOpen(false);
+    expect(match.loop.paused).toBe(false);
+  });
+
+  it('the Delete card button uses the same confirmed path as the key', () => {
+    hud.activateSlot(0);
+    (hud as unknown as { perform(b: unknown): void }).perform({ action: { type: 'delete' } });
+    expect(match.performed).toContainEqual({ type: 'deleteSelection' });
+    expect(match.issued.some((c) => c.type === 'delete')).toBe(false);
+  });
+
+  it('a queue cancel is shown as pending until a tick applies it, with a toast while paused', () => {
+    const tc = match.fx.townCenter;
+    match.selection.set([tc]);
+    const building = match.fx.state.entities.find((e) => e.id === tc)!;
+    if (building.kind !== 'building') throw new Error('not a building');
+    building.queue.push({ kind: 'unit', unitType: 'villager', costPaid: { food: 50, wood: 0, gold: 0, stone: 0 }, ticksDone: 3, ticksTotal: 400, popCapNotified: false });
+    match.loop.paused = true;
+    hud.refresh();
+    const items = (): { cancelPending: boolean }[] => (hud.vm.selection.kind === 'single' ? hud.vm.selection.queue : []);
+    expect(items().map((q) => q.cancelPending)).toEqual([false]);
+    hud.cancelQueueItem(tc, 0);
+    hud.cancelQueueItem(tc, 0); // a second click does not issue a second command
+    expect(match.issued.filter((c) => c.type === 'cancelQueue')).toHaveLength(1);
+    expect(items().map((q) => q.cancelPending)).toEqual([true]);
+    expect(hud.vm.toasts.map((t) => t.text)).toEqual(['Cancel will apply when the game resumes']);
+    // Still pending while paused (no tick); applied once the sim has ticked.
+    vi.advanceTimersByTime(300);
+    expect(items().map((q) => q.cancelPending)).toEqual([true]);
+    match.fx.state.tick += 1;
+    building.queue.length = 0;
+    vi.advanceTimersByTime(100);
+    expect(items()).toEqual([]);
+  });
+
+  it('a cancel while running is pending but needs no toast', () => {
+    const tc = match.fx.townCenter;
+    match.selection.set([tc]);
+    const building = match.fx.state.entities.find((e) => e.id === tc)!;
+    if (building.kind !== 'building') throw new Error('not a building');
+    building.queue.push({ kind: 'unit', unitType: 'villager', costPaid: { food: 50, wood: 0, gold: 0, stone: 0 }, ticksDone: 3, ticksTotal: 400, popCapNotified: false });
+    hud.cancelQueueItem(tc, 0);
+    expect(hud.vm.toasts).toEqual([]);
+  });
+});

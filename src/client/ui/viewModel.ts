@@ -54,6 +54,20 @@ export interface QueueItemVM {
   progress: number;
   /** Held at 100% because of the population cap. */
   popBlocked: boolean;
+  /** A cancel was issued and has not been applied yet (it applies on the next tick, so not while paused). */
+  cancelPending: boolean;
+}
+
+/** One extra line in the selection panel (WP13): passive income, drop-off, population, gatherers. */
+export interface SelectionFactVM {
+  /** Stable key, e.g. `income`, `dropOff`, `pop`, `gatherers`. */
+  id: string;
+  /** Short text beside the icons, e.g. `+0.25 gold/s`, `Drop-off`, `+10 population`, `Gatherers 2/5`. */
+  text: string;
+  /** Full sentence for the hover title and screen readers, e.g. `Drop-off for food, wood, gold and stone`. */
+  title: string;
+  /** Resource icons shown before the text (resource ids). */
+  resources: ResourceType[];
 }
 
 /** One selected entity in detail. */
@@ -77,6 +91,8 @@ export interface SingleSelectionVM {
   constructionProgress: number | null;
   /** Buildings: production queue, front first. */
   queue: QueueItemVM[];
+  /** Extra facts about the entity (WP13), in display order. Empty when there are none. */
+  facts: SelectionFactVM[];
 }
 
 export interface MultiSelectionEntryVM {

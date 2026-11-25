@@ -205,13 +205,24 @@ function buildingItems(input: CardInput, e: Extract<ReadonlyEntity, { kind: 'bui
     ];
   }
   const items: Item[] = [];
-  for (const id of def.trains) {
-    const item = defItem(input, id, { type: 'train', unitType: id }, null);
-    if (item !== null) items.push(item);
-  }
-  for (const id of def.researches) {
-    const item = defItem(input, id, { type: 'research', techId: id }, null);
-    if (item !== null) items.push(item);
+  // Stable slots (plan 7.3): an item's slot is its position in the building's data order for this civ
+  // (units, then techs) for the whole match. Never-for-this-civ items take no slot; an item that is not
+  // available yet stays greyed in its slot; a researched tech leaves its slot empty.
+  let pos = 0;
+  const ids: { id: ProducibleId; action: CardAction }[] = [
+    ...def.trains.map((id) => ({ id, action: { type: 'train', unitType: id } as CardAction })),
+    ...def.researches.map((id) => ({ id, action: { type: 'research', techId: id } as CardAction })),
+  ];
+  for (const { id, action } of ids) {
+    const d = input.registry.producible(id);
+    if (d === undefined || input.query.availability(input.playerId, id).hidden || neverForCiv(d, input.civ)) continue;
+    const item = defItem(input, id, action, null);
+    if (d.cardSlot !== undefined) {
+      if (item !== null) items.push({ ...item, fixedSlot: d.cardSlot });
+      continue;
+    }
+    if (item !== null && pos < SLOT_CORNER) items.push({ ...item, fixedSlot: pos });
+    pos++;
   }
   if (def.trains.length > 0) {
     items.push(

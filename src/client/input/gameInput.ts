@@ -65,12 +65,14 @@ export interface InputMode {
 }
 
 /** Actions the input layer cannot perform itself and passes to the app/HUD. */
-export type UiAction = 'menu' | 'toggleDebug';
+export type UiAction = 'menu' | 'toggleDebug' | 'confirmDemolish' | 'togglePause';
 
 /** Pixels the pointer must travel before a press becomes a drag box. */
 export const DRAG_THRESHOLD_PX = 4;
 /** Max gap between two clicks (or two group-key taps) to count as a double. */
 export const DOUBLE_CLICK_MS = 400;
+/** Window in which a second Delete confirms demolishing completed buildings. */
+export const DEMOLISH_CONFIRM_MS = 2000;
 
 export class GameInput {
   readonly selection = new SelectionStore();
@@ -92,6 +94,7 @@ export class GameInput {
   private lastClick: ClickRecord | null = null;
   private lastGroupTap: { group: number; time: number } | null = null;
   private lastIdle: EntityId | null = null;
+  private pendingDemolish: { key: string; time: number } | null = null;
 
   constructor(deps: GameInputDeps) {
     this.sim = deps.sim;
@@ -192,7 +195,20 @@ export class GameInput {
       }
       case 'deleteSelection': {
         const own = this.selectedEntities().filter((e) => e.owner === this.playerId);
-        if (own.length > 0) this.commands.issue({ type: 'delete', entityIds: own.map((e) => e.id) });
+        if (own.length === 0) return;
+        // Demolishing a completed building needs a second Delete within DEMOLISH_CONFIRM_MS; units go at once.
+        if (own.some((e) => e.kind === 'building' && e.constructed)) {
+          const key = own.map((e) => e.id).join(',');
+          const now = performance.now();
+          const p = this.pendingDemolish;
+          if (p === null || p.key !== key || now - p.time > DEMOLISH_CONFIRM_MS) {
+            this.pendingDemolish = { key, time: now };
+            this.emitUi('confirmDemolish');
+            return;
+          }
+        }
+        this.pendingDemolish = null;
+        this.commands.issue({ type: 'delete', entityIds: own.map((e) => e.id) });
         return;
       }
       case 'cancel':
@@ -200,7 +216,9 @@ export class GameInput {
         else if (this.mode?.onCancel?.() !== true) this.emitUi('menu');
         return;
       case 'togglePause':
-        this.loop.paused = !this.loop.paused;
+        // The HUD owns pause (it ignores the key while the in-match menu holds the game paused).
+        if (this.uiListeners.size > 0) this.emitUi('togglePause');
+        else this.loop.paused = !this.loop.paused;
         return;
       case 'toggleDebug':
         this.emitUi('toggleDebug');

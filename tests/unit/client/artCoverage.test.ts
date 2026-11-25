@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyIcon, classifySprite } from '../../../src/client/art/catalog';
+import { classifyIcon, classifySprite, iconFacing } from '../../../src/client/art/catalog';
 import { registry } from '../../../src/data';
 
 /**
@@ -45,5 +45,17 @@ describe('art covers the real data registry', () => {
 
   it('resource icons used by the HUD exist', () => {
     for (const r of ['food', 'wood', 'gold', 'stone']) expect(classifyIcon(`icon.resource.${r}`)).toBe('known');
+  });
+});
+
+describe('HUD icons of mounted units show the horse', () => {
+  it('draws horseman, lancer and cataphract side-on and foot units head-on', () => {
+    for (const id of ['horseman', 'lancer', 'cataphract']) expect(iconFacing(id)).toBe(0);
+    for (const id of ['villager', 'spearman', 'swordsman', 'archer']) expect(iconFacing(id)).toBe(1);
+  });
+
+  it('every horse-riding unit in the data is covered', () => {
+    // Units of the Stable are the mounted ones.
+    for (const id of registry.building('stable').trains) expect(iconFacing(id)).toBe(0);
   });
 });

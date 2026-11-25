@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { buildHudViewModel, type BuildViewModelInput, type HudClientState } from '../../../src/client/ui/buildViewModel';
 import { createFixture, enqueue, fakeQueries, type Fixture } from '../../../src/client/ui/fixtures';
 import { registry } from '../../../src/data';
+import { createBuilding } from '../../../src/sim/entities';
 import type { BuildingEntity } from '../../../src/sim/types';
 
 const CLIENT: HudClientState = { speed: 1, paused: false, page: 'main', menuOpen: false, placing: null, toasts: [], banner: null };
@@ -143,5 +144,57 @@ describe('client state passthrough', () => {
   it('is a pure function of its input (same input, equal output)', () => {
     const fx = createFixture();
     expect(build(fx, [fx.townCenter])).toEqual(build(fx, [fx.townCenter]));
+  });
+});
+
+describe('selection facts (WP13)', () => {
+  const facts = (fx: Fixture, id: number): { id: string; text: string; resources: string[] }[] => {
+    const sel = build(fx, [id]).selection;
+    if (sel.kind !== 'single') throw new Error('expected a single selection');
+    return sel.facts.map((f) => ({ id: f.id, text: f.text, resources: f.resources }));
+  };
+
+  it('a house shows the population it provides', () => {
+    const fx = createFixture();
+    expect(facts(fx, fx.house)).toEqual([{ id: 'pop', text: '+10 population', resources: [] }]);
+  });
+
+  it('a Town Center shows what it accepts and its population', () => {
+    const fx = createFixture();
+    expect(facts(fx, fx.townCenter)).toEqual([
+      { id: 'dropOff', text: 'Drop-off', resources: ['food', 'wood', 'gold', 'stone'] },
+      { id: 'pop', text: '+10 population', resources: [] },
+    ]);
+  });
+
+  it('a mill accepts food only', () => {
+    const fx = createFixture();
+    expect(facts(fx, fx.mill)).toEqual([{ id: 'dropOff', text: 'Drop-off', resources: ['food'] }]);
+  });
+
+  it('a Silk Workshop shows its passive income', () => {
+    const fx = createFixture({ age: 3 });
+    const sw = createBuilding(fx.state, 'silkWorkshop', 1, 20, 20, true);
+    expect(facts(fx, sw.id)).toEqual([{ id: 'income', text: '+0.25 gold/s', resources: ['gold'] }]);
+  });
+
+  it('resource nodes and farms show their gatherer count', () => {
+    const fx = createFixture();
+    const tree = fx.state.entities.find((e) => e.id === fx.tree)!;
+    if (tree.kind !== 'node') throw new Error('not a node');
+    tree.gathererIds = [5, 6];
+    const max = registry.node('tree').maxGatherers;
+    expect(facts(fx, fx.tree)).toEqual([{ id: 'gatherers', text: `Gatherers 2/${max}`, resources: ['wood'] }]);
+    const farm = createBuilding(fx.state, 'farm', 1, 24, 24, true);
+    farm.gathererIds = [7];
+    expect(facts(fx, farm.id)).toEqual([
+      { id: 'gatherers', text: `Gatherers 1/${registry.building('farm').farm!.maxGatherers}`, resources: ['food'] },
+    ]);
+  });
+
+  it('units and unfinished buildings have no facts', () => {
+    const fx = createFixture();
+    expect(facts(fx, fx.villagers[0]!)).toEqual([]);
+    expect(facts(fx, fx.foundation)).toEqual([]);
   });
 });
