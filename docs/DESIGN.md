@@ -20,3 +20,10 @@ Phase 0 (scaffold and contracts) only. No game rules are implemented yet; the si
 ## Rules
 
 (Filled in by Phase 1+ work packages.)
+
+### WP4: content data
+
+- All plan section 5 content is in `src/data/`. Tech rates use `mul` modifiers selected by the `villager` tag (Iron Axes etc. stack multiplicatively; Hand Carts adds 5 carry capacity and multiplies speed by 1.1). Themata is `cost.wood x0.8` on `farm` (50 -> 40) plus `gatherRate.farm x1.1`.
+- Age-advance techs (`townshipAge`, `citadelAge`, `empireAge`) are researched at the Town Center. Their `age` is the age the player must currently be in (they set `advancesTo = age + 1`), and `requiresAgeBuildings: 2`. Buildings with `countsTowardAge` are Mill, Lumber Camp, Mining Camp, Farm, Barracks (age 1), Archery Range, Stable (age 2), Siege Workshop and Silk Workshop (age 3); the Town Center and House do not count.
+- The Silk Workshop is defined in `civs/byzantines.ts` and included in the shared `buildings` table (with `civs: ['byzantines']`); every villager lists it in `builds`, availability filters by civ. The Stable trains Horseman, Lancer and Cataphract; the Cataphract `replaces` the Lancer. The Siege Workshop trains Battering Ram, Trebuchet and Siphonarios.
+- Node ids: `tree`, `berryBush`, `goldDeposit`, `stoneDeposit`. Icons for nodes: `icon.node.<id>`.

@@ -1,4 +1,61 @@
 import type { NodeDef } from './schema';
 
-/** Resource node types (plan 5.2). Filled in by WP4. */
-export const nodes: NodeDef[] = [];
+/** Resource node types (plan 5.2). The Farm is a building (see buildings.ts). */
+export const nodes: NodeDef[] = [
+  {
+    kind: 'node',
+    id: 'tree',
+    name: 'Tree',
+    resource: 'wood',
+    gatherKind: 'wood',
+    amount: 100,
+    footprint: 1,
+    blocking: true,
+    maxGatherers: 1,
+    minimapColor: 0x2d5a1e,
+    sprite: 'node.tree',
+    icon: 'icon.node.tree',
+  },
+  {
+    kind: 'node',
+    id: 'berryBush',
+    name: 'Berry Bush',
+    resource: 'food',
+    gatherKind: 'berries',
+    amount: 150,
+    footprint: 1,
+    blocking: true,
+    maxGatherers: 1,
+    minimapColor: 0xb03a5b,
+    sprite: 'node.berryBush',
+    icon: 'icon.node.berryBush',
+  },
+  {
+    kind: 'node',
+    id: 'goldDeposit',
+    name: 'Gold Deposit',
+    resource: 'gold',
+    gatherKind: 'gold',
+    amount: 800,
+    footprint: 2,
+    blocking: true,
+    maxGatherers: 6,
+    minimapColor: 0xe0b020,
+    sprite: 'node.goldDeposit',
+    icon: 'icon.node.goldDeposit',
+  },
+  {
+    kind: 'node',
+    id: 'stoneDeposit',
+    name: 'Stone Deposit',
+    resource: 'stone',
+    gatherKind: 'stone',
+    amount: 600,
+    footprint: 2,
+    blocking: true,
+    maxGatherers: 6,
+    minimapColor: 0x8a8d93,
+    sprite: 'node.stoneDeposit',
+    icon: 'icon.node.stoneDeposit',
+  },
+];
