@@ -4,6 +4,8 @@ import { createUnit, findEntity } from '../entities';
 import { availability } from '../rules/availability';
 import { resolvedCost, resolvedStat } from '../rules/stats';
 import { reject, emit, type CommandHandler } from './common';
+import { isIdle } from './movement';
+import { findRetarget, gatherRate, gatherTargetOf, hasRoom } from './gatherTargets';
 import { assignOrder } from './orders';
 import { livingPopulation, recomputePopulation } from './population';
 import { completeResearch } from './research';
@@ -23,7 +25,7 @@ import {
 } from '../types';
 
 /** Rings of tiles around a building searched for a spawn tile (1 = directly adjacent). */
-const MAX_SPAWN_RING = 3;
+const MAX_SPAWN_RING = 6;
 
 /**
  * Validate that `buildingId` is an own, completed building. Rejects
@@ -141,12 +143,39 @@ function rallyPoint(ctx: SimContext, b: BuildingEntity): Vec2 | null {
   return { x: b.rally.x, y: b.rally.y };
 }
 
+/** Tile indices (`ty * width + tx`) currently holding an idle unit. */
+function idleUnitTiles(ctx: SimContext): Set<number> {
+  const { width, height } = ctx.state.map;
+  const tiles = new Set<number>();
+  for (const e of ctx.state.entities) {
+    if (e.kind !== 'unit' || !isIdle(e)) continue;
+    const tx = Math.min(width - 1, Math.max(0, Math.floor(e.pos.x)));
+    const ty = Math.min(height - 1, Math.max(0, Math.floor(e.pos.y)));
+    tiles.add(ty * width + tx);
+  }
+  return tiles;
+}
+
 /**
- * Free tile adjacent to the building nearest `target` (squared distance from
- * the tile centre, ties by tile index). Searches the 8-connected ring around
- * the footprint, then up to MAX_SPAWN_RING rings out. `null` if none is free.
+ * Spawn tile for a unit finishing at `b`: a free tile on the 8-connected ring
+ * around the footprint nearest `target` (squared distance from the tile
+ * centre, ties by tile index) that does not currently hold an idle unit, so
+ * successive units without a rally point stand on distinct tiles. When a ring
+ * is full the search spreads outward (up to MAX_SPAWN_RING rings). Only if
+ * every tile in range holds an idle unit does it fall back to a free tile
+ * that does, so production never stalls. `null` if no tile is free at all.
  */
 export function findSpawnTile(ctx: SimContext, b: BuildingEntity, target: Vec2): { tx: number; ty: number } | null {
+  const idleTiles = idleUnitTiles(ctx);
+  return searchSpawnTile(ctx, b, target, idleTiles) ?? searchSpawnTile(ctx, b, target, null);
+}
+
+function searchSpawnTile(
+  ctx: SimContext,
+  b: BuildingEntity,
+  target: Vec2,
+  avoid: ReadonlySet<number> | null,
+): { tx: number; ty: number } | null {
   const { width, height } = ctx.state.map;
   const size = ctx.data.building(b.typeId).footprint;
   for (let ring = 1; ring <= MAX_SPAWN_RING; ring++) {
@@ -160,6 +189,7 @@ export function findSpawnTile(ctx: SimContext, b: BuildingEntity, target: Vec2):
         if (!onRing || tx < 0 || ty < 0 || tx >= width || ty >= height) continue;
         const index = ty * width + tx;
         if (ctx.runtime.occupancy[index] !== 0) continue;
+        if (avoid !== null && avoid.has(index)) continue;
         const dx = tx + 0.5 - target.x;
         const dy = ty + 0.5 - target.y;
         const d = dx * dx + dy * dy;
@@ -175,24 +205,29 @@ export function findSpawnTile(ctx: SimContext, b: BuildingEntity, target: Vec2):
   return null;
 }
 
-/** The order a freshly trained unit gets from its building's rally point, or null. */
-function rallyOrder(ctx: SimContext, b: BuildingEntity, unit: UnitEntity): Order | null {
+/** Radius around a rally target searched for a free node of the same resource (tiles). */
+export const RALLY_RETARGET_RADIUS = 16;
+
+/**
+ * The order a freshly trained unit gets from its building's rally point, or
+ * null. A rally onto a node or farm whose slots are all taken searches the
+ * nearest free node of the same resource within RALLY_RETARGET_RADIUS tiles of
+ * the rally target; when there is none the unit walks to the rally point and
+ * `idle` is set so the caller reports it idle once.
+ */
+function rallyOrder(ctx: SimContext, b: BuildingEntity, unit: UnitEntity): { order: Order | null; idle: boolean } {
   const point = rallyPoint(ctx, b);
-  if (point === null || b.rally === null) return null;
-  if (b.rally.targetId !== null) {
-    const t = findEntity(ctx.state, b.rally.targetId);
-    const rates = ctx.data.unit(unit.typeId).gather?.rates;
-    if (t !== undefined && rates !== undefined) {
-      if (t.kind === 'node' && rates[ctx.data.node(t.typeId).gatherKind] !== undefined) {
-        return { type: 'gather', targetId: t.id };
-      }
-      if (t.kind === 'building' && t.owner === b.owner) {
-        const farm = ctx.data.building(t.typeId).farm;
-        if (farm !== undefined && rates[farm.gatherKind] !== undefined) return { type: 'gather', targetId: t.id };
-      }
-    }
-  }
-  return { type: 'move', x: point.x, y: point.y };
+  if (point === null || b.rally === null) return { order: null, idle: false };
+  const move: Order = { type: 'move', x: point.x, y: point.y };
+  if (b.rally.targetId === null) return { order: move, idle: false };
+  const t = findEntity(ctx.state, b.rally.targetId);
+  if (t === undefined || t.kind === 'unit') return { order: move, idle: false };
+  const target = gatherTargetOf(ctx, t, unit.owner);
+  if (target === null || gatherRate(ctx, unit, target.kind) <= 0) return { order: move, idle: false };
+  if (hasRoom(target, unit.id)) return { order: { type: 'gather', targetId: t.id }, idle: false };
+  const next = findRetarget(ctx, unit, target.centre, target.resource, RALLY_RETARGET_RADIUS);
+  if (next !== null) return { order: { type: 'gather', targetId: next.entity.id }, idle: false };
+  return { order: move, idle: true };
 }
 
 /** Spawn the finished unit of the front item. Returns false if there is no free tile. */
@@ -203,8 +238,9 @@ function spawnUnit(ctx: SimContext, b: BuildingEntity, unitType: string): boolea
   if (tile === null) return false;
   const unit = createUnit(ctx.state, unitType, b.owner, tile.tx + 0.5, tile.ty + 0.5);
   emit(ctx, { type: 'UnitTrained', playerId: b.owner, unitId: unit.id, unitType, buildingId: b.id });
-  const order = rallyOrder(ctx, b, unit);
+  const { order, idle } = rallyOrder(ctx, b, unit);
   if (order !== null) assignOrder(ctx, unit, order, false);
+  if (idle) emit(ctx, { type: 'VillagerIdle', playerId: unit.owner, unitId: unit.id });
   return true;
 }
 

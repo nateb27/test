@@ -341,7 +341,7 @@ describe('economy loop (real data, commands only)', () => {
     d.run(300);
     expect(d.villagers()).toHaveLength(cap); // still held
     expect(count('PopulationCapped')).toBe(1); // announced once
-    expect(d.player.popUsed).toBe(cap + 1);
+    expect(d.player.popUsed).toBe(cap); // queued units do not count (plan 4.6)
     // A second House releases it.
     const builders = d.villagers().slice(0, 2).map((v) => v.id);
     d.buildAndWait('house', builders, tcCentre.x, tcCentre.y, 6);
@@ -574,7 +574,7 @@ describe('economy loop (real data, commands only)', () => {
     d.run(2);
     expect(d.building(range.id).queue).toHaveLength(2);
     expect(d.player.resources.wood).toBe(before.wood - 60);
-    expect(d.player.popUsed).toBe(used + 2);
+    expect(d.player.popUsed).toBe(used); // queued units do not count
     d.issue({ type: 'delete', entityIds: [range.id] });
     d.run(3);
     expect(d.entity(range.id)).toBeUndefined();
