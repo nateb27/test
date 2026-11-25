@@ -197,7 +197,7 @@ describe('villager card', () => {
     const labels = (): string[] =>
       buildCommandCard({ playerId: 1, civ: 'byzantines', registry, query: sim.query, selected: [tc], page: 'main' })!.buttons.map((b) => b.defId ?? b.label);
     expect(labels()).toContain('handCarts');
-    (sim.state.players[1] as { researched: string[] }).researched.push('handCarts');
+    (sim.state.players[1] as unknown as { researched: string[] }).researched.push('handCarts');
     expect(labels()).not.toContain('handCarts');
     expect(labels()).toContain('townshipAge'); // everything else is still there
   });

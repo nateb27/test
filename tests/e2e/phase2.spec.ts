@@ -16,6 +16,7 @@ import {
   recallVillagers,
   resources,
   selection,
+  selectVillager,
   shot,
   startMatch,
   step,
@@ -632,5 +633,65 @@ test('scenario 11: minimap click and drag move the camera; pan, zoom and bounds 
   await page.keyboard.up('ArrowRight');
   expect(Math.abs((await toScreen(page, 120, 0)).x - (1280 - 96 * 0.5))).toBeLessThan(2);
   await shot(page, 's11-5-clamped');
+  expect(errors).toEqual([]);
+});
+
+test('construction through the UI: assist by right click, builder works the new farm, cancel refunds', async ({ page }) => {
+  test.setTimeout(120_000);
+  const errors = collectErrors(page);
+  await startMatch(page, { paused: true });
+  const tc = await townCenter(page);
+  await cheat.resources(page, { wood: 400 });
+  await step(page, 1); // cheats are commands: they apply on the next tick
+  const vs = await villagers(page);
+  const [v1, v2, v3, v4] = [...vs].sort((a, b) => b.x + b.y - (a.x + a.y)).map((v) => v.id) as [number, number, number, number];
+  const orderOf = (id: number): Promise<{ type: string; targetId?: number; buildingId?: number } | null> =>
+    page.evaluate((u) => {
+      const e = window.__game!.state!.entities.find((x) => x.id === u);
+      return e !== undefined && e.kind === 'unit' ? (e.currentOrder as { type: string; targetId?: number; buildingId?: number } | null) : null;
+    }, id);
+
+  // One villager builds a farm for 40 wood (Themata); a second one helps with a right click on the foundation.
+  const woodBefore = (await resources(page)).wood;
+  await selectVillager(page, v1);
+  const farm = await placeViaCard(page, { menu: 'Economy', label: 'Farm', size: 2, near: tc, minRing: 4, complete: false });
+  await step(page, 2);
+  expect((await resources(page)).wood).toBe(woodBefore - 40);
+  await selectVillager(page, v2);
+  const fp = await toScreen(page, farm.x, farm.y);
+  await page.mouse.click(fp.x, fp.y, { button: 'right' });
+  await step(page, 2);
+  expect((await orderOf(v2))?.type).toBe('assist');
+  expect((await orderOf(v1))?.type).toBe('build');
+  await shot(page, 's12-1-two-builders');
+  await stepUntil(page, `g.state.entities.some((e) => e.id === ${farm.id} && e.constructed)`, 3000);
+  await step(page, 3);
+  // One builder (the lower unit id, which acts first) works the farm by itself; a farm takes one worker, the other idles.
+  const after = [await orderOf(v1), await orderOf(v2)];
+  expect(after.filter((o) => o?.type === 'gather' && o.targetId === farm.id)).toHaveLength(1);
+  expect(after.filter((o) => o === null)).toHaveLength(1);
+  await stepUntil(page, `g.state.players[1].resources.food > 200`, 3000);
+  await shot(page, 's12-2-farming');
+
+  // A third villager sent to the busy farm with a right click gets the order (and finds nothing free, so it idles).
+  await selectVillager(page, v3);
+  await page.mouse.click(fp.x, fp.y, { button: 'right' });
+  await step(page, 2);
+  expect(['gather', null]).toContain((await orderOf(v3))?.type ?? null);
+
+  // Cancel: place a House with a fourth villager, select the foundation, Cancel on its card: full refund.
+  await selectVillager(page, v4);
+  const wood = (await resources(page)).wood;
+  const house = await placeViaCard(page, { menu: 'Economy', label: 'House', size: 2, near: tc, minRing: 5, complete: false });
+  await step(page, 2);
+  expect((await resources(page)).wood).toBe(wood - 50);
+  await centreCamera(page, house.x, house.y);
+  await clickBuilding(page, house);
+  await expect(card(page, 'Cancel')).toBeVisible();
+  await shot(page, 's12-3-cancel-card');
+  await card(page, 'Cancel').click();
+  await step(page, 2);
+  expect((await resources(page)).wood).toBe(wood);
+  expect(await buildingsOf(page, 'house')).toHaveLength(0);
   expect(errors).toEqual([]);
 });

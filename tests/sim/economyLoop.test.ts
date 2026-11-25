@@ -10,7 +10,7 @@
  */
 
 import { beforeAll, describe, expect, it } from 'vitest';
-import { registry } from '../../src/data';
+import { createRegistry, registry } from '../../src/data';
 import { createGame, deserialize, hashState, serialize } from '../../src/sim';
 import {
   TICK_RATE,
@@ -651,5 +651,63 @@ describe('economy loop determinism', () => {
   it('the save round-trips byte for byte', () => {
     const json = serialize(d.sim);
     expect(serialize(deserialize(json))).toBe(json);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Construction time responds to the resolved stats (no real tech changes build times, so a civ bonus does)
+// ---------------------------------------------------------------------------
+
+describe('construction time follows the resolved stat cache', () => {
+  function ticksToBuildHouse(factor: number): number {
+    const civ = registry.civ('byzantines');
+    const data = createRegistry({
+      units: registry.units,
+      buildings: registry.buildings,
+      techs: registry.techs,
+      ages: registry.ages,
+      civs: [
+        {
+          ...civ,
+          bonuses: [...civ.bonuses, { name: 'Quick', description: '', modifiers: [{ select: { ids: ['house'] }, stat: 'buildTime', op: 'mul', value: factor }] }],
+        },
+      ],
+      nodes: registry.nodes,
+      terrains: registry.terrains,
+      start: registry.start,
+    });
+    const sim = createGame(CONFIG, data);
+    const entities = sim.state.entities;
+    const tc = entities.find((e) => e.kind === 'building' && e.owner === ME)!;
+    const builder = entities.find((e) => e.kind === 'unit' && e.owner === ME)!;
+    if (tc.kind !== 'building') throw new Error('no tc');
+    // A house right beside the Town Center so the walk is a constant few ticks.
+    let seq = 1;
+    let placed = -1;
+    for (const [dx, dy] of [[4, 0], [-3, 0], [0, 4], [0, -3], [5, 5], [-4, -4]] as const) {
+      const r = sim.query.canPlace(ME, 'house', tc.tile.tx + dx, tc.tile.ty + dy);
+      if (!r.ok) continue;
+      sim.step([{ type: 'build', playerId: ME, seq: seq++, unitIds: [builder.id], buildingType: 'house', tx: tc.tile.tx + dx, ty: tc.tile.ty + dy, queue: false }]);
+      placed = sim.state.entities.find((e) => e.kind === 'building' && e.typeId === 'house')!.id;
+      break;
+    }
+    if (placed < 0) throw new Error('no spot');
+    let working = -1;
+    for (let t = 0; t < 4000; t++) {
+      const b = sim.state.entities.find((e) => e.id === placed)!;
+      if (b.kind === 'building' && b.builderIds.length > 0 && working < 0) working = t;
+      if (b.kind === 'building' && b.constructed) return t - working;
+      sim.step([]);
+    }
+    throw new Error('never finished');
+  }
+
+  it('halving the resolved buildTime halves the ticks a single builder needs', () => {
+    const normal = ticksToBuildHouse(1);
+    const quick = ticksToBuildHouse(0.5);
+    expect(normal).toBeGreaterThanOrEqual(399);
+    expect(normal).toBeLessThanOrEqual(402);
+    expect(quick).toBeGreaterThanOrEqual(199);
+    expect(quick).toBeLessThanOrEqual(202);
   });
 });
