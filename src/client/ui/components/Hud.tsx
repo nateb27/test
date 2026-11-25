@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { DataRegistry } from '../../../data/schema';
 import type { Sim } from '../../../sim/types';
 import type { SaveStorage } from '../../platform';
@@ -40,12 +40,19 @@ export interface HudProps {
  */
 export function Hud({ controller, iconUrl, storage, sim, registry, onRestart, onQuit, onLoaded }: HudProps) {
   const vm = useViewModel(controller);
+  // The controller keeps the parts of the view-model that did not change as the same objects, so these
+  // elements are rebuilt (and Preact skips diffing them) only when their own part changed.
+  const topBar = useMemo(() => <TopBar vm={vm.topBar} actions={controller} />, [vm.topBar, controller]);
+  const toasts = useMemo(() => <Toasts toasts={vm.toasts} />, [vm.toasts]);
+  const banner = useMemo(() => <Banner banner={vm.banner} />, [vm.banner]);
+  const selection = useMemo(() => <SelectionPanel vm={vm.selection} actions={controller} />, [vm.selection, controller]);
+  const card = useMemo(() => <CommandCard vm={vm.commandCard} actions={controller} registry={registry} />, [vm.commandCard, controller, registry]);
   return (
     <IconContext.Provider value={iconUrl}>
       <div class="hud ui-root" data-testid="hud">
-        <TopBar vm={vm.topBar} actions={controller} />
-        <Toasts toasts={vm.toasts} />
-        <Banner banner={vm.banner} />
+        {topBar}
+        {toasts}
+        {banner}
         {vm.placing !== null && (
           <div class="placing-hint" data-testid="placing-hint">
             Click to place, Shift to keep placing, Esc to cancel
@@ -56,8 +63,8 @@ export function Hud({ controller, iconUrl, storage, sim, registry, onRestart, on
             {/* WP10 mounts the minimap into this empty container. */}
             <div id="minimap-slot" data-testid="minimap-slot" />
           </div>
-          <SelectionPanel vm={vm.selection} actions={controller} />
-          <CommandCard vm={vm.commandCard} actions={controller} registry={registry} />
+          {selection}
+          {card}
         </div>
         {vm.menuOpen && (
           <GameMenu

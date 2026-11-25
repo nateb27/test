@@ -6,7 +6,9 @@
  * and picking that WP5 (input), WP9/WP10 (overlays, minimap) build on.
  */
 
-import { Application, Container } from 'pixi.js';
+import { Application, Container, UPDATE_PRIORITY } from 'pixi.js';
+import { DEBUG_HOOKS_ENABLED } from '../debug/hook';
+import { perf } from '../debug/perf';
 import type { AssetManifest } from '../art/manifest';
 import { registry as defaultRegistry } from '../../data';
 import type { DataRegistry } from '../../data/schema';
@@ -94,6 +96,13 @@ export async function createWorldRenderer(options: RendererOptions): Promise<Wor
   app.canvas.classList.add('world-canvas');
   options.parent.appendChild(app.canvas);
 
+  if (DEBUG_HOOKS_ENABLED) {
+    // Time Pixi's own draw (scene graph traversal and command submission) between the first and last ticker callbacks.
+    let t0 = 0;
+    app.ticker.add(() => void (t0 = perf.start()), null, UPDATE_PRIORITY.HIGH);
+    app.ticker.add(() => perf.end('pixi.render', t0), null, UPDATE_PRIORITY.UTILITY);
+  }
+
   const camera = new Camera();
   const b = mapScreenBounds(options.mapWidth, options.mapHeight);
   const pad = 96;
@@ -141,8 +150,12 @@ export async function createWorldRenderer(options: RendererOptions): Promise<Wor
       world.position.set(app.screen.width / 2 - camera.x * camera.zoom, app.screen.height / 2 - camera.y * camera.zoom);
       world.scale.set(camera.zoom);
       const rect = camera.visibleRect();
+      const t0 = perf.start();
       terrain.update(rect, state.map, state.mapSeed);
+      const t1 = perf.start();
+      perf.end('render.terrain', t0);
       entities.update(state, alpha, rect, now);
+      perf.end('render.entities', t1);
     },
     worldToCanvas: (x, y) => camera.worldToCanvas(x, y),
     canvasToWorld: (cx, cy) => camera.canvasToWorld(cx, cy),

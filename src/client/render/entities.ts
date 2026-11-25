@@ -5,7 +5,7 @@
  * fall back to the art catalogue when a definition is missing.
  */
 
-import { Container, Sprite } from 'pixi.js';
+import { Container, Sprite, type Texture } from 'pixi.js';
 import type { DataRegistry } from '../../data/schema';
 import type { AssetManifest, BuildingStage, SpriteAnimation, SpriteAsset, SpriteState, UnitAnimState } from '../art/manifest';
 import type { TeamAssetManifest } from '../art/procedural';
@@ -20,8 +20,9 @@ import {
   type ReadonlyGameState,
   type Vec2,
 } from '../../sim/types';
+import { perf } from '../debug/perf';
 import type { WorldPxRect } from './camera';
-import { compareDepth, depthKey, footprintCenter, worldToScreen } from './iso';
+import { compareDepth, depthKey, footprintCenter } from './iso';
 
 type RUnit = Extract<ReadonlyEntity, { kind: 'unit' }>;
 type RBuilding = Extract<ReadonlyEntity, { kind: 'building' }>;
@@ -114,11 +115,6 @@ export interface DrawnEntity extends Drawable {
   owner: number;
 }
 
-interface View {
-  sprite: Sprite;
-  gen: number;
-}
-
 function isTeamManifest(m: AssetManifest): m is TeamAssetManifest {
   return typeof (m as Partial<TeamAssetManifest>).teamSprite === 'function';
 }
@@ -138,13 +134,66 @@ export function teamLookup(state: ReadonlyGameState, registry: DataRegistry | nu
   };
 }
 
+/**
+ * What the layer keeps for one visible entity between frames: its sprite, its
+ * art (looked up once, not per frame) and the `DrawnEntity` record handed to
+ * picking and the overlays, updated in place.
+ */
+interface Entry {
+  readonly e: ReadonlyEntity;
+  readonly drawn: DrawnEntity;
+  /** Anchor in world pixels (iso, 1x). Fixed for buildings and nodes, rewritten every frame for units. */
+  sx: number;
+  sy: number;
+  /** Draw layer written to `sprite.zIndex` (see `EntityLayer.update`). */
+  z: number;
+  sprite: Sprite | null;
+  asset: SpriteAsset | null;
+  /** Last frame this entry was drawn (`EntityLayer.gen`), to hide it when it leaves the screen. */
+  gen: number;
+  /** Texture currently set on the sprite (statics skip the rest of the work while it is unchanged). */
+  tex: Texture | null;
+  mirror: boolean;
+}
+
+function newEntry(registry: DataRegistry | null, e: ReadonlyEntity): Entry {
+  const size = e.kind === 'unit' ? 0 : footprintOf(registry, e);
+  const a = e.kind === 'unit' ? e.pos : footprintCenter(e.tile.tx, e.tile.ty, size);
+  const sx = (a.x - a.y) * (TILE_W / 2);
+  const sy = (a.x + a.y) * (TILE_H / 2);
+  const drawn: DrawnEntity = {
+    id: e.id,
+    kind: e.kind,
+    depth: depthKey(a.x, a.y),
+    wx: a.x,
+    wy: a.y,
+    size,
+    hit: { minX: 0, minY: 0, maxX: 0, maxY: 0 },
+    bounds: { minX: 0, minY: 0, maxX: 0, maxY: 0 },
+    owner: e.owner,
+  };
+  return { e, drawn, sx, sy, z: 0, sprite: null, asset: null, gen: 0, tex: null, mirror: false };
+}
+
+/** `compareDepth` on entries. */
+function byDepth(a: Entry, b: Entry): number {
+  return a.drawn.depth - b.drawn.depth || a.drawn.id - b.drawn.id;
+}
+
 export class EntityLayer {
   readonly container = new Container();
-  private views = new Map<EntityId, View>();
+  /** Buildings and nodes, ascending (depth, id). Their position never changes, so they are sorted once per change of the entity set. */
+  private statics: Entry[] = [];
+  private staticById = new Map<EntityId, Entry>();
+  private staticSource: readonly unknown[] | null = null;
+  private staticSourceLength = -1;
+  private units = new Map<EntityId, Entry>();
   private gen = 0;
   /** Entities drawn on the last frame, back to front. */
   drawn: DrawnEntity[] = [];
-  private byId = new Map<EntityId, DrawnEntity>();
+  private drawnEntries: Entry[] = [];
+  private visibleStatics: Entry[] = [];
+  private visibleUnits: Entry[] = [];
 
   constructor(
     private readonly manifest: AssetManifest,
@@ -158,82 +207,206 @@ export class EntityLayer {
   }
 
   getDrawn(id: EntityId): DrawnEntity | undefined {
-    return this.byId.get(id);
+    const entry = this.staticById.get(id) ?? this.units.get(id);
+    return entry !== undefined && entry.gen === this.gen ? entry.drawn : undefined;
+  }
+
+  /**
+   * Rebuild the sorted list of buildings and nodes when the entity set changed.
+   * Ids are never reused and `entities` stays ascending, so the set changed
+   * exactly when the array was replaced (removals) or its length changed
+   * (additions).
+   */
+  private syncStatics(state: ReadonlyGameState): void {
+    const list = state.entities;
+    if (list === this.staticSource && list.length === this.staticSourceLength) return;
+    this.staticSource = list;
+    this.staticSourceLength = list.length;
+    const next: Entry[] = [];
+    const live = new Set<EntityId>();
+    for (const e of list) {
+      if (e.kind === 'unit') continue;
+      live.add(e.id);
+      next.push(this.staticById.get(e.id) ?? newEntry(this.registry, e));
+    }
+    for (const [id, entry] of this.staticById) {
+      if (!live.has(id)) {
+        entry.sprite?.destroy();
+        this.staticById.delete(id);
+      }
+    }
+    for (const entry of next) this.staticById.set(entry.drawn.id, entry);
+    next.sort(byDepth);
+    // Buildings and nodes keep fixed even layers: Pixi re-sorts its children only when a zIndex changes.
+    next.forEach((entry, i) => {
+      entry.z = 2 * i;
+    });
+    this.statics = next;
+  }
+
+  /** Give `entry` its sprite and art on first use. */
+  private ready(entry: Entry, colors: TeamColorLookup): void {
+    if (entry.sprite === null) {
+      entry.sprite = new Sprite();
+      this.container.addChild(entry.sprite);
+    }
+    if (entry.asset === null) {
+      const c = colors(entry.e.owner);
+      entry.asset = this.assetFor(spriteIdOf(this.registry, entry.e), c.primary, c.secondary);
+    }
   }
 
   /** Update the scene graph for `state`. `visible` is the viewport in world pixels. */
   update(state: ReadonlyGameState, alpha: number, visible: WorldPxRect, nowMs: number): void {
     this.gen++;
+    const gen = this.gen;
     const margin = 260;
-    const rect = { minX: visible.minX - margin, minY: visible.minY - margin * 1.5, maxX: visible.maxX + margin, maxY: visible.maxY + margin };
+    const minX = visible.minX - margin;
+    const minY = visible.minY - margin * 1.5;
+    const maxX = visible.maxX + margin;
+    const maxY = visible.maxY + margin;
+    const a = Math.min(1, Math.max(0, alpha));
     const team = teamLookup(state, this.registry);
-    const list: { d: Drawable; e: ReadonlyEntity }[] = [];
-    for (const e of state.entities) {
-      const d = makeDrawable(this.registry, e, alpha);
-      const s = worldToScreen(d.wx, d.wy);
-      if (s.x < rect.minX || s.x > rect.maxX || s.y < rect.minY || s.y > rect.maxY) continue;
-      list.push({ d, e });
-    }
-    list.sort((a, b) => compareDepth(a.d, b.d));
 
-    this.drawn = [];
-    this.byId.clear();
-    list.forEach(({ d, e }, rank) => {
-      let view = this.views.get(e.id);
-      if (view === undefined) {
-        view = { sprite: new Sprite(), gen: 0 };
-        this.container.addChild(view.sprite);
-        this.views.set(e.id, view);
+    this.syncStatics(state);
+
+    // Visible buildings and nodes (already in draw order).
+    const vs = this.visibleStatics;
+    vs.length = 0;
+    for (const entry of this.statics) {
+      if (entry.sx < minX || entry.sx > maxX || entry.sy < minY || entry.sy > maxY) continue;
+      vs.push(entry);
+    }
+
+    // Visible units, interpolated, then sorted among themselves.
+    const vu = this.visibleUnits;
+    vu.length = 0;
+    for (const e of state.entities) {
+      if (e.kind !== 'unit') continue;
+      const x = e.prevPos.x + (e.pos.x - e.prevPos.x) * a;
+      const y = e.prevPos.y + (e.pos.y - e.prevPos.y) * a;
+      const sx = (x - y) * (TILE_W / 2);
+      const sy = (x + y) * (TILE_H / 2);
+      if (sx < minX || sx > maxX || sy < minY || sy > maxY) continue;
+      let entry = this.units.get(e.id);
+      if (entry === undefined) {
+        entry = newEntry(this.registry, e);
+        this.units.set(e.id, entry);
       }
-      view.gen = this.gen;
-      const spr = view.sprite;
-      const colors = team(e.owner);
-      const asset = this.assetFor(spriteIdOf(this.registry, e), colors.primary, colors.secondary);
-      let state_: SpriteState = 'default';
-      if (e.kind === 'unit') state_ = unitAnimState(e);
-      else if (e.kind === 'building') state_ = buildingStage(e);
-      const anim: SpriteAnimation = asset.animation(state_, e.kind === 'unit' ? e.facing : 0);
-      const frameIdx = anim.frames.length > 1 && anim.frameMs > 0 ? Math.floor((nowMs + e.id * 137) / anim.frameMs) % anim.frames.length : 0;
-      const tex = anim.frames[frameIdx]!;
+      const d = entry.drawn;
+      d.wx = x;
+      d.wy = y;
+      d.depth = depthKey(x, y);
+      entry.sx = sx;
+      entry.sy = sy;
+      vu.push(entry);
+    }
+    vu.sort(byDepth);
+    // A unit sits on the odd layer just below the first building or node drawn after it (in front of the one
+    // before it), ordered among the units of the same gap by (depth, id): its layer changes only when it walks
+    // past a building or node, not on every frame.
+    {
+      const stat = this.statics;
+      let lastGap = -1;
+      let run = 0;
+      for (const unit of vu) {
+        let lo = 0;
+        let hi = stat.length;
+        while (lo < hi) {
+          const mid = (lo + hi) >>> 1;
+          if (byDepth(stat[mid]!, unit) < 0) lo = mid + 1;
+          else hi = mid;
+        }
+        run = lo === lastGap ? run + 1 : 1;
+        lastGap = lo;
+        unit.z = 2 * lo - 1 + Math.min(run, 1000) / 1024;
+      }
+    }
+
+    // Merge the two sorted lists, assigning draw ranks.
+    const order = this.drawnEntries;
+    order.length = 0;
+    const drawn = this.drawn;
+    drawn.length = 0;
+    let i = 0;
+    let j = 0;
+    while (i < vs.length || j < vu.length) {
+      const entry = j >= vu.length || (i < vs.length && byDepth(vs[i]!, vu[j]!) <= 0) ? vs[i++]! : vu[j++]!;
+      this.show(entry, team, nowMs);
+      order.push(entry);
+      drawn.push(entry.drawn);
+    }
+
+    // Hide what left the screen; forget what left the world.
+    for (const entry of this.statics) {
+      if (entry.gen !== gen && entry.sprite !== null && entry.sprite.visible) entry.sprite.visible = false;
+    }
+    for (const [id, entry] of this.units) {
+      if (entry.gen === gen) continue;
+      if (entry.sprite !== null) entry.sprite.visible = false;
+      if (!entityExists(state, id)) {
+        entry.sprite?.destroy();
+        this.units.delete(id);
+      }
+    }
+    perf.add('count.drawn', drawn.length);
+  }
+
+  /** Write one entity's sprite for this frame and refresh its `DrawnEntity`. */
+  private show(entry: Entry, team: TeamColorLookup, nowMs: number): void {
+    entry.gen = this.gen;
+    this.ready(entry, team);
+    const spr = entry.sprite as Sprite;
+    const asset = entry.asset as SpriteAsset;
+    const e = entry.e;
+    let animState: SpriteState = 'default';
+    if (e.kind === 'unit') animState = unitAnimState(e);
+    else if (e.kind === 'building') animState = buildingStage(e);
+    const anim: SpriteAnimation = asset.animation(animState, e.kind === 'unit' ? e.facing : 0);
+    const frameIdx =
+      anim.frames.length > 1 && anim.frameMs > 0 ? Math.floor((nowMs + e.id * 137) / anim.frameMs) % anim.frames.length : 0;
+    const tex = anim.frames[frameIdx]!;
+    const d = entry.drawn;
+    const isUnit = e.kind === 'unit';
+    // Buildings and nodes only need their sprite rewritten when the texture changed.
+    if (isUnit || tex !== entry.tex || !spr.visible) {
+      entry.tex = tex;
       spr.texture = tex;
       spr.anchor.set(asset.anchor.x, asset.anchor.y);
       const mirror = e.kind === 'node' ? (e.id & 1) === 1 : anim.mirrorX;
+      entry.mirror = mirror;
       spr.scale.x = mirror ? -1 : 1;
-      const s = worldToScreen(d.wx, d.wy);
-      spr.position.set(s.x, s.y);
-      spr.zIndex = rank;
-      spr.visible = true;
-
+      spr.position.set(entry.sx, entry.sy);
       const w = tex.width;
       const h = tex.height;
-      const bounds: WorldPxRect = {
-        minX: s.x - asset.anchor.x * w,
-        minY: s.y - asset.anchor.y * h,
-        maxX: s.x + (1 - asset.anchor.x) * w,
-        maxY: s.y + (1 - asset.anchor.y) * h,
-      };
-      const size = e.kind === 'unit' ? 0 : footprintOf(this.registry, e);
-      const drawn: DrawnEntity = { ...d, size, bounds, hit: hitBox(e.kind, e.kind === 'node' ? e.typeId : '', bounds, s, w, h, size), owner: e.owner };
-      this.drawn.push(drawn);
-      this.byId.set(e.id, drawn);
-    });
-
-    for (const [id, view] of this.views) {
-      if (view.gen !== this.gen) {
-        // Entity left the screen or the world: hide, and free it entirely if it no longer exists.
-        view.sprite.visible = false;
-        if (!entityExists(state, id)) {
-          view.sprite.destroy();
-          this.views.delete(id);
-        }
+      const b = d.bounds;
+      b.minX = entry.sx - asset.anchor.x * w;
+      b.minY = entry.sy - asset.anchor.y * h;
+      b.maxX = entry.sx + (1 - asset.anchor.x) * w;
+      b.maxY = entry.sy + (1 - asset.anchor.y) * h;
+      if (isUnit) {
+        const hw = w * 0.2;
+        d.hit.minX = entry.sx - hw;
+        d.hit.maxX = entry.sx + hw;
+        d.hit.minY = entry.sy - h * 0.55;
+        d.hit.maxY = entry.sy + h * 0.06;
+      } else {
+        d.hit = hitBox(e.kind, e.kind === 'node' ? e.typeId : '', b, { x: entry.sx, y: entry.sy }, w, h, d.size);
       }
     }
+    spr.zIndex = entry.z;
+    spr.visible = true;
   }
 
   destroy(): void {
-    this.views.clear();
+    this.statics = [];
+    this.staticById.clear();
+    this.units.clear();
     this.drawn = [];
-    this.byId.clear();
+    this.drawnEntries = [];
+    this.visibleStatics = [];
+    this.visibleUnits = [];
+    this.staticSource = null;
   }
 }
 

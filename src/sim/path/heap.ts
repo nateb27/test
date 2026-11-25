@@ -25,28 +25,6 @@ export class NodeHeap {
     this.count = 0;
   }
 
-  private less(a: number, b: number): boolean {
-    const fa = this.f[a]!;
-    const fb = this.f[b]!;
-    if (fa !== fb) return fa < fb;
-    const ha = this.h[a]!;
-    const hb = this.h[b]!;
-    if (ha !== hb) return ha < hb;
-    return this.node[a]! < this.node[b]!;
-  }
-
-  private swap(a: number, b: number): void {
-    const f = this.f[a]!;
-    const h = this.h[a]!;
-    const n = this.node[a]!;
-    this.f[a] = this.f[b]!;
-    this.h[a] = this.h[b]!;
-    this.node[a] = this.node[b]!;
-    this.f[b] = f;
-    this.h[b] = h;
-    this.node[b] = n;
-  }
-
   private grow(): void {
     const cap = this.f.length * 2;
     const f = new Int32Array(cap);
@@ -62,37 +40,57 @@ export class NodeHeap {
 
   push(node: number, f: number, h: number): void {
     if (this.count === this.f.length) this.grow();
+    const fs = this.f;
+    const hs = this.h;
+    const ns = this.node;
     let i = this.count++;
-    this.f[i] = f;
-    this.h[i] = h;
-    this.node[i] = node;
+    // Sift up by moving parents down into the hole (no swaps).
     while (i > 0) {
       const parent = (i - 1) >> 1;
-      if (!this.less(i, parent)) break;
-      this.swap(i, parent);
+      const pf = fs[parent]!;
+      if (pf < f || (pf === f && (hs[parent]! < h || (hs[parent] === h && ns[parent]! < node)))) break;
+      fs[i] = pf;
+      hs[i] = hs[parent]!;
+      ns[i] = ns[parent]!;
       i = parent;
     }
+    fs[i] = f;
+    hs[i] = h;
+    ns[i] = node;
   }
 
   /** Remove and return the minimum entry's node. The heap must not be empty. */
   pop(): number {
-    const top = this.node[0]!;
+    const fs = this.f;
+    const hs = this.h;
+    const ns = this.node;
+    const top = ns[0]!;
     const last = --this.count;
     if (last > 0) {
-      this.f[0] = this.f[last]!;
-      this.h[0] = this.h[last]!;
-      this.node[0] = this.node[last]!;
+      // Re-insert the last entry from the root, moving the smaller child up into the hole.
+      const f = fs[last]!;
+      const h = hs[last]!;
+      const node = ns[last]!;
       let i = 0;
       for (;;) {
-        const l = 2 * i + 1;
-        const r = l + 1;
-        let m = i;
-        if (l < last && this.less(l, m)) m = l;
-        if (r < last && this.less(r, m)) m = r;
-        if (m === i) break;
-        this.swap(i, m);
-        i = m;
+        let c = 2 * i + 1;
+        if (c >= last) break;
+        const r = c + 1;
+        if (r < last) {
+          const fc = fs[c]!;
+          const fr = fs[r]!;
+          if (fr < fc || (fr === fc && (hs[r]! < hs[c]! || (hs[r] === hs[c] && ns[r]! < ns[c]!)))) c = r;
+        }
+        const cf = fs[c]!;
+        if (cf > f || (cf === f && (hs[c]! > h || (hs[c] === h && ns[c]! > node)))) break;
+        fs[i] = cf;
+        hs[i] = hs[c]!;
+        ns[i] = ns[c]!;
+        i = c;
       }
+      fs[i] = f;
+      hs[i] = h;
+      ns[i] = node;
     }
     return top;
   }

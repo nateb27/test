@@ -12,6 +12,7 @@ import { createModeController, type ActiveMode, type ModeController } from '../i
 import { WorldOverlays } from '../render/overlays';
 import type { WorldRendererApi } from '../render/renderer';
 import type { Minimap } from '../ui/minimap';
+import { perf } from '../debug/perf';
 import { CommandBuffer } from './commandBuffer';
 import { FixedTickLoop } from './loop';
 
@@ -34,6 +35,8 @@ export class Match {
   minimap: Minimap | null = null;
   /** Receives the text of a refused placement or rally click; the game screen points it at the HUD toasts. */
   onInvalid: (text: string) => void = () => {};
+  /** Dev/e2e only: called before each tick with `state.tick` (the stress match's scripted player issues commands here). */
+  beforeTick: ((tick: number) => void) | null = null;
   private readonly cleanup: (() => void)[] = [];
   private readonly listeners = new Set<SimEventListener>();
   private readonly modeListeners = new Set<ModeListener>();
@@ -84,9 +87,16 @@ export class Match {
   }
 
   private renderFrame(alpha: number): void {
+    const t0 = perf.start();
     this.input.update();
+    const t1 = perf.start();
+    perf.end('frame.input', t0);
     this.renderer.render(this.sim.state, alpha);
+    const t2 = perf.start();
+    perf.end('frame.render', t1);
     this.overlays.update();
+    perf.end('frame.overlays', t2);
+    perf.end('frame.js', t0);
   }
 
   /** Subscribe to the events of every tick. Returns an unsubscribe function. */
@@ -97,8 +107,15 @@ export class Match {
 
   /** Run one tick with the buffered commands. */
   tick(): void {
+    const t0 = perf.start();
+    this.beforeTick?.(this.sim.state.tick);
     const events = this.sim.step(this.commands.drain());
-    if (events.length > 0) for (const l of this.listeners) l(events);
+    perf.end('sim.step', t0);
+    if (events.length > 0) {
+      const t1 = perf.start();
+      for (const l of this.listeners) l(events);
+      perf.end('sim.listeners', t1);
+    }
   }
 
   /** Run n ticks immediately (debug / tests). */
