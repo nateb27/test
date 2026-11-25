@@ -98,7 +98,8 @@ export function runCleanup(ctx: SimContext): void {
 /**
  * Delete own units and buildings. The whole command is rejected (nothing
  * changes) if any id is unknown or not owned by the player (neutral nodes never are). Unfinished
- * buildings refund `costPaid` in full; everything else refunds nothing.
+ * buildings refund `costPaid` in full and a building's queued items are refunded in full
+ * (same rule as `cancelQueue`); everything else refunds nothing.
  * Removal itself happens in the cleanup step of the same tick.
  */
 export const applyDeleteCommand: CommandHandler<'delete'> = (ctx, cmd) => {
@@ -112,8 +113,11 @@ export const applyDeleteCommand: CommandHandler<'delete'> = (ctx, cmd) => {
   const player = ctx.state.players[cmd.playerId];
   for (const e of targets) {
     if (ctx.runtime.pendingRemoval.includes(e.id)) continue;
-    if (e.kind === 'building' && !e.constructed && player !== undefined) {
-      for (const r of RESOURCE_TYPES) player.resources[r] += e.costPaid[r];
+    if (e.kind === 'building' && player !== undefined) {
+      if (!e.constructed) for (const r of RESOURCE_TYPES) player.resources[r] += e.costPaid[r];
+      // Queued units and techs are refunded in full, like `cancelQueue`.
+      for (const item of e.queue) for (const r of RESOURCE_TYPES) player.resources[r] += item.costPaid[r];
+      e.queue = [];
     }
     insertSorted(ctx.runtime.pendingRemoval, e.id);
   }

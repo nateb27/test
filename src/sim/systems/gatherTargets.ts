@@ -79,9 +79,8 @@ export function gatherTargetOf(ctx: SimContext, entity: Entity | undefined, owne
 
 /**
  * A resolved stat for a unit's owner: the per-player cache WP8 maintains in
- * `runtime.resolvedStats` if it has the value, else the def's base value.
- * Never throws, so it works with the stat-resolution stub and keeps working
- * once the real cache is filled.
+ * `runtime.resolvedStats` (techs and civ bonuses applied), else the def's base
+ * value (a def the cache does not know). Never throws.
  */
 function statOr(ctx: SimContext, unit: UnitEntity, stat: StatKey, base: number): number {
   const cached = ctx.runtime.resolvedStats[unit.owner]?.[unit.typeId]?.[stat];
