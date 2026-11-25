@@ -4,7 +4,8 @@
  *
  * - Toasts: rejected commands (plain language), population cap, completed
  *   buildings / research / non-villager units, idle villagers. An identical
- *   live toast is refreshed instead of duplicated.
+ *   live toast is merged into one with a count and its lifetime restarts;
+ *   routine ones (units trained) cannot crowd out errors.
  * - Banners: age advances and the objective (with elapsed game time). Banners
  *   are shown one at a time, in order.
  */
@@ -55,16 +56,36 @@ export class NotificationCenter {
     return this.current;
   }
 
-  /** Show a toast now (also used by the HUD for greyed-out clicks). */
-  push(kind: ToastKind, text: string): void {
+  /**
+   * Show a toast now (also used by the HUD for greyed-out clicks). A toast identical to one still showing is merged
+   * into it: its count goes up ("Spearman trained x3") and its lifetime restarts. `routine` toasts (units trained)
+   * may hold at most half the slots, the oldest routine toast making room for a new one, and never push out anything
+   * else; when the slots are full, a routine toast is the first to go, then non-errors, then the oldest.
+   */
+  push(kind: ToastKind, text: string, routine = false): void {
     const t = this.now();
-    const existing = this.toastList.find((x) => x.text === text && x.kind === kind);
+    const existing = this.toastList.find((x) => (x.baseText ?? x.text) === text && x.kind === kind);
     if (existing !== undefined) {
-      this.toastList = this.toastList.map((x) => (x === existing ? { ...x, expiresAt: t + this.toastMs } : x));
+      const count = (existing.count ?? 1) + 1;
+      const merged: ToastVM = { ...existing, count, baseText: text, text: `${text} \u00d7${count}`, expiresAt: t + this.toastMs };
+      this.toastList = this.toastList.map((x) => (x === existing ? merged : x));
       return;
     }
-    const toast: ToastVM = { id: this.nextId++, kind, text, expiresAt: t + this.toastMs };
-    this.toastList = [...this.toastList, toast].slice(-this.maxToasts);
+    const toast: ToastVM = { id: this.nextId++, kind, text, expiresAt: t + this.toastMs, ...(routine ? { routine: true } : {}) };
+    let list = [...this.toastList];
+    if (routine) {
+      const limit = Math.max(1, Math.floor(this.maxToasts / 2));
+      while (list.filter((x) => x.routine === true).length >= limit) list.splice(list.findIndex((x) => x.routine === true), 1);
+    }
+    list.push(toast);
+    while (list.length > this.maxToasts) {
+      const rank = (x: ToastVM): number => (x.routine === true ? 0 : x.kind === 'error' ? 2 : 1);
+      let victim = 0;
+      const last = routine ? list.length : list.length - 1; // only a routine toast may be the one dropped
+      for (let i = 1; i < last; i++) if (rank(list[i]!) < rank(list[victim]!)) victim = i;
+      list.splice(victim, 1);
+    }
+    this.toastList = list;
   }
 
   /** Queue a banner. */
@@ -94,7 +115,7 @@ export class NotificationCenter {
         case 'UnitTrained':
           // Villagers are too frequent to announce; they show up at the rally point.
           if (ev.playerId === this.playerId && ev.unitType !== 'villager') {
-            this.push('success', `${defName(this.registry, ev.unitType)} trained`);
+            this.push('success', `${defName(this.registry, ev.unitType)} trained`, true);
           }
           break;
         case 'VillagerIdle':

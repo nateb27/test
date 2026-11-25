@@ -145,6 +145,50 @@ describe('other notifications', () => {
     expect(center.toasts[0]!.expiresAt).toBeGreaterThan(first.expiresAt);
   });
 
+  it('identical toasts within their lifetime merge into one with a count and a fresh lifetime', () => {
+    const { center, fx, advance } = setup();
+    const trained = (unitType: string): SimEvent => ({ type: 'UnitTrained', playerId: 1, unitId: 6, unitType, buildingId: 1 });
+    center.ingest([trained('spearman')], fx.state);
+    expect(center.toasts.map((t) => t.text)).toEqual(['Spearman trained']);
+    const first = center.toasts[0]!;
+    advance(3000);
+    center.ingest([trained('spearman')], fx.state);
+    advance(3000); // 6 s after the first, but the second restarted the lifetime
+    center.ingest([trained('spearman')], fx.state);
+    expect(center.toasts.map((t) => t.text)).toEqual(['Spearman trained \u00d73']);
+    expect(center.toasts[0]!.id).toBe(first.id);
+    expect(center.toasts[0]!.expiresAt).toBe(1000 + 6000 + 4000);
+    advance(3999);
+    expect(center.toasts).toHaveLength(1);
+    advance(1);
+    expect(center.toasts).toEqual([]);
+    // After expiry the same text starts again at one.
+    center.ingest([trained('spearman')], fx.state);
+    expect(center.toasts.map((t) => t.text)).toEqual(['Spearman trained']);
+  });
+
+  it('steady military production cannot crowd out errors or other news', () => {
+    const { center, fx } = setup();
+    const trained = (unitType: string): SimEvent => ({ type: 'UnitTrained', playerId: 1, unitId: 6, unitType, buildingId: 1 });
+    center.ingest([rejected('cannotPlace'), rejected('queueFull')], fx.state);
+    for (const u of ['spearman', 'archer', 'swordsman', 'cavalry', 'spearman', 'archer', 'swordsman', 'cavalry']) {
+      center.ingest([trained(u)], fx.state);
+    }
+    const texts = center.toasts.map((t) => t.text);
+    expect(texts).toContain(REJECT_TEXT.cannotPlace);
+    expect(texts).toContain(REJECT_TEXT.queueFull);
+    expect(center.toasts.filter((t) => t.routine === true).length).toBeLessThanOrEqual(2);
+    expect(center.toasts.length).toBeLessThanOrEqual(4);
+    // With every slot taken by errors, a routine toast is dropped rather than evicting one.
+    center.ingest([rejected('invalidTarget'), rejected('unknownDef')], fx.state);
+    center.ingest([trained('archer')], fx.state);
+    expect(center.toasts.map((t) => t.kind)).toEqual(['error', 'error', 'error', 'error']);
+    // A new error does evict the oldest toast.
+    center.ingest([rejected('notOwner')], fx.state);
+    expect(center.toasts.at(-1)!.text).toBe(REJECT_TEXT.notOwner);
+    expect(center.toasts).toHaveLength(4);
+  });
+
   it('toasts expire and the oldest are dropped past the limit', () => {
     const { center, fx, advance } = setup();
     for (const r of ['cannotPlace', 'queueFull', 'invalidTarget', 'unknownDef', 'notOwner'] as RejectReason[]) {
