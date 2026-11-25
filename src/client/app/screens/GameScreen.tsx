@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { registry } from '../../../data';
 import type { BuildingId, GameConfig, Sim, Vec2 } from '../../../sim/types';
+import { DEBUG_HOOKS_ENABLED } from '../../debug/hook';
 import { entityCentre, findTownCenter } from '../../input/selection';
 import { createWorldRenderer } from '../../render/renderer';
 import { Hud } from '../../ui/components/Hud';
@@ -83,6 +84,8 @@ export function GameScreen({
         onStartRally: () => hooks?.onStartRally?.(ctx()),
       });
       controller.start();
+      // Dev and e2e builds only: `?paused=1` starts every match paused, so tests can compare a loaded save tick for tick.
+      if (DEBUG_HOOKS_ENABLED && new URLSearchParams(window.location.search).has('paused')) match.loop.paused = true;
       match.start();
       setHud(controller);
       // The HUD (and `#minimap-slot`) is rendered on the next frame.

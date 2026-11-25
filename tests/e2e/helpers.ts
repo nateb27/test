@@ -184,3 +184,181 @@ export function openGround(page: Page, cx: number, cy: number, margin = 3): Prom
 }
 
 export const shot = (page: Page, name: string): Promise<Buffer> => page.screenshot({ path: `${SHOTS}/${name}.png` });
+
+// ---------------------------------------------------------------------------
+// Driving the real UI
+// ---------------------------------------------------------------------------
+
+/** A command card button by its label ("Lumber Camp", "Economy", "Set Rally"). */
+export const card = (page: Page, label: string): Locator => page.locator(`[data-testid="command-card"] button[aria-label^="${label} ("]`);
+
+/**
+ * Step the sim in chunks until `expr` (a JS expression over `g = window.__game`) is true.
+ * Fails after `max` ticks. Returns the ticks stepped.
+ */
+export async function stepUntil(page: Page, expr: string, max = 6000, chunk = 20): Promise<number> {
+  const stepped = await page.evaluate(
+    ([code, limit, size]) => {
+      const g = window.__game!;
+      const test = new Function('g', `return (${code});`) as (g: unknown) => boolean;
+      let n = 0;
+      while (!test(g)) {
+        if (n >= (limit as number)) return -1;
+        g.step(size as number);
+        n += size as number;
+      }
+      return n;
+    },
+    [expr, max, chunk] as const,
+  );
+  if (stepped < 0) throw new Error(`stepUntil timed out after ${max} ticks: ${expr}`);
+  return stepped;
+}
+
+/** Select the six starting villagers with a double click and bind them to control group 1 (`Digit1` recalls them). */
+export async function groupVillagers(page: Page): Promise<number[]> {
+  const ids = await selectAllVillagers(page);
+  await page.keyboard.press('Control+Digit1');
+  return ids;
+}
+
+export async function recallVillagers(page: Page): Promise<void> {
+  await page.keyboard.press('Digit1');
+}
+
+/**
+ * Candidate screen points for a building near world (cx, cy): on the canvas, clear of HUD panels, in rings of
+ * growing distance from the anchor, skipping spots too close to existing buildings or nodes of the same neighbourhood.
+ */
+async function candidates(page: Page, cx: number, cy: number, size: number, minRing: number): Promise<Pt[]> {
+  return page.evaluate(
+    ([ax, ay, sz, ring0]) => {
+      const g = window.__game!;
+      const sizes: Record<string, number> = {
+        townCenter: 4, house: 2, mill: 2, lumberCamp: 2, miningCamp: 2, farm: 2, barracks: 3, archeryRange: 3, stable: 3,
+        siegeWorkshop: 3, silkWorkshop: 3, goldDeposit: 2, stoneDeposit: 2, tree: 1, berryBush: 1,
+      };
+      const others = g.state!.entities
+        .flatMap((e) => {
+          if (e.kind === 'unit') return [];
+          const s = sizes[e.typeId] ?? 1;
+          return [{ x: e.tile.tx + s / 2, y: e.tile.ty + s / 2, s }];
+        });
+      const out: { x: number; y: number }[] = [];
+      for (let r = ring0!; r <= 22; r++) {
+        for (let a = 0; a < 48; a++) {
+          const wx = (ax as number) + Math.cos((a * Math.PI) / 24) * r;
+          const wy = (ay as number) + Math.sin((a * Math.PI) / 24) * r;
+          const tx = Math.round(wx - (sz as number) / 2) + (sz as number) / 2;
+          const ty = Math.round(wy - (sz as number) / 2) + (sz as number) / 2;
+          if (tx < 4 || ty < 4 || tx > 116 || ty > 116) continue;
+          const s = g.worldToScreen(tx, ty);
+          if (s.x < 80 || s.x > window.innerWidth - 80 || s.y < 100 || s.y > window.innerHeight - 260) continue;
+          // Keep one free tile around every neighbour (never wall a builder in), nodes included.
+          const clear = others.every((o) => Math.max(Math.abs(o.x - tx), Math.abs(o.y - ty)) >= (o.s + (sz as number)) / 2 + 1);
+          if (clear) out.push({ x: s.x, y: s.y });
+        }
+      }
+      return out;
+    },
+    [cx, cy, size, minRing] as const,
+  );
+}
+
+/** Move the mouse over candidate spots until the placement ghost says the spot is valid; returns that screen point. */
+export async function validGhostSpot(page: Page, cx: number, cy: number, size: number, minRing = 3): Promise<Pt> {
+  const list = await candidates(page, cx, cy, size, minRing);
+  for (const p of list) {
+    await page.mouse.move(p.x, p.y);
+    await frames(page, 1);
+    const g = await page.evaluate(() => window.__game!.ghost());
+    if (g !== null && g.visible && g.ok) return p;
+  }
+  throw new Error(`no valid ${size}x${size} spot near ${cx},${cy} (${list.length} candidates)`);
+}
+
+export interface PlaceOptions {
+  /** Button labels to click before the building ("Economy" or "Military"). */
+  menu: 'Economy' | 'Military';
+  /** The building's card label ("House"). */
+  label: string;
+  size: number;
+  near: { x: number; y: number };
+  minRing?: number;
+  /** Screenshot name taken while the ghost is green, before the click. */
+  ghostShot?: string;
+  /** Run until the foundation completes (default true). */
+  complete?: boolean;
+}
+
+/** The own building entries of a type (all, or completed only). */
+export const buildingsOf = (page: Page, type: string): Promise<Entry[]> => entities(page, { type, own: true, kind: 'building' });
+
+/**
+ * With builders selected: click the page button, the building button, move to a valid ghost spot, click.
+ * Steps the sim until the building is complete. Returns the new building's entry.
+ */
+export async function placeViaCard(page: Page, o: PlaceOptions): Promise<Entry> {
+  const before = new Set((await buildingsOf(page, o.label === 'House' ? 'house' : typeIdOf(o.label))).map((b) => b.id));
+  // The card stays on the build page after a placement (handy for placing more): go back first if it is the other one.
+  if ((await card(page, o.label).count()) === 0) {
+    if ((await card(page, o.menu).count()) === 0) await card(page, 'Back').click();
+    await card(page, o.menu).click();
+  }
+  await card(page, o.label).click();
+  expect(await inputMode(page)).toBe('placement');
+  const spot = await validGhostSpot(page, o.near.x, o.near.y, o.size, o.minRing ?? 3);
+  if (o.ghostShot !== undefined) await shot(page, o.ghostShot);
+  await page.mouse.click(spot.x, spot.y);
+  expect(await inputMode(page)).toBeNull();
+  await step(page, 2);
+  const type = typeIdOf(o.label);
+  const placed = (await buildingsOf(page, type)).find((b) => !before.has(b.id));
+  if (placed === undefined) throw new Error(`${o.label} was not placed`);
+  if (o.complete !== false) {
+    await stepUntil(
+      page,
+      `g.state.entities.some((e) => e.id === ${placed.id} && e.constructed)`,
+      9000,
+    );
+  }
+  return placed;
+}
+
+const LABEL_TO_TYPE: Record<string, string> = {
+  House: 'house',
+  Mill: 'mill',
+  'Lumber Camp': 'lumberCamp',
+  'Mining Camp': 'miningCamp',
+  Farm: 'farm',
+  Barracks: 'barracks',
+  'Archery Range': 'archeryRange',
+  Stable: 'stable',
+  'Siege Workshop': 'siegeWorkshop',
+  'Silk Workshop': 'silkWorkshop',
+};
+const typeIdOf = (label: string): string => {
+  const t = LABEL_TO_TYPE[label];
+  if (t === undefined) throw new Error(`unknown building label ${label}`);
+  return t;
+};
+
+/** Select an own building by clicking it on the canvas (a point on its footprint). */
+export async function clickBuilding(page: Page, b: Entry): Promise<void> {
+  const p = await toScreen(page, b.x, b.y);
+  await page.mouse.click(p.x, p.y);
+  expect(await selection(page)).toEqual([b.id]);
+}
+
+/** The toast texts currently shown. */
+export const toasts = (page: Page): Promise<string[]> => page.getByTestId('toast').allTextContents();
+
+export const topBarNumber = async (page: Page, id: 'res-food' | 'res-wood' | 'res-gold' | 'res-stone' | 'pop'): Promise<string> =>
+  (await page.getByTestId(id).textContent())?.replace(/[^0-9/]/g, '') ?? '';
+
+/** Centre the camera on a world point with a real click on the minimap. */
+export async function centreCamera(page: Page, x: number, y: number): Promise<void> {
+  const m = await toMinimap(page, x, y);
+  await page.mouse.click(m.x, m.y);
+  await frames(page, 3);
+}

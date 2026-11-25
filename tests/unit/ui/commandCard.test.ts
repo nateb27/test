@@ -41,7 +41,10 @@ describe('command card content matches availability', () => {
           expect(vm).not.toBeNull();
           const buttons = vm!.buttons;
 
-          const expectedIds = [...building.trains, ...building.researches].filter((id) => !query.availability(1, id).hidden);
+          // Hidden defs and techs the player already has are not on the card.
+          const expectedIds = [...building.trains, ...building.researches].filter(
+            (id) => !query.availability(1, id).hidden && !(rich && registry.techs.some((t) => t.id === id)),
+          );
           const defButtons = buttons.filter((x) => x.action.type === 'train' || x.action.type === 'research');
           expect(defButtons.map((x) => x.defId)).toEqual(expectedIds);
 
@@ -186,6 +189,17 @@ describe('villager card', () => {
     const stableCard = buildCommandCard({ playerId: 1, civ: 'byzantines', registry, query: sim.query, selected: [asStable], page: 'main' })!;
     expect(stableCard.buttons.some((b) => b.defId === 'lancer')).toBe(false);
     expect(stableCard.buttons.find((b) => b.defId === 'cataphract')!.enabled).toBe(false);
+  });
+
+  it('a researched tech disappears from the card of the building that offered it', () => {
+    const sim = createGame({ seed: 3, mapSize: 120, players: [{ civ: 'byzantines' }] });
+    const tc = sim.state.entities.find((e) => e.kind === 'building' && e.owner === 1)!;
+    const labels = (): string[] =>
+      buildCommandCard({ playerId: 1, civ: 'byzantines', registry, query: sim.query, selected: [tc], page: 'main' })!.buttons.map((b) => b.defId ?? b.label);
+    expect(labels()).toContain('handCarts');
+    (sim.state.players[1] as { researched: string[] }).researched.push('handCarts');
+    expect(labels()).not.toContain('handCarts');
+    expect(labels()).toContain('townshipAge'); // everything else is still there
   });
 
   it('ignores the requested page unless every selected unit builds', () => {

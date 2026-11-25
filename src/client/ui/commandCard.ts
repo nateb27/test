@@ -7,8 +7,9 @@
  * - Each selected own entity contributes the items it could show; a mixed
  *   selection shows only the items every entity has in common.
  * - Items for which `availability(...).hidden` is true (other civs, replaced
- *   defs) never appear. Everything else appears; unavailable ones are greyed
- *   (`enabled: false`) with the reasons from `availability`.
+ *   defs) never appear, and neither does a tech the player already has.
+ *   Everything else appears; unavailable ones are greyed (`enabled: false`)
+ *   with the reasons from `availability`.
  * - Costs are the resolved (modifier-adjusted) ones from `availability`; times are `resolvedStat`.
  */
 
@@ -85,6 +86,8 @@ function defItem(input: CardInput, defId: ProducibleId, action: CardAction, pref
   if (def === undefined) return null;
   const av = input.query.availability(input.playerId, defId);
   if (av.hidden || neverForCiv(def, input.civ)) return null;
+  // A researched tech leaves the card of the building that offered it (plan 4.7).
+  if (av.reasons.some((r) => r.code === 'alreadyResearched')) return null;
   return {
     key: `${action.type}:${defId}`,
     fixedSlot: null,
