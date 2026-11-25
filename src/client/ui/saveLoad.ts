@@ -3,8 +3,8 @@
  * import, and plain-language errors (notably for an unsupported save version).
  */
 
-import { deserialize, serialize } from '../../sim';
-import { SAVE_VERSION, TICK_RATE, type Sim } from '../../sim/types';
+import { deserialize, SaveError, SaveVersionError, serialize } from '../../sim';
+import { TICK_RATE, type Sim } from '../../sim/types';
 import type { SaveMeta, SaveStorage } from '../platform';
 
 export type LoadResult =
@@ -16,27 +16,22 @@ export function parseSave(json: string | null): LoadResult {
   if (json === null || json.trim() === '') {
     return { ok: false, kind: 'empty', message: 'That save slot is empty.' };
   }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(json);
-  } catch {
-    return { ok: false, kind: 'corrupt', message: 'This file is not a valid save.' };
-  }
-  const obj = parsed as { version?: unknown; state?: unknown } | null;
-  if (obj === null || typeof obj !== 'object' || typeof obj.version !== 'number' || typeof obj.state !== 'object') {
-    return { ok: false, kind: 'corrupt', message: 'This file is not a valid save.' };
-  }
-  if (obj.version !== SAVE_VERSION) {
-    return {
-      ok: false,
-      kind: 'unsupportedVersion',
-      message: `This save is from a different version of the game (save version ${obj.version}; this game reads version ${SAVE_VERSION}) and cannot be loaded.`,
-    };
-  }
   try {
     return { ok: true, sim: deserialize(json) };
-  } catch {
-    return { ok: false, kind: 'corrupt', message: 'This save is damaged and cannot be loaded.' };
+  } catch (error) {
+    if (error instanceof SaveVersionError) {
+      const hint =
+        error.direction === 'newer' ? ' It was made by a newer build; update the game to open it.' : '';
+      return {
+        ok: false,
+        kind: 'unsupportedVersion',
+        message: `This save is from a different version of the game (save version ${String(error.found)}; this game reads version ${error.expected}) and cannot be loaded.${hint}`,
+      };
+    }
+    if (error instanceof SaveError && error.code === 'corrupt') {
+      return { ok: false, kind: 'corrupt', message: 'This save is damaged and cannot be loaded.' };
+    }
+    return { ok: false, kind: 'corrupt', message: 'This file is not a valid save.' };
   }
 }
 

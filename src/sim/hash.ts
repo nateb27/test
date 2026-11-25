@@ -9,65 +9,100 @@
 
 import type { DeepReadonly, GameState } from './types';
 
-function fail(path: string, what: string): never {
+/** Path of the value being written, kept as a stack and only turned into text when something is wrong. */
+const pathStack: (string | number)[] = [];
+/** Output being built; string concatenation (ropes) beats an array of pieces here. */
+let buf = '';
+
+function fail(what: string): never {
+  let path = '';
+  for (const part of pathStack) path += typeof part === 'number' ? `[${part}]` : path === '' ? part : `.${part}`;
   throw new Error(`canonicalJson: ${what} at ${path || '<root>'}`);
 }
 
-function write(value: unknown, path: string, out: string[]): void {
+/** `JSON.stringify(key)` memoised: the same few hundred key names repeat across thousands of objects. */
+const keyText = new Map<string, string>();
+
+function quotedKey(key: string): string {
+  let text = keyText.get(key);
+  if (text === undefined) {
+    text = JSON.stringify(key);
+    if (keyText.size < 4096) keyText.set(key, text);
+  }
+  return text;
+}
+
+function write(value: unknown): void {
   if (value === null) {
-    out.push('null');
+    buf += 'null';
     return;
   }
   switch (typeof value) {
     case 'number':
-      if (!Number.isFinite(value)) fail(path, `non-finite number ${String(value)}`);
-      if (Object.is(value, -0)) fail(path, 'negative zero');
-      out.push(JSON.stringify(value));
+      if (!Number.isFinite(value)) fail(`non-finite number ${String(value)}`);
+      if (Object.is(value, -0)) fail('negative zero');
+      buf += JSON.stringify(value);
       return;
     case 'string':
-      out.push(JSON.stringify(value));
+      buf += JSON.stringify(value);
       return;
     case 'boolean':
-      out.push(value ? 'true' : 'false');
+      buf += value ? 'true' : 'false';
       return;
     case 'object':
       break;
     default:
-      fail(path, `unsupported type ${typeof value}`);
+      fail(`unsupported type ${typeof value}`);
   }
   if (Array.isArray(value)) {
-    out.push('[');
+    buf += '[';
     for (let i = 0; i < value.length; i++) {
-      if (i > 0) out.push(',');
+      if (i > 0) buf += ',';
       const item: unknown = value[i];
-      if (item === undefined) fail(`${path}[${i}]`, 'undefined array item');
-      write(item, `${path}[${i}]`, out);
+      pathStack.push(i);
+      if (item === undefined) fail('undefined array item');
+      write(item);
+      pathStack.pop();
     }
-    out.push(']');
+    buf += ']';
     return;
   }
   const proto: unknown = Object.getPrototypeOf(value);
-  if (proto !== Object.prototype && proto !== null) fail(path, 'non-plain object');
+  if (proto !== Object.prototype && proto !== null) fail('non-plain object');
   const record = value as Record<string, unknown>;
-  const keys = Object.keys(record).sort();
-  out.push('{');
+  const keys = Object.keys(record);
+  // Insertion order is usually already sorted; sort only when it is not.
+  for (let i = 1; i < keys.length; i++) {
+    if ((keys[i - 1] as string) > (keys[i] as string)) {
+      keys.sort();
+      break;
+    }
+  }
+  buf += '{';
   let first = true;
   for (const key of keys) {
     const v = record[key];
     if (v === undefined) continue;
-    if (!first) out.push(',');
+    if (!first) buf += ',';
     first = false;
-    out.push(JSON.stringify(key), ':');
-    write(v, path ? `${path}.${key}` : key, out);
+    buf += quotedKey(key) + ':';
+    pathStack.push(key);
+    write(v);
+    pathStack.pop();
   }
-  out.push('}');
+  buf += '}';
 }
 
 /** Serialize plain data to canonical JSON (see module doc). */
 export function canonicalJson(value: unknown): string {
-  const out: string[] = [];
-  write(value, '', out);
-  return out.join('');
+  pathStack.length = 0;
+  buf = '';
+  try {
+    write(value);
+    return buf;
+  } finally {
+    buf = '';
+  }
 }
 
 /** 32-bit FNV-1a over the UTF-8 bytes of `text`, as 8 lowercase hex digits. */

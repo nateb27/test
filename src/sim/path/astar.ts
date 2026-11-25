@@ -11,7 +11,7 @@
  * - Expansions (closed nodes) are counted for the per-tick budget.
  */
 
-import { canStep, DIR_X, DIR_Y, isWalkable, tileAt, type PathGrid } from './grid';
+import { isWalkable, tileAt, type PathGrid } from './grid';
 import { NodeHeap } from './heap';
 import type { PathGoal, TilePos } from '../types';
 
@@ -123,6 +123,12 @@ function nearestInRing(grid: PathGrid, tx: number, ty: number, r: number): TileP
   return best;
 }
 
+const NEIGHBOUR_DX = new Int8Array([1, 0, -1, 0, 1, -1, -1, 1]);
+const NEIGHBOUR_DY = new Int8Array([0, 1, 0, -1, 1, 1, -1, -1]);
+/** Orthogonal neighbours (bit 0 E, 1 S, 2 W, 3 N) a diagonal step SE, SW, NW, NE passes between. */
+const DIAGONAL_NEEDS = new Int8Array([1 | 2, 4 | 2, 4 | 8, 1 | 8]);
+const neighbourOffsets = new Int32Array(8);
+
 // Scratch buffers shared by all searches (not state; reset by generation stamps).
 let scratchSize = 0;
 let gScore = new Int32Array(0);
@@ -182,18 +188,44 @@ export function findPath(
   let reached = false;
   let capped = false;
 
+  // Hot loop: locals and typed tables instead of repeated property reads and
+  // helper calls. The moves and their order are exactly those of `canStep`
+  // over DIR_X/DIR_Y: the four orthogonal steps (E, S, W, N) first, then the
+  // four diagonals (SE, SW, NW, NE), each of which also needs its two
+  // orthogonal neighbours walkable.
+  const blocked = grid.blocked;
+  const height = grid.height;
+  const gx0 = g.x0;
+  const gy0 = g.y0;
+  const gx1 = g.x1;
+  const gy1 = g.y1;
+  const diff = DIAGONAL_COST - STRAIGHT_COST;
+  const open = openStamp;
+  const closed = closedStamp;
+  const gs = gScore;
+  const par = parent;
+  const offsets = neighbourOffsets;
+  offsets[0] = 1;
+  offsets[1] = width;
+  offsets[2] = -1;
+  offsets[3] = -width;
+  offsets[4] = width + 1;
+  offsets[5] = width - 1;
+  offsets[6] = -width - 1;
+  offsets[7] = 1 - width;
+
   while (heap.size > 0) {
     const cur = heap.pop();
-    if (closedStamp[cur] === gen) continue;
+    if (closed[cur] === gen) continue;
     if (expanded >= maxExpansions) {
       capped = true;
       break;
     }
-    closedStamp[cur] = gen;
+    closed[cur] = gen;
     expanded++;
     const cx = cur % width;
     const cy = (cur - cx) / width;
-    const curG = gScore[cur]!;
+    const curG = gs[cur]!;
     const h = heuristic(g, cx, cy);
     if (h < bestH || (h === bestH && (curG < bestG || (curG === bestG && cur < best)))) {
       best = cur;
@@ -205,18 +237,34 @@ export function findPath(
       reached = true;
       break;
     }
+    // Bit d of `ok` says the orthogonal neighbour d (0 E, 1 S, 2 W, 3 N) is walkable.
+    let ok = 0;
+    if (cx + 1 < width && blocked[cur + 1] === 0) ok |= 1;
+    if (cy + 1 < height && blocked[cur + width] === 0) ok |= 2;
+    if (cx > 0 && blocked[cur - 1] === 0) ok |= 4;
+    if (cy > 0 && blocked[cur - width] === 0) ok |= 8;
     for (let d = 0; d < 8; d++) {
-      const nx = cx + DIR_X[d]!;
-      const ny = cy + DIR_Y[d]!;
-      if (!canStep(grid, cx, cy, nx, ny)) continue;
-      const ni = ny * width + nx;
-      if (closedStamp[ni] === gen) continue;
-      const ng = curG + (d < 4 ? STRAIGHT_COST : DIAGONAL_COST);
-      if (openStamp[ni] === gen && ng >= gScore[ni]!) continue;
-      openStamp[ni] = gen;
-      gScore[ni] = ng;
-      parent[ni] = cur;
-      const nh = heuristic(g, nx, ny);
+      let ng: number;
+      if (d < 4) {
+        if ((ok & (1 << d)) === 0) continue;
+        ng = curG + STRAIGHT_COST;
+      } else {
+        const need = DIAGONAL_NEEDS[d - 4] as number;
+        if ((ok & need) !== need) continue;
+        ng = curG + DIAGONAL_COST;
+      }
+      const ni = cur + (offsets[d] as number);
+      if (d >= 4 && blocked[ni] !== 0) continue;
+      if (closed[ni] === gen) continue;
+      if (open[ni] === gen && ng >= gs[ni]!) continue;
+      open[ni] = gen;
+      gs[ni] = ng;
+      par[ni] = cur;
+      const nx = cx + (NEIGHBOUR_DX[d] as number);
+      const ny = cy + (NEIGHBOUR_DY[d] as number);
+      const dx = nx < gx0 ? gx0 - nx : nx > gx1 ? nx - gx1 : 0;
+      const dy = ny < gy0 ? gy0 - ny : ny > gy1 ? ny - gy1 : 0;
+      const nh = dx > dy ? STRAIGHT_COST * dx + diff * dy : STRAIGHT_COST * dy + diff * dx;
       heap.push(ni, ng + nh, nh);
     }
   }
