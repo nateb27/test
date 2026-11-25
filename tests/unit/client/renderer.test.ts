@@ -189,11 +189,17 @@ describe('art catalogue', () => {
 describe('entity helpers', () => {
   it('falls back to catalogue footprints and sprite ids when the def is missing', () => {
     const tc = makeBuilding(1, 1, 'townCenter', 10, 10);
-    expect(registry.def('townCenter')).toBeUndefined(); // WP4 data not merged in this branch
+    // With the real content the def wins; with no registry the catalogue answers.
+    expect(registry.def('townCenter')).toBeDefined();
     expect(footprintOf(registry, tc)).toBe(4);
-    expect(spriteIdOf(registry, tc)).toBe('building.townCenter');
+    expect(footprintOf(null, tc)).toBe(4);
+    expect(spriteIdOf(null, tc)).toBe('building.townCenter');
     const gold = makeNode(2, 'goldDeposit', 5, 5);
-    expect(footprintOf(registry, gold)).toBe(2);
+    expect(footprintOf(null, gold)).toBe(2);
+    // Ids that exist in neither the registry nor the catalogue.
+    expect(registry.def('mysteryHall')).toBeUndefined();
+    expect(spriteIdOf(registry, makeBuilding(5, 1, 'mysteryHall', 0, 0))).toBe('building.mysteryHall');
+    expect(footprintOf(registry, makeBuilding(6, 1, 'barracks', 0, 0))).toBe(3);
     expect(footprintOf(registry, makeBuilding(3, 1, 'mysteryHall', 0, 0))).toBe(2);
     expect(footprintOf(registry, makeNode(4, 'mysteryRock', 0, 0))).toBe(1);
   });
