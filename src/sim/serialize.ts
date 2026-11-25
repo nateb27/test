@@ -115,7 +115,7 @@ export function deserialize(json: string, data: DataRegistry = registry): Sim {
 // Validation: enough to refuse a damaged or hand-edited save cleanly instead of
 // crashing mid-game: shapes and ranges of every field the sim reads, ids that
 // must name a def of the right kind, positions and footprints inside the map,
-// and references to entity ids that do not exist. Whether an order still makes
+// and references to entity ids that do not exist (except in orders, see `validOrder`). Whether an order still makes
 // sense (a path that no longer leads anywhere, ...) is left to the sim.
 // ---------------------------------------------------------------------------
 
@@ -229,12 +229,14 @@ function validOrder(o: unknown, ctx: Ctx): boolean {
   switch (o.type) {
     case 'move':
       return isVec(o, ctx);
+    // The target must be a plausible id, but need not exist: a node depleted or a building deleted this tick is only
+    // dropped from orders when the order next runs, so a save between ticks can legitimately hold such an order.
     case 'gather':
-      return refExists(o.targetId, ctx);
+      return isInt(o.targetId, 1);
     case 'build':
     case 'assist':
     case 'dropOff':
-      return refExists(o.buildingId, ctx);
+      return isInt(o.buildingId, 1);
     default:
       return false;
   }

@@ -306,7 +306,9 @@ describe('save format', () => {
     expect(load((s) => { unit(s).pos = { x: 5000, y: -3 }; })).toMatch(/position outside the map/);
     expect(load((s) => { unit(s).prevPos = { x: -1, y: 4 }; })).toMatch(/position outside the map/);
     expect(load((s) => { unit(s).facing = 8; })).toMatch(/facing/);
-    expect(load((s) => { unit(s).orderQueue = [{ type: 'gather', targetId: 99999 }]; })).toMatch(/order queue/);
+    expect(load((s) => { unit(s).orderQueue = [{ type: 'gather', targetId: 'tree' }]; })).toMatch(/order queue/);
+    // An order whose target is gone is legitimate (cleanup runs before the order notices) and still loads.
+    expect(load((s) => { unit(s).orderQueue = [{ type: 'gather', targetId: 99999 }]; })).toBe('loaded');
     expect(load((s) => { unit(s).orderQueue = [{ type: 'dance' }]; })).toMatch(/order queue/);
     expect(load((s) => { unit(s).orderQueue = [{ type: 'move', x: 1e9, y: 0 }]; })).toMatch(/order queue/);
     expect(load((s) => { unit(s).carried = { type: 'wood', amount: 2.5 }; })).toMatch(/load/);
