@@ -3,6 +3,7 @@ import { registry } from '../../../data/index';
 import { MAP_SIZE } from '../../../sim/types';
 import { civSummary } from '../../ui/civSummary';
 import { Icon, IconContext } from '../../ui/components/Icon';
+import { matchSeed } from '../seed';
 import type { AppHost } from '../host';
 import type { Navigate } from './types';
 
@@ -27,7 +28,7 @@ export function CivSelect({ navigate, host }: { navigate: Navigate; host: AppHos
       name: 'loading',
       source: {
         kind: 'new',
-        config: { seed: (Math.random() * 0x7fffffff) >>> 0, mapSize: MAP_SIZE, players: [{ civ: selected }] },
+        config: { seed: matchSeed(), mapSize: MAP_SIZE, players: [{ civ: selected }] },
       },
     });
 

@@ -87,10 +87,19 @@ export function GameScreen({
       controller = new HudController({
         match,
         playerId: LOCAL_PLAYER_ID,
+        now: m.clock.now,
         onStartPlacement: (b) => hooks?.onStartPlacement?.(b, ctx()),
         onStartRally: () => hooks?.onStartRally?.(ctx()),
       });
       controller.start();
+      // Dev and e2e builds only: after `__game.step` the HUD and the minimap's unit layer rebuild at once, so a test
+      // never waits for their wall-clock timers (10 Hz and 5 Hz).
+      if (DEBUG_HOOKS_ENABLED) {
+        m.afterStep = () => {
+          controller?.sync();
+          m.minimap?.redraw();
+        };
+      }
       // Dev and e2e builds only: `?paused=1` starts every match paused, so tests can compare a loaded save tick for tick.
       if (DEBUG_HOOKS_ENABLED && new URLSearchParams(window.location.search).has('paused')) match.loop.paused = true;
       match.start();

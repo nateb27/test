@@ -14,6 +14,7 @@ import { WorldOverlays } from '../render/overlays';
 import type { WorldRendererApi } from '../render/renderer';
 import type { Minimap } from '../ui/minimap';
 import { perf } from '../debug/perf';
+import { ClientClock } from './clock';
 import { CommandBuffer } from './commandBuffer';
 import { FixedTickLoop } from './loop';
 
@@ -25,6 +26,8 @@ export type ModeListener = (mode: ActiveMode | null) => void;
 
 export class Match {
   readonly loop = new FixedTickLoop();
+  /** Clock for time-windowed UI rules; tests freeze it (`__game.freezeClock`). */
+  readonly clock = new ClientClock();
   readonly commands = new CommandBuffer(LOCAL_PLAYER_ID);
   /** Pointer/keyboard handling, selection and control groups (WP5). */
   readonly input: GameInput;
@@ -39,6 +42,8 @@ export class Match {
   minimap: Minimap | null = null;
   /** Receives the text of a refused placement or rally click; the game screen points it at the HUD toasts. */
   onInvalid: (text: string) => void = () => {};
+  /** Dev/e2e only: called after `stepTicks` and after the clock is advanced, so the HUD can rebuild at once instead of on its next timer. */
+  afterStep: (() => void) | null = null;
   /** Dev/e2e only: called before each tick with `state.tick` (the stress match's scripted player issues commands here). */
   beforeTick: ((tick: number) => void) | null = null;
   private readonly cleanup: (() => void)[] = [];
@@ -53,7 +58,7 @@ export class Match {
     readonly renderer: WorldRendererApi,
     manifest?: AssetManifest,
   ) {
-    this.input = new GameInput({ sim, renderer, commands: this.commands, loop: this.loop, playerId: LOCAL_PLAYER_ID });
+    this.input = new GameInput({ sim, renderer, commands: this.commands, loop: this.loop, playerId: LOCAL_PLAYER_ID, now: this.clock.now });
     this.modes = createModeController({
       input: this.input,
       sim,
@@ -71,6 +76,7 @@ export class Match {
       renderer,
       registry,
       playerId: LOCAL_PLAYER_ID,
+      now: this.clock.now,
       selection: () => this.input.selection.ids,
       dragBox: () => this.input.dragBox,
       ghost: () => this.modes.ghost(),
@@ -126,9 +132,11 @@ export class Match {
     }
   }
 
-  /** Run n ticks immediately (debug / tests). */
-  stepTicks(n: number): void {
+  /** Run n ticks immediately (debug / tests). `present: false` skips the redraw and the HUD rebuild (a long run of steps). */
+  stepTicks(n: number, present = true): void {
     for (let i = 0; i < n; i++) this.tick();
+    if (!present) return;
+    this.afterStep?.();
     this.renderFrame(this.alpha);
   }
 

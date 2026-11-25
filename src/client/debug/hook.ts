@@ -25,11 +25,21 @@ export interface GameDebugHook {
    * Throws outside a match.
    */
   worldToScreen(x: number, y: number): { x: number; y: number };
-  /** Run `n` ticks synchronously, consuming buffered commands on the first. Throws outside a match. */
-  step(n: number): void;
+  /**
+   * Run `n` ticks synchronously, consuming buffered commands on the first, then redraw and rebuild the HUD.
+   * `present: false` skips that last part (for many small steps in a row). Throws outside a match.
+   */
+  step(n: number, present?: boolean): void;
   /** `hashState` of the current state. Throws outside a match. */
   hash(): string;
   setPaused(paused: boolean): void;
+  /**
+   * Stop the client clock that times double clicks, double taps, the demolish confirmation and toast lifetimes from
+   * following real time; it then moves only through `advanceClock`. Throws outside a match.
+   */
+  freezeClock(): void;
+  /** Move the frozen client clock forward by `ms`. Throws outside a match or while the clock is running. */
+  advanceClock(ms: number): void;
   setSpeed(speed: GameSpeed): void;
   /** Active input mode (set by a Build or Set Rally button), or null. */
   inputMode(): 'placement' | 'rally' | null;
@@ -45,6 +55,8 @@ export interface GameDebugHook {
   } | null;
   /** Counts of what the world overlays drew on the last frame. */
   overlayStats(): Record<string, number>;
+  /** The entity a click at this page point would pick on the world canvas (what `pickEntity` returns), or null. Throws outside a match. */
+  pickAt(x: number, y: number): EntityId | null;
   /** World tiles -> page CSS pixels on the minimap. Throws while the minimap is not mounted. */
   minimapToPage(x: number, y: number): { x: number; y: number };
   /** Cheats are issued as `cheat` commands for the local player and apply on the next tick. */

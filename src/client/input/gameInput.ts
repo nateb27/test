@@ -41,6 +41,8 @@ export interface GameInputDeps {
   playerId: PlayerId;
   registry?: DataRegistry;
   hotkeys?: readonly HotkeyBinding[];
+  /** Millisecond clock for the double-click, double-tap and demolish windows (default `performance.now`). */
+  now?: () => number;
 }
 
 export interface CanvasPoint {
@@ -86,6 +88,7 @@ export class GameInput {
   private readonly playerId: PlayerId;
   private readonly registry: DataRegistry;
   private readonly hotkeys: readonly HotkeyBinding[];
+  private readonly now: () => number;
   private readonly cleanup: (() => void)[] = [];
   private readonly cardListeners = new Set<(slot: number) => void>();
   private readonly uiListeners = new Set<(action: UiAction) => void>();
@@ -104,6 +107,7 @@ export class GameInput {
     this.playerId = deps.playerId;
     this.registry = deps.registry ?? defaultRegistry;
     this.hotkeys = deps.hotkeys ?? HOTKEYS;
+    this.now = deps.now ?? ((): number => performance.now());
     // WASD would collide with the command-card grid (QWERT / ASDFG / ZXCVB).
     this.renderer.cameraInput.setWasd(false);
 
@@ -199,7 +203,7 @@ export class GameInput {
         // Demolishing a completed building needs a second Delete within DEMOLISH_CONFIRM_MS; units go at once.
         if (own.some((e) => e.kind === 'building' && e.constructed)) {
           const key = own.map((e) => e.id).join(',');
-          const now = performance.now();
+          const now = this.now();
           const p = this.pendingDemolish;
           if (p === null || p.key !== key || now - p.time > DEMOLISH_CONFIRM_MS) {
             this.pendingDemolish = { key, time: now };
@@ -233,7 +237,7 @@ export class GameInput {
         const exists = (id: EntityId): boolean => this.sim.query.entityById(id) !== undefined;
         const live = this.selection.groups.recall(action.group, exists);
         if (live.length === 0) return;
-        const now = performance.now();
+        const now = this.now();
         const again = this.lastGroupTap !== null && this.lastGroupTap.group === action.group && now - this.lastGroupTap.time <= DOUBLE_CLICK_MS;
         this.lastGroupTap = { group: action.group, time: now };
         this.selection.set(live);
@@ -319,7 +323,7 @@ export class GameInput {
   private click(p: CanvasPoint, shift: boolean): void {
     const picked = this.renderer.pickEntity(p.x, p.y);
     const hit = picked === null ? null : (this.sim.query.entityById(picked) ?? null);
-    const now = performance.now();
+    const now = this.now();
     const { isDouble, next } = trackClick(this.lastClick, hit === null ? null : hit.id, shift, now);
     this.lastClick = next;
     if (hit !== null && isDouble && hit.owner === this.playerId && hit.kind !== 'node') {
