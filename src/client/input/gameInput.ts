@@ -23,6 +23,8 @@ import {
   findTownCenter,
   nextIdleVillager,
   sameTypeSelection,
+  trackClick,
+  type ClickRecord,
   SelectionStore,
 } from './selection';
 import { TempSelectionFeedback } from './tempSelectionFeedback';
@@ -89,7 +91,7 @@ export class GameInput {
   private readonly uiListeners = new Set<(action: UiAction) => void>();
   private mode: InputMode | null = null;
   private press: { x: number; y: number; shift: boolean; dragging: boolean } | null = null;
-  private lastClick: { id: EntityId; time: number } | null = null;
+  private lastClick: ClickRecord | null = null;
   private lastGroupTap: { group: number; time: number } | null = null;
   private lastIdle: EntityId | null = null;
 
@@ -309,8 +311,8 @@ export class GameInput {
     const picked = this.renderer.pickEntity(p.x, p.y);
     const hit = picked === null ? null : (this.sim.query.entityById(picked) ?? null);
     const now = performance.now();
-    const isDouble = hit !== null && this.lastClick !== null && this.lastClick.id === hit.id && now - this.lastClick.time <= DOUBLE_CLICK_MS;
-    this.lastClick = hit === null ? null : { id: hit.id, time: now };
+    const { isDouble, next } = trackClick(this.lastClick, hit === null ? null : hit.id, shift, now);
+    this.lastClick = next;
     if (hit !== null && isDouble && hit.owner === this.playerId && hit.kind !== 'node') {
       const cam = this.renderer.camera;
       const ids = this.renderer.entitiesInCanvasRect(0, 0, cam.viewW, cam.viewH, [hit.kind]);
@@ -320,7 +322,6 @@ export class GameInput {
         if (e !== undefined) visible.push(e);
       }
       this.selection.set(sameTypeSelection(hit, visible, this.selection.ids, shift, this.playerId, this.lookup));
-      this.lastClick = null;
       return;
     }
     this.selection.set(clickSelection(this.selection.ids, hit, shift, this.playerId, this.lookup));

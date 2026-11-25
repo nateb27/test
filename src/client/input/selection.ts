@@ -210,3 +210,26 @@ export class SelectionStore {
     return () => this.listeners.delete(listener);
   }
 }
+
+export interface ClickRecord {
+  id: EntityId;
+  time: number;
+}
+
+/** Max gap between two clicks to count as a double click. */
+export const DOUBLE_CLICK_WINDOW_MS = 400;
+
+/**
+ * Double-click tracking. Returns whether this click is a double and the
+ * record to remember. A shift click is never a double and resets the tracker.
+ */
+export function trackClick(
+  last: ClickRecord | null,
+  hitId: EntityId | null,
+  shift: boolean,
+  now: number,
+): { isDouble: boolean; next: ClickRecord | null } {
+  if (shift || hitId === null) return { isDouble: false, next: null };
+  const isDouble = last !== null && last.id === hitId && now - last.time <= DOUBLE_CLICK_WINDOW_MS;
+  return { isDouble, next: isDouble ? null : { id: hitId, time: now } };
+}

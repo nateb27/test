@@ -52,6 +52,30 @@ async function townCenter(page: Page): Promise<{ id: number; cx: number; cy: num
   });
 }
 
+/** A visible screen point with no entity within 3 tiles (so clicking it hits open ground). */
+function clearGround(page: Page): Promise<Pt> {
+  return page.evaluate(() => {
+    const g = window.__game!;
+    const ents = g.state!.entities;
+    const tc = ents.find((e) => e.kind === 'building' && e.owner === 1)!;
+    const cx = tc.kind === 'building' ? tc.tile.tx + 2 : 0;
+    const cy = tc.kind === 'building' ? tc.tile.ty + 2 : 0;
+    for (const [dx, dy] of [[6, 7], [7, -6], [-7, 6], [-6, -7], [9, 3], [3, 9], [-9, -3], [-3, -9]]) {
+      const x = cx + dx!;
+      const y = cy + dy!;
+      const s = g.worldToScreen(x, y);
+      if (s.x < 80 || s.x > 1200 || s.y < 80 || s.y > 640) continue;
+      const clear = ents.every((e) => {
+        const ex = e.kind === 'unit' ? e.pos.x : e.tile.tx + 1;
+        const ey = e.kind === 'unit' ? e.pos.y : e.tile.ty + 1;
+        return Math.hypot(ex - x, ey - y) > 4;
+      });
+      if (clear) return s;
+    }
+    throw new Error('no clear ground on screen');
+  });
+}
+
 test('scenario 1: boot, menu, match renders with grass, a Town Center and 6 villagers', async ({ page }) => {
   const errors = collectErrors(page);
   const t0 = Date.now();
@@ -155,6 +179,7 @@ test('selection: click, shift, double-click, groups, H, idle cycle, delete and p
   // Click the front-most villager (largest x + y): nothing can cover it.
   const front = [...vs].sort((a, b) => b.x + b.y - (a.x + a.y))[0]!;
   const fp = await toScreen(page, front.x, front.y);
+  const ground = await clearGround(page);
   await page.mouse.click(fp.x, fp.y - 14);
   expect(await selection(page)).toEqual([front.id]);
 
@@ -164,19 +189,18 @@ test('selection: click, shift, double-click, groups, H, idle cycle, delete and p
   await page.keyboard.up('Shift');
   expect(await selection(page)).toEqual([]);
 
-  // Double-click selects every visible villager (wait so the clicks above are not part of the double).
-  await page.waitForTimeout(500);
+  // Double-click selects every visible villager.
   await page.mouse.dblclick(fp.x, fp.y - 14);
   expect(await selection(page)).toEqual(ids);
 
   // Click empty ground clears.
-  await page.mouse.click(120, 120);
+  await page.mouse.click(ground.x, ground.y);
   expect(await selection(page)).toEqual([]);
 
   // Control groups: Ctrl+1 assigns, 1 recalls.
   await page.mouse.dblclick(fp.x, fp.y - 14);
   await page.keyboard.press('Control+Digit1');
-  await page.mouse.click(120, 120);
+  await page.mouse.click(ground.x, ground.y);
   expect(await selection(page)).toEqual([]);
   await page.keyboard.press('Digit1');
   expect(await selection(page)).toEqual(ids);
@@ -223,10 +247,10 @@ test('scenario 11 (camera): pan, zoom and clamp; WASD no longer pans', async ({ 
   // Arrow keys pan: holding Right moves the view right, so the TC moves left on screen.
   await page.mouse.move(640, 360);
   await page.keyboard.down('ArrowRight');
-  await page.waitForTimeout(400);
+  await expect.poll(async () => (await at()).x).toBeLessThan(start.x - 100);
   await page.keyboard.up('ArrowRight');
+  await page.waitForTimeout(100);
   const panned = await at();
-  expect(panned.x).toBeLessThan(start.x - 100);
 
   // Middle-drag pans too.
   await page.mouse.move(600, 300);

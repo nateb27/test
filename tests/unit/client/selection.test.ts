@@ -11,6 +11,7 @@ import {
   pruneIds,
   sameTypeSelection,
   SelectionStore,
+  trackClick,
   type EntityLookup,
 } from '../../../src/client/input/selection';
 import { makeBuilding, makeNode, makeUnit } from '../../../src/client/render/dev/fixtureState';
@@ -204,5 +205,29 @@ describe('hotkey table', () => {
   it('has no duplicate bindings', () => {
     const keys = HOTKEYS.map((b) => `${b.code}|${b.ctrl ?? false}|${b.shift ?? '*'}`);
     expect(new Set(keys).size).toBe(keys.length);
+  });
+});
+
+describe('double-click tracking', () => {
+  it('two plain clicks on the same entity within the window are a double', () => {
+    const a = trackClick(null, 10, false, 1000);
+    expect(a.isDouble).toBe(false);
+    expect(trackClick(a.next, 10, false, 1100).isDouble).toBe(true);
+    expect(trackClick(a.next, 11, false, 1100).isDouble).toBe(false);
+    expect(trackClick(a.next, 10, false, 1500).isDouble).toBe(false);
+  });
+  it('click then shift-click shortly after is not a double and resets the tracker', () => {
+    const a = trackClick(null, 10, false, 1000);
+    const b = trackClick(a.next, 10, true, 1010);
+    expect(b.isDouble).toBe(false);
+    expect(b.next).toBeNull();
+    // the following plain click starts a fresh sequence, only the next one is a double
+    const c = trackClick(b.next, 10, false, 1020);
+    expect(c.isDouble).toBe(false);
+    expect(trackClick(c.next, 10, false, 1030).isDouble).toBe(true);
+  });
+  it('shift-click then plain click is not a double', () => {
+    const a = trackClick(null, 10, true, 1000);
+    expect(trackClick(a.next, 10, false, 1010).isDouble).toBe(false);
   });
 });
