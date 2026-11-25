@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { defineConfig, devices } from '@playwright/test';
 
-const PORT = 4173;
+const PORT = Number(process.env.E2E_PORT ?? 4173);
 
 // Use a pre-installed Chromium when present (sandboxed dev containers);
 // CI installs Playwright's own browser instead.

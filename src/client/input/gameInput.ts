@@ -27,7 +27,6 @@ import {
   type ClickRecord,
   SelectionStore,
 } from './selection';
-import { TempSelectionFeedback } from './tempSelectionFeedback';
 
 export interface CommandSink {
   issue(input: CommandInput): unknown;
@@ -75,7 +74,7 @@ export const DOUBLE_CLICK_MS = 400;
 
 export class GameInput {
   readonly selection = new SelectionStore();
-  /** Current drag box in canvas pixels, or null. Read by the temporary selection feedback. */
+  /** Current drag box in canvas pixels, or null. Read by the drag-box overlay (`render/overlays`). */
   dragBox: { x0: number; y0: number; x1: number; y1: number } | null = null;
 
   private readonly sim: Sim;
@@ -85,7 +84,6 @@ export class GameInput {
   private readonly playerId: PlayerId;
   private readonly registry: DataRegistry;
   private readonly hotkeys: readonly HotkeyBinding[];
-  private readonly feedback: TempSelectionFeedback;
   private readonly cleanup: (() => void)[] = [];
   private readonly cardListeners = new Set<(slot: number) => void>();
   private readonly uiListeners = new Set<(action: UiAction) => void>();
@@ -105,7 +103,6 @@ export class GameInput {
     this.hotkeys = deps.hotkeys ?? HOTKEYS;
     // WASD would collide with the command-card grid (QWERT / ASDFG / ZXCVB).
     this.renderer.cameraInput.setWasd(false);
-    this.feedback = new TempSelectionFeedback(this.renderer, this.registry, this.selection, () => this.dragBox, this.playerId, this.lookup);
 
     const canvas = this.renderer.canvas;
     const listen = <T extends EventTarget>(t: T, type: string, fn: (e: never) => void): void => {
@@ -149,11 +146,6 @@ export class GameInput {
   /** Per-frame, before rendering: drop selected entities that no longer exist. */
   update(): void {
     this.selection.prune((id) => this.sim.query.entityById(id) !== undefined);
-  }
-
-  /** Per-frame, after rendering: refresh the temporary selection visuals. */
-  afterRender(): void {
-    this.feedback.update();
   }
 
   /** Right click at a canvas point with the current selection. Returns the commands issued. */
@@ -241,7 +233,6 @@ export class GameInput {
     this.cleanup.length = 0;
     this.cardListeners.clear();
     this.uiListeners.clear();
-    this.feedback.destroy();
   }
 
   // ------------------------------------------------------------ internals

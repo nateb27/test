@@ -31,7 +31,7 @@ export function GameScreen({ sim, host }: { sim: Sim; host: AppHost }) {
         renderer.destroy();
         return;
       }
-      match = new Match(sim, renderer);
+      match = new Match(sim, renderer, manifest);
       host.setMatch(match);
       match.start();
     })();
