@@ -72,7 +72,7 @@ export class NotificationCenter {
       return;
     }
     const toast: ToastVM = { id: this.nextId++, kind, text, expiresAt: t + this.toastMs, ...(routine ? { routine: true } : {}) };
-    let list = [...this.toastList];
+    const list = [...this.toastList];
     if (routine) {
       const limit = Math.max(1, Math.floor(this.maxToasts / 2));
       while (list.filter((x) => x.routine === true).length >= limit) list.splice(list.findIndex((x) => x.routine === true), 1);
