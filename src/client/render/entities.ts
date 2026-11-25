@@ -11,12 +11,14 @@ import type { AssetManifest, BuildingStage, SpriteAnimation, SpriteAsset, Sprite
 import type { TeamAssetManifest } from '../art/procedural';
 import { DEFAULT_FOOTPRINT } from '../art/catalog';
 import { DEFAULT_PRIMARY, DEFAULT_SECONDARY } from '../art/palette';
-import type {
-  DeepReadonly,
-  EntityId,
-  ReadonlyEntity,
-  ReadonlyGameState,
-  Vec2,
+import {
+  TILE_H,
+  TILE_W,
+  type DeepReadonly,
+  type EntityId,
+  type ReadonlyEntity,
+  type ReadonlyGameState,
+  type Vec2,
 } from '../../sim/types';
 import type { WorldPxRect } from './camera';
 import { compareDepth, depthKey, footprintCenter, worldToScreen } from './iso';
@@ -103,7 +105,9 @@ export const KIND_PRIORITY: Readonly<Record<Drawable['kind'], number>> = { unit:
 
 /** What the layer remembers about each entity drawn on the last frame (for picking). */
 export interface DrawnEntity extends Drawable {
-  /** Hit box in world pixels (iso screen space at 1x). */
+  /** Footprint side in tiles (0 for units). Picking tests the ground footprint first. */
+  size: number;
+  /** Sprite hit box in world pixels (iso screen space at 1x): the body that overhangs the footprint. */
   hit: WorldPxRect;
   /** Sprite box in world pixels. */
   bounds: WorldPxRect;
@@ -208,7 +212,8 @@ export class EntityLayer {
         maxX: s.x + (1 - asset.anchor.x) * w,
         maxY: s.y + (1 - asset.anchor.y) * h,
       };
-      const drawn: DrawnEntity = { ...d, bounds, hit: hitBox(e.kind, e.kind === 'node' ? e.typeId : '', bounds, s, w, h), owner: e.owner };
+      const size = e.kind === 'unit' ? 0 : footprintOf(this.registry, e);
+      const drawn: DrawnEntity = { ...d, size, bounds, hit: hitBox(e.kind, e.kind === 'node' ? e.typeId : '', bounds, s, w, h, size), owner: e.owner };
       this.drawn.push(drawn);
       this.byId.set(e.id, drawn);
     });
@@ -246,21 +251,42 @@ function entityExists(state: ReadonlyGameState, id: EntityId): boolean {
   return false;
 }
 
+/** Body of a node above its footprint that counts as the node: half width and height above the footprint centre, in px. */
+const NODE_BODY: Readonly<Record<string, { halfW: number; up: number }>> = {
+  tree: { halfW: 18, up: 64 },
+  berryBush: { halfW: 22, up: 30 },
+  goldDeposit: { halfW: 46, up: 44 },
+  stoneDeposit: { halfW: 46, up: 44 },
+};
+
 /**
- * Tighter click box than the full texture (textures include shadow and padding).
- * Units: a body-sized box above the feet; buildings: texture minus a small inset;
- * nodes: trees only the canopy column, deposits/bushes the central mass.
+ * Click box for the part of a sprite that rises above its ground footprint
+ * (the footprint itself is tested first, see `pickDrawn`).
+ * Units: a body-sized box above the feet. Buildings: the sprite inside the
+ * footprint's screen width, down to the footprint's front corner. Nodes: the
+ * visible body (trunk and canopy, ore mass) in a narrow column, so open
+ * ground beside or in front of a tree is not the tree.
  */
-export function hitBox(kind: Drawable['kind'], typeId: string, bounds: WorldPxRect, anchor: { x: number; y: number }, w: number, h: number): WorldPxRect {
+export function hitBox(kind: Drawable['kind'], typeId: string, bounds: WorldPxRect, anchor: { x: number; y: number }, w: number, h: number, size = 1): WorldPxRect {
   if (kind === 'unit') {
     const hw = w * 0.2;
     return { minX: anchor.x - hw, maxX: anchor.x + hw, minY: anchor.y - h * 0.55, maxY: anchor.y + h * 0.06 };
   }
+  const front = anchor.y + size * (TILE_H / 2);
   if (kind === 'building') {
     const inx = w * 0.05;
-    return { minX: bounds.minX + inx, maxX: bounds.maxX - inx, minY: bounds.minY + 4, maxY: bounds.maxY - 6 };
+    const band = size * (TILE_W / 2);
+    return {
+      minX: Math.max(bounds.minX + inx, anchor.x - band),
+      maxX: Math.min(bounds.maxX - inx, anchor.x + band),
+      minY: bounds.minY + 4,
+      maxY: Math.min(bounds.maxY - 6, front),
+    };
   }
-  const inx = typeId === 'tree' ? w * 0.22 : w * 0.1;
-  return { minX: bounds.minX + inx, maxX: bounds.maxX - inx, minY: bounds.minY + 3, maxY: bounds.maxY - 4 };
+  const body = NODE_BODY[typeId];
+  if (body === undefined) {
+    const inx = w * 0.22;
+    return { minX: bounds.minX + inx, maxX: bounds.maxX - inx, minY: Math.max(bounds.minY + 3, anchor.y - 48), maxY: Math.min(bounds.maxY - 4, front) };
+  }
+  return { minX: anchor.x - body.halfW, maxX: anchor.x + body.halfW, minY: Math.max(bounds.minY + 3, anchor.y - body.up), maxY: front };
 }
-

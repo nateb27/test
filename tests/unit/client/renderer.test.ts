@@ -5,6 +5,7 @@ import { Camera, MAX_ZOOM, MIN_ZOOM } from '../../../src/client/render/camera';
 import {
   buildingStage,
   footprintOf,
+  hitBox,
   makeDrawable,
   sortDrawables,
   spriteIdOf,
@@ -237,8 +238,8 @@ describe('entity helpers', () => {
 
 describe('picking', () => {
   const rect = (x: number, y: number, w: number, h: number) => ({ minX: x, minY: y, maxX: x + w, maxY: y + h });
-  const mk = (id: number, kind: DrawnEntity['kind'], depth: number, hit: ReturnType<typeof rect>): DrawnEntity => ({
-    id, kind, depth, wx: 0, wy: 0, hit, bounds: hit, owner: 1,
+  const mk = (id: number, kind: DrawnEntity['kind'], depth: number, hit: ReturnType<typeof rect>, size = 0): DrawnEntity => ({
+    id, kind, depth, wx: 0, wy: 0, size, hit, bounds: hit, owner: 1,
   });
 
   it('prefers units over buildings over nodes, then the front-most', () => {
@@ -253,6 +254,49 @@ describe('picking', () => {
     expect(pickDrawn(drawn.slice(0, 2), 10, 10)).toBe(2);
     expect(pickDrawn(drawn.slice(0, 1), 10, 10)).toBe(1);
     expect(pickDrawn(drawn, 500, 500)).toBeNull();
+  });
+
+  /** An entity drawn the way the entity layer does it: footprint centre, real hit box. */
+  const placed = (id: number, kind: 'building' | 'node', typeId: string, tx: number, ty: number, size: number, w: number, h: number, ay: number): DrawnEntity => {
+    const c = footprintCenter(tx, ty, size);
+    const s = worldToScreen(c.x, c.y);
+    const bounds = { minX: s.x - w / 2, maxX: s.x + w / 2, minY: s.y - ay, maxY: s.y + (h - ay) };
+    return { id, kind, depth: c.x + c.y, wx: c.x, wy: c.y, size, bounds, hit: hitBox(kind, typeId, bounds, s, w, h, size), owner: 0 };
+  };
+  const at = (x: number, y: number) => worldToScreen(x, y);
+
+  it('a ground click next to a tree or deposit is not that entity (footprint first, narrow body)', () => {
+    const tree = placed(1, 'node', 'tree', 20, 20, 1, 76, 100, 80);
+    const gold = placed(2, 'node', 'goldDeposit', 40, 40, 2, 132, 110, 70);
+    const drawn = [tree, gold];
+    // On the footprint.
+    expect(pickDrawn(drawn, at(20.5, 20.5).x, at(20.5, 20.5).y)).toBe(1);
+    expect(pickDrawn(drawn, at(41, 41).x, at(41, 41).y)).toBe(2);
+    // The eight neighbouring tiles of the tree, and two tiles away, are ground.
+    for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1], [1, 1], [-1, 1], [1, -1], [2, 0], [0, 2], [2, 2], [-2, 0], [0, -2]] as const) {
+      const p = at(20.5 + dx, 20.5 + dy);
+      expect(pickDrawn(drawn, p.x, p.y), `tree ${dx},${dy}`).toBeNull();
+    }
+    for (const [dx, dy] of [[-1.5, 0.5], [2.5, 0.5], [2.5, 2.5], [-1.5, -1.5], [0.5, 2.5], [0.5, -1.5]] as const) {
+      const p = at(40 + dx, 40 + dy);
+      expect(pickDrawn(drawn, p.x, p.y), `gold ${dx},${dy}`).toBeNull();
+    }
+    // Several tiles up-screen of a tree is ground, however tall the sprite is.
+    const far = at(17.5, 17.5);
+    expect(pickDrawn(drawn, far.x, far.y)).toBeNull();
+  });
+
+  it('the canopy of a tree and the roof of a building still pick it', () => {
+    const tree = placed(1, 'node', 'tree', 20, 20, 1, 76, 100, 80);
+    const tc = placed(3, 'building', 'townCenter', 30, 30, 4, 300, 260, 200);
+    const c = at(20.5, 20.5);
+    expect(pickDrawn([tree], c.x, c.y - 40)).toBe(1);
+    const t = at(32, 32);
+    expect(pickDrawn([tc], t.x, t.y - 60)).toBe(3);
+    // Footprint beats a neighbour's overhanging body: the tile in front of a tree behind it is the tile's own entity.
+    const front = placed(4, 'node', 'tree', 21, 21, 1, 76, 100, 80);
+    const p = at(20.5, 20.5);
+    expect(pickDrawn([tree, front], p.x, p.y)).toBe(1);
   });
 
   it('footprint centre agrees with the anchor used for buildings', () => {

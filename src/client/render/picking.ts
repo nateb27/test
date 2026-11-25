@@ -4,19 +4,40 @@
  */
 
 import type { EntityId } from '../../sim/types';
-import { KIND_PRIORITY, type DrawnEntity } from './entities';
+import type { DrawnEntity } from './entities';
+import { screenToWorld } from './iso';
 
-/** Entity under a point given in world pixels (iso screen space at 1x), or null. */
+/**
+ * Entity under a point given in world pixels (iso screen space at 1x), or null.
+ *
+ * Order: units (sprite body box) first; then footprint-first for buildings and
+ * nodes (the point lies on the entity's ground footprint, so a click on open
+ * ground next to a tree is not the tree); then the sprite body that overhangs
+ * a footprint (a click on a tree's canopy or a roof). Within a tier buildings
+ * win over nodes, then the front-most (`drawn` is back to front).
+ */
 export function pickDrawn(drawn: readonly DrawnEntity[], px: number, py: number): EntityId | null {
-  let best: DrawnEntity | null = null;
-  // `drawn` is back to front, so walk it in reverse: first hit per kind is the front-most.
+  let building: DrawnEntity | null = null;
+  let node: DrawnEntity | null = null;
+  let bodyBuilding: DrawnEntity | null = null;
+  let bodyNode: DrawnEntity | null = null;
+  const w = screenToWorld(px, py);
   for (let i = drawn.length - 1; i >= 0; i--) {
     const d = drawn[i]!;
-    if (px < d.hit.minX || px > d.hit.maxX || py < d.hit.minY || py > d.hit.maxY) continue;
-    if (best === null || KIND_PRIORITY[d.kind] < KIND_PRIORITY[best.kind]) best = d;
-    if (best.kind === 'unit') break;
+    if (d.kind === 'unit') {
+      if (px >= d.hit.minX && px <= d.hit.maxX && py >= d.hit.minY && py <= d.hit.maxY) return d.id;
+      continue;
+    }
+    const half = d.size / 2;
+    if (d.size > 0 && w.x >= d.wx - half && w.x < d.wx + half && w.y >= d.wy - half && w.y < d.wy + half) {
+      if (d.kind === 'building') building ??= d;
+      else node ??= d;
+    } else if (px >= d.hit.minX && px <= d.hit.maxX && py >= d.hit.minY && py <= d.hit.maxY) {
+      if (d.kind === 'building') bodyBuilding ??= d;
+      else bodyNode ??= d;
+    }
   }
-  return best === null ? null : best.id;
+  return (building ?? node ?? bodyBuilding ?? bodyNode)?.id ?? null;
 }
 
 export interface PickRect {
