@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WP3 contact sheet</title>
+    <style>
+      html, body { margin: 0; background: #1a2414; color: #e8e0c8; font: 12px system-ui, sans-serif; }
+      canvas { display: block; }
+      h2 { margin: 6px 10px 2px; font-size: 13px; }
+      .row { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 10px; }
+      .cell { background: #4f7a32; border-radius: 4px; padding: 2px; text-align: center; }
+      .cell img { display: block; image-rendering: auto; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./sheet.ts"></script>
+  </body>
+</html>
