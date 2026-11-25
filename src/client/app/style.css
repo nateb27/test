@@ -51,3 +51,156 @@ body,
   inset: 0;
   display: block;
 }
+
+.canvas-host {
+  position: absolute;
+  inset: 0;
+}
+
+/* ---------------------------------------------------------------- menus */
+
+.screen.menu {
+  background: radial-gradient(ellipse at 50% 30%, #3a2356 0%, #1c1030 55%, #0e0818 100%);
+}
+
+.screen.menu .tagline {
+  margin: -12px 0 12px;
+  color: #b7a9c9;
+  letter-spacing: 0.08em;
+}
+
+.screen.menu h1 {
+  color: #d4af37;
+  text-shadow: 0 2px 0 #000, 0 0 24px rgba(212, 175, 55, 0.35);
+}
+
+.screen.menu h2 {
+  margin: 0 0 4px;
+  color: #d4af37;
+  letter-spacing: 0.05em;
+}
+
+.screen.menu button.primary {
+  background: #6a2c91;
+}
+
+.screen.menu button.primary:hover {
+  background: #8238b0;
+}
+
+.screen.menu .modal button,
+.screen.menu .saveload button {
+  min-width: 0;
+  font-size: 15px;
+}
+
+.menu-row {
+  display: flex;
+  gap: 16px;
+}
+
+.civ-layout {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  width: min(900px, calc(100% - 48px));
+}
+
+.civ-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: none;
+}
+
+.screen.menu .civ-pick {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 190px;
+  padding: 8px 14px;
+  font-size: 17px;
+  text-align: left;
+}
+
+.screen.menu .civ-pick.active {
+  background: #6a2c91;
+  box-shadow: 0 0 0 2px #d4af37;
+}
+
+.civ-panel {
+  flex: 1;
+  padding: 16px 20px;
+  border-radius: 8px;
+  max-height: 440px;
+  overflow-y: auto;
+  user-select: text;
+}
+
+.civ-head {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+
+.civ-head h3 {
+  margin: 0 0 4px;
+  font-size: 24px;
+  color: #d4af37;
+}
+
+.civ-head p {
+  margin: 0;
+  color: #e4d9c3;
+}
+
+.civ-panel h4 {
+  margin: 16px 0 6px;
+  color: #d4af37;
+  border-bottom: 1px solid rgba(212, 175, 55, 0.35);
+  padding-bottom: 3px;
+}
+
+.civ-panel ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.civ-uniques li {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.unique-name {
+  font-weight: 700;
+}
+
+.screen.menu .muted {
+  color: #b7a9c9;
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.progress {
+  width: 360px;
+  height: 14px;
+  border: 2px solid #8f7424;
+  border-radius: 8px;
+  background: #120a1c;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #6a2c91, #d4af37);
+  transition: width 0.15s linear;
+}
+
+.screen.menu .modal-backdrop {
+  position: absolute;
+}

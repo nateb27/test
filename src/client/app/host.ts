@@ -3,16 +3,54 @@
  * screen name and the running match. Backs the `window.__game` hook.
  */
 
+import { registry } from '../../data';
 import { hashState } from '../../sim/hash';
+import type { TeamAssetManifest } from '../art/procedural';
 import type { GameDebugHook, ScreenName } from '../debug/hook';
 import type { Platform } from '../platform';
 import type { Match } from './match';
 
+/** Creates the (unloaded) art manifest. Injected so tests need no WebGL. */
+export type ManifestFactory = () => Promise<TeamAssetManifest>;
+
+const defaultManifestFactory: ManifestFactory = async () => {
+  const { createProceduralManifest } = await import('../art/procedural');
+  return createProceduralManifest({ registry });
+};
+
 export class AppHost {
   screen: ScreenName = 'menu';
   match: Match | null = null;
+  /** The loaded art manifest, shared by the menus and every match. */
+  manifest: TeamAssetManifest | null = null;
+  private manifestPromise: Promise<TeamAssetManifest> | null = null;
+  private readonly progressListeners = new Set<(fraction: number) => void>();
 
-  constructor(readonly platform: Platform) {}
+  constructor(
+    readonly platform: Platform,
+    private readonly manifestFactory: ManifestFactory = defaultManifestFactory,
+  ) {}
+
+  /** Generate the art once (menus show icons, matches draw sprites); later calls reuse it. */
+  loadManifest(onProgress?: (fraction: number) => void): Promise<TeamAssetManifest> {
+    if (onProgress !== undefined) this.progressListeners.add(onProgress);
+    this.manifestPromise ??= this.manifestFactory().then(async (m) => {
+      await m.load((f) => {
+        for (const l of this.progressListeners) l(f);
+      });
+      this.manifest = m;
+      return m;
+    });
+    const done = this.manifestPromise;
+    if (onProgress !== undefined) {
+      const detach = (): void => void this.progressListeners.delete(onProgress);
+      done.then(detach, detach);
+    }
+    return done;
+  }
+
+  /** Icon URL for the DOM HUD; empty until the manifest is loaded. */
+  iconUrl = (id: string): string => this.manifest?.iconUrl(id) ?? '';
 
   setMatch(match: Match | null): void {
     this.match = match;

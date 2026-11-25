@@ -12,6 +12,7 @@ test('boots to the menu, starts a match, and the sim ticks', async ({ page }) =>
   await expect(page.getByRole('heading', { name: 'Untitled RTS' })).toBeVisible();
 
   await page.getByTestId('new-game').click();
+  await page.getByTestId('start-match').click();
   const canvas = page.locator('canvas.world-canvas');
   await expect(canvas).toBeVisible({ timeout: 5_000 });
 

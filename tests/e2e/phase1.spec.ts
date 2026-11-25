@@ -21,6 +21,7 @@ async function startMatch(page: Page): Promise<void> {
   await page.goto('/');
   await expect(page.getByTestId('main-menu')).toBeVisible();
   await page.getByTestId('new-game').click();
+  await page.getByTestId('start-match').click();
   await expect(page.locator('canvas.world-canvas')).toBeVisible({ timeout: 5_000 });
   await expect.poll(() => page.evaluate(() => window.__game?.state?.entities.length ?? 0)).toBeGreaterThan(10);
   // Let the first frames render.
