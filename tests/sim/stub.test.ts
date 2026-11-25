@@ -69,6 +69,7 @@ describe('sim stub', () => {
     ]);
     expect(sim.state.players[1]?.resources.stone).toBe(500);
     expect(events).toEqual([
+      { type: 'CommandRejected', playerId: 1, seq: 1, commandType: 'stop', reason: 'notOwner' },
       { type: 'CommandRejected', playerId: 1, seq: 3, commandType: 'train', reason: 'invalidCommand' },
     ]);
   });
