@@ -64,7 +64,7 @@ describe('sim stub', () => {
     const sim = createGame(config);
     const events = sim.step([
       { type: 'cheat', playerId: 1, seq: 2, cheat: { kind: 'addResources', amounts: { stone: 500 } } },
-      { type: 'stop', playerId: 1, seq: 1, unitIds: [] },
+      { type: 'stop', playerId: 1, seq: 1, unitIds: [999] },
       { type: 'train', playerId: 1, seq: 3, buildingId: 1, unitType: 'villager' },
     ]);
     expect(sim.state.players[1]?.resources.stone).toBe(500);

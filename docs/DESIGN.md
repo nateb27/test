@@ -20,3 +20,17 @@ Phase 0 (scaffold and contracts) only. No game rules are implemented yet; the si
 ## Rules
 
 (Filled in by Phase 1+ work packages.)
+
+## WP1 (sim core) rules
+
+- **Command intake.** Commands sort by `(playerId, seq)` (stable). A command is dropped with `CommandRejected('invalidCommand')` before dispatch if its type is unknown, `playerId` is not a real player (1..n), `seq` is not an integer, a number is not finite, an id is not a positive integer, an id list is empty, or a required string/flag is missing. Rule checks (ownership, cost, placement) belong to the handlers.
+- **Map generation.** Defs are found through the registry: the Town Center is `start.centerBuilding`; node defs are chosen by `gatherKind` (`wood`, `berries`, `gold`, `stone`), not by id. A kind with no def is skipped. Attempt k uses `rng = createRng(seed + k)`; `state.mapSeed` is the final seed (up to 24 attempts, then the last map is kept).
+- **Start positions.** One player: a corner start chosen by the seed; two players: opposite corners. Each start gets 0..8 tiles of inward jitter. Edge distance is `min(25, floor(size / 4))` (25 on the 120 map), measured to the Town Center centre.
+- **Clear radius.** Nothing is generated within 8 tiles of a Town Center centre except the two guaranteed berry patches, which the plan places at 6 to 10 tiles. Gold (10 to 14), stone (12 to 16) and the three tree stands (8 to 14) are outside it. Distances are node centre to Town Center centre.
+- **Clusters.** Berries: 3x2 or 2x3 block; gold: 2x2 block of deposits; stone: L of three deposits; tree stands and forests: seeded blobs. Different clusters are separated by at least one free tile, and every blob tile keeps an open edge neighbour. Forests keep 15 tiles from starts and cover about 12% of tiles. Extra gold, stone and berry clusters (4, 3, 4 on 120x120, scaled by area) keep 20 tiles from starts and 14 from each other.
+- **Validation.** 4-connected flood fill from the first Town Center must reach at least 95% of free walkable tiles; every Town Center, starting unit and guaranteed node must have a reachable edge-adjacent tile.
+- **Starting units** stand on the ring of tiles around the Town Center, evenly spaced from a seeded offset, facing 1.
+- **Delete.** All-or-nothing per command: unknown id gives `unknownEntity`, a foreign or neutral id gives `notOwner`. Unfinished buildings refund `costPaid` immediately; removal itself happens in cleanup.
+- **Cleanup.** Removes depleted nodes (`amount <= 0`) and `pendingRemoval`, emits `ResourceNodeDepleted`, calls `endCurrentOrder` for removed units, clears their gatherer/builder slots and path requests, frees blocking footprints and bumps `occupancyVersion`. Orders of surviving units that point at a removed entity are not touched: order handlers treat a missing target as retarget-or-finish.
+- **Queries.** `entitiesInRect` and `entityAtPoint` use half-open footprints `[tx, tx+size)`; units use `UNIT_PICK_RADIUS` (rect test: distance from the unit to the rect).
+- **spawnUnit cheat** creates the unit at the exact point; rejects unknown unit types (`unknownDef`) and out-of-map or blocked tiles (`invalidTarget`).

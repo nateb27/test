@@ -1,6 +1,8 @@
 /** Cheat command (dev/test only on the client side). Owned by WP1. */
 
-import { notImplemented, type CommandHandler } from './common';
+import { createUnit } from '../entities';
+import { notImplemented, reject, type CommandHandler } from './common';
+import { recomputePopulation } from './population';
 import { RESOURCE_TYPES } from '../types';
 
 export const applyCheatCommand: CommandHandler<'cheat'> = (ctx, cmd) => {
@@ -23,9 +25,21 @@ export const applyCheatCommand: CommandHandler<'cheat'> = (ctx, cmd) => {
     case 'instantResearch':
       player.cheats.instantResearch = cheat.enabled;
       return;
-    case 'spawnUnit':
-      // TODO(WP1): create the unit at (x, y) for the player.
-      notImplemented(ctx, cmd);
+    case 'spawnUnit': {
+      const { width, height } = ctx.state.map;
+      if (ctx.data.units.every((u) => u.id !== cheat.unitType)) {
+        reject(ctx, cmd, 'unknownDef');
+        return;
+      }
+      const tx = Math.floor(cheat.x);
+      const ty = Math.floor(cheat.y);
+      if (tx < 0 || ty < 0 || tx >= width || ty >= height || ctx.runtime.occupancy[ty * width + tx] !== 0) {
+        reject(ctx, cmd, 'invalidTarget');
+        return;
+      }
+      createUnit(ctx.state, cheat.unitType, cmd.playerId, cheat.x, cheat.y);
+      recomputePopulation(ctx);
       return;
+    }
   }
 };
