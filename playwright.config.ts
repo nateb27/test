@@ -10,6 +10,8 @@ const executablePath = !process.env.CI && existsSync(LOCAL_CHROMIUM) ? LOCAL_CHR
 
 export default defineConfig({
   testDir: 'tests/e2e',
+  // Matches are real (software GL, random maps) and some scenarios play several minutes of game time.
+  timeout: 90_000,
   outputDir: 'test-results',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,

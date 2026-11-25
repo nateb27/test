@@ -77,17 +77,19 @@ test('scenario 3: right-click a tree, wood rises after a round trip; ground besi
       const ents = g.state!.entities;
       const t = ents.find((e) => e.id === id)!;
       if (t.kind !== 'node') throw new Error('not a node');
-      for (const [dx, dy] of [[0, 1], [1, 0], [-1, 0], [0, -1], [1, 1], [-1, 1], [1, -1]] as const) {
-        const tx = t.tile.tx + dx;
-        const ty = t.tile.ty + dy;
-        const sizes: Record<string, number> = { townCenter: 4, goldDeposit: 2, stoneDeposit: 2 };
-        const taken = ents.some((e) => {
-          if (e.kind === 'unit') return false;
-          const n = sizes[e.typeId] ?? 1;
-          // The tile itself and every tile around it must be free of other entities, so the click is plainly ground.
-          return tx + 1 > e.tile.tx - 1 && tx < e.tile.tx + n + 1 && ty + 1 > e.tile.ty - 1 && ty < e.tile.ty + n + 1 && e.id !== id;
-        });
-        if (!taken) return { x: tx + 0.5, y: ty + 0.5 };
+      const sizes: Record<string, number> = { townCenter: 4, goldDeposit: 2, stoneDeposit: 2 };
+      // Prefer a neighbour with no other entity around it at all; on a crowded stand any free neighbouring tile will do.
+      for (const margin of [1, 0]) {
+        for (const [dx, dy] of [[0, 1], [1, 0], [-1, 0], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]] as const) {
+          const tx = t.tile.tx + dx;
+          const ty = t.tile.ty + dy;
+          const taken = ents.some((e) => {
+            if (e.kind === 'unit' || e.id === id) return false;
+            const n = sizes[e.typeId] ?? 1;
+            return tx + 1 > e.tile.tx - margin && tx < e.tile.tx + n + margin && ty + 1 > e.tile.ty - margin && ty < e.tile.ty + n + margin;
+          });
+          if (!taken) return { x: tx + 0.5, y: ty + 0.5 };
+        }
       }
       return null;
     },
