@@ -17,7 +17,7 @@ import { registry } from '../data/index';
 import type { DataRegistry } from '../data/schema';
 import { canonicalJson } from './hash';
 import { simFromState } from './sim';
-import { SAVE_VERSION, type GameState, type Sim } from './types';
+import { MAX_PRODUCTION_QUEUE, SAVE_VERSION, type GameState, type Sim } from './types';
 
 interface SaveFile {
   version: number;
@@ -56,7 +56,14 @@ export class SaveVersionError extends SaveError {
     /** The version this build reads (`SAVE_VERSION`). */
     readonly expected: number,
   ) {
-    super('unsupportedVersion', `Unsupported save version: ${String(found)} (expected ${expected})`);
+    super(
+      'unsupportedVersion',
+      typeof found !== 'number'
+        ? `Unrecognised save version: ${JSON.stringify(found)} is not a number (this build reads version ${expected})`
+        : !Number.isInteger(found)
+          ? `Unrecognised save version: ${String(found)} is not a whole number (this build reads version ${expected})`
+          : `Unsupported save version: ${found} (expected ${expected})`,
+    );
     this.name = 'SaveVersionError';
     this.direction =
       typeof found !== 'number' || !Number.isInteger(found) ? 'unknown' : found > expected ? 'newer' : 'older';
@@ -106,8 +113,10 @@ export function deserialize(json: string, data: DataRegistry = registry): Sim {
 
 // ---------------------------------------------------------------------------
 // Validation: enough to refuse a damaged or hand-edited save cleanly instead of
-// crashing mid-game. Deep consistency (orders pointing at removed entities,
-// ...) is left to the sim, whose handlers already tolerate it.
+// crashing mid-game: shapes and ranges of every field the sim reads, ids that
+// must name a def of the right kind, positions and footprints inside the map,
+// and references to entity ids that do not exist. Whether an order still makes
+// sense (a path that no longer leads anywhere, ...) is left to the sim.
 // ---------------------------------------------------------------------------
 
 function bad(what: string): never {
@@ -164,6 +173,10 @@ function validateState(state: Record<string, unknown>, data: DataRegistry): void
   const entities = state.entities;
   if (!Array.isArray(entities)) bad('the entity list is missing');
   const playerCount = (players as unknown[]).length;
+  const ids = new Set<number>();
+  for (const e of entities as unknown[]) if (isRecord(e) && typeof e.id === 'number') ids.add(e.id);
+  const ctx: Ctx = { data, width, height, ids };
+
   let last = 0;
   for (const e of entities as unknown[]) {
     if (!isRecord(e) || !isInt(e.id, 1) || e.id <= last || e.id >= (state.nextEntityId as number)) {
@@ -177,24 +190,125 @@ function validateState(state: Record<string, unknown>, data: DataRegistry): void
     if (def === undefined) bad(`entity ${last} is a "${String(entity.typeId)}", which does not exist in this version`);
     if (entity.kind !== def?.kind) bad(`entity ${last} has the wrong kind for "${String(entity.typeId)}"`);
     if (entity.kind === 'unit') {
-      const pos = entity.pos;
-      const prev = entity.prevPos;
-      if (!isRecord(pos) || !isNum(pos.x) || !isNum(pos.y) || !isRecord(prev) || !isNum(prev.x) || !isNum(prev.y)) {
-        bad(`unit ${last} has an invalid position`);
-      }
-      if (!Array.isArray(entity.orderQueue)) bad(`unit ${last} has no order queue`);
-      if (entity.currentOrder !== null && !isRecord(entity.currentOrder)) bad(`unit ${last} has an invalid order`);
+      validateUnit(entity, last, ctx);
     } else {
-      const tile = entity.tile;
-      if (!isRecord(tile) || !isInt(tile.tx) || !isInt(tile.ty) || tile.tx >= width || tile.ty >= height) {
-        bad(`entity ${last} has an invalid tile`);
-      }
-      if (!Array.isArray(entity.gathererIds)) bad(`entity ${last} has no gatherer list`);
-      if (entity.kind === 'node' && !isInt(entity.amount)) bad(`node ${last} has an invalid amount`);
-      if (entity.kind === 'building') {
-        if (!Array.isArray(entity.queue) || !Array.isArray(entity.builderIds)) bad(`building ${last} has no queue`);
-        if (typeof entity.constructed !== 'boolean' || !isNum(entity.progress)) bad(`building ${last} has invalid progress`);
-      }
+      validateStatic(entity, last, ctx);
     }
   }
+
+  for (const [i, r] of (state.pathQueue as unknown[]).entries()) {
+    if (!isRecord(r) || !isInt(r.id) || !isInt(r.unitId, 1) || !ids.has(r.unitId)) bad(`path request ${i} is invalid`);
+    const req = r as Record<string, unknown>;
+    if (!isRecord(req.from) || !isInt(req.from.tx) || !isInt(req.from.ty)) bad(`path request ${i} has an invalid start`);
+    const goal = req.goal;
+    if (!isRecord(goal) || (goal.kind !== 'point' && goal.kind !== 'footprint')) bad(`path request ${i} has an invalid goal`);
+  }
+}
+
+interface Ctx {
+  data: DataRegistry;
+  width: number;
+  height: number;
+  ids: ReadonlySet<number>;
+}
+
+function isVec(v: unknown, ctx: Ctx): boolean {
+  return isRecord(v) && isNum(v.x) && isNum(v.y) && v.x >= 0 && v.y >= 0 && v.x <= ctx.width && v.y <= ctx.height;
+}
+
+function validResources(v: unknown): boolean {
+  return isRecord(v) && ['food', 'wood', 'gold', 'stone'].every((k) => isInt(v[k]));
+}
+
+function refExists(id: unknown, ctx: Ctx): boolean {
+  return isInt(id, 1) && ctx.ids.has(id);
+}
+
+function validOrder(o: unknown, ctx: Ctx): boolean {
+  if (!isRecord(o)) return false;
+  switch (o.type) {
+    case 'move':
+      return isVec(o, ctx);
+    case 'gather':
+      return refExists(o.targetId, ctx);
+    case 'build':
+    case 'assist':
+    case 'dropOff':
+      return refExists(o.buildingId, ctx);
+    default:
+      return false;
+  }
+}
+
+function validateUnit(entity: Record<string, unknown>, id: number, ctx: Ctx): void {
+  if (!isVec(entity.pos, ctx) || !isVec(entity.prevPos, ctx)) bad(`unit ${id} has a position outside the map`);
+  if (!isInt(entity.facing) || (entity.facing as number) > 7) bad(`unit ${id} has an invalid facing`);
+  if (!Array.isArray(entity.orderQueue) || !entity.orderQueue.every((o) => validOrder(o, ctx))) {
+    bad(`unit ${id} has an invalid order queue`);
+  }
+  const cur = entity.currentOrder;
+  if (cur !== null && !validOrder(cur, ctx)) bad(`unit ${id} has an invalid order`);
+  if (cur !== null && typeof (cur as Record<string, unknown>).phase !== 'string') bad(`unit ${id} has an order with no phase`);
+  const carried = entity.carried;
+  if (carried !== null) {
+    if (!isRecord(carried) || !['food', 'wood', 'gold', 'stone'].includes(carried.type as string) || !isInt(carried.amount, 1)) {
+      bad(`unit ${id} carries an invalid load`);
+    }
+  }
+  const path = entity.path;
+  if (path !== null) {
+    if (!isRecord(path) || !Array.isArray(path.waypoints) || !path.waypoints.every((w) => isVec(w, ctx)) || !isInt(path.nextIndex) || !isInt(path.occupancyVersion)) {
+      bad(`unit ${id} has an invalid path`);
+    }
+  }
+  if (entity.pendingPathRequestId !== null && !isInt(entity.pendingPathRequestId)) bad(`unit ${id} has an invalid path request`);
+}
+
+function validateStatic(entity: Record<string, unknown>, id: number, ctx: Ctx): void {
+  const { data, width, height } = ctx;
+  const tile = entity.tile;
+  if (!isRecord(tile) || !isInt(tile.tx) || !isInt(tile.ty)) bad(`entity ${id} has an invalid tile`);
+  const t = tile as { tx: number; ty: number };
+  const typeId = entity.typeId as string;
+  const size = entity.kind === 'node' ? data.node(typeId).footprint : data.building(typeId).footprint;
+  if (t.tx + size > width || t.ty + size > height) bad(`entity ${id} stands outside the map`);
+  if (!Array.isArray(entity.gathererIds) || !entity.gathererIds.every((g) => refExists(g, ctx))) {
+    bad(`entity ${id} has an invalid gatherer list`);
+  }
+  if (entity.kind === 'node') {
+    if (!isInt(entity.amount)) bad(`node ${id} has an invalid amount`);
+    return;
+  }
+  if (!Array.isArray(entity.queue) || !Array.isArray(entity.builderIds)) bad(`building ${id} has no queue`);
+  if (!(entity.builderIds as unknown[]).every((b) => refExists(b, ctx))) bad(`building ${id} has an invalid builder list`);
+  if (typeof entity.constructed !== 'boolean' || !isNum(entity.progress) || entity.progress < 0 || entity.progress > 1) {
+    bad(`building ${id} has invalid progress`);
+  }
+  if (!isNum(entity.incomeAccumulator)) bad(`building ${id} has an invalid income accumulator`);
+  if (!validResources(entity.costPaid)) bad(`building ${id} has an invalid cost record`);
+  const rally = entity.rally;
+  if (rally !== null) {
+    if (!isVec(rally, ctx) || (isRecord(rally) && rally.targetId !== null && !refExists(rally.targetId, ctx))) {
+      bad(`building ${id} has an invalid rally point`);
+    }
+  }
+  const queue = entity.queue as unknown[];
+  if (queue.length > MAX_PRODUCTION_QUEUE) bad(`building ${id} has too many queued items`);
+  queue.forEach((item, n) => {
+    const what = `queue item ${n + 1} of building ${id}`;
+    if (!isRecord(item)) bad(`${what} is invalid`);
+    const it = item as Record<string, unknown>;
+    if (it.kind === 'unit') {
+      if (typeof it.unitType !== 'string' || data.def(it.unitType)?.kind !== 'unit') bad(`${what} is not a known unit`);
+      if (typeof it.popCapNotified !== 'boolean') bad(`${what} is invalid`);
+    } else if (it.kind === 'tech') {
+      if (typeof it.techId !== 'string' || data.def(it.techId)?.kind !== 'tech') bad(`${what} is not a known technology`);
+    } else {
+      bad(`${what} is neither a unit nor a technology`);
+    }
+    if (!validResources(it.costPaid)) bad(`${what} has an invalid cost`);
+    if (!isInt(it.ticksDone) || !isInt(it.ticksTotal, 1) || (it.ticksDone as number) > (it.ticksTotal as number)) {
+      bad(`${what} has invalid progress`);
+    }
+  });
 }

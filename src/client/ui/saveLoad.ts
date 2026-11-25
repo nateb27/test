@@ -22,6 +22,13 @@ export function parseSave(json: string | null): LoadResult {
     if (error instanceof SaveVersionError) {
       const hint =
         error.direction === 'newer' ? ' It was made by a newer build; update the game to open it.' : '';
+      if (error.direction === 'unknown') {
+        return {
+          ok: false,
+          kind: 'unsupportedVersion',
+          message: `This save has an unrecognised version (${JSON.stringify(error.found)} is not a version number) and cannot be loaded.`,
+        };
+      }
       return {
         ok: false,
         kind: 'unsupportedVersion',

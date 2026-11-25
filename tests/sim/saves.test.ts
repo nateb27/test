@@ -277,6 +277,64 @@ describe('save format', () => {
     expect(damage(() => {})).toBe('loaded');
   });
 
+  it('refuses hand-edited saves with bad queue items, positions, references and numbers', () => {
+    type E = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+    const load = (edit: (s: { entities: E[]; pathQueue: E[] }) => void): string => {
+      const file = JSON.parse(readFileSync(FIXTURE, 'utf8')) as { state: { entities: E[]; pathQueue: E[] } };
+      edit(file.state);
+      try {
+        deserialize(JSON.stringify(file));
+      } catch (e) {
+        expect(e).toBeInstanceOf(SaveError);
+        expect((e as SaveError).code).toBe('corrupt');
+        return (e as SaveError).message;
+      }
+      return 'loaded';
+    };
+    const tcWithQueue = (s: { entities: E[] }): E => s.entities.find((e) => e.kind === 'building' && e.queue.length > 0)!;
+    const unit = (s: { entities: E[] }): E => s.entities.find((e) => e.kind === 'unit' && e.carried !== undefined)!;
+    const item = (s: { entities: E[] }): E => tcWithQueue(s).queue[0];
+
+    expect(load((s) => { item(s).ticksTotal = 'x'; })).toMatch(/queue item 1 .*invalid progress/);
+    expect(load((s) => { item(s).ticksDone = item(s).ticksTotal + 1; })).toMatch(/invalid progress/);
+    expect(load((s) => { item(s).kind = 'banana'; })).toMatch(/neither a unit nor a technology/);
+    expect(load((s) => { item(s).kind = 'unit'; item(s).unitType = 'dragon'; })).toMatch(/not a known unit/);
+    expect(load((s) => { item(s).kind = 'tech'; item(s).techId = 'villager'; })).toMatch(/not a known technology/);
+    expect(load((s) => { item(s).costPaid.food = 1.5; })).toMatch(/invalid cost/);
+    expect(load((s) => { delete item(s).costPaid; })).toMatch(/invalid cost/);
+    expect(load((s) => { tcWithQueue(s).queue = Array.from({ length: 11 }, () => ({ ...item(s) })); })).toMatch(/too many/);
+    expect(load((s) => { unit(s).pos = { x: 5000, y: -3 }; })).toMatch(/position outside the map/);
+    expect(load((s) => { unit(s).prevPos = { x: -1, y: 4 }; })).toMatch(/position outside the map/);
+    expect(load((s) => { unit(s).facing = 8; })).toMatch(/facing/);
+    expect(load((s) => { unit(s).orderQueue = [{ type: 'gather', targetId: 99999 }]; })).toMatch(/order queue/);
+    expect(load((s) => { unit(s).orderQueue = [{ type: 'dance' }]; })).toMatch(/order queue/);
+    expect(load((s) => { unit(s).orderQueue = [{ type: 'move', x: 1e9, y: 0 }]; })).toMatch(/order queue/);
+    expect(load((s) => { unit(s).carried = { type: 'wood', amount: 2.5 }; })).toMatch(/load/);
+    expect(load((s) => { tcWithQueue(s).tile = { tx: 9999, ty: 0 }; })).toMatch(/outside the map/);
+    expect(load((s) => { tcWithQueue(s).gathererIds = [99999]; })).toMatch(/gatherer list/);
+    expect(load((s) => { tcWithQueue(s).rally = { x: 1, y: 1, targetId: 99999 }; })).toMatch(/rally/);
+    expect(load((s) => { tcWithQueue(s).costPaid.wood = 0.5; })).toMatch(/cost record/);
+    expect(load((s) => { s.pathQueue = [{ id: 1, unitId: 99999, from: { tx: 0, ty: 0 }, goal: { kind: 'point', x: 1, y: 1 } }]; })).toMatch(/path request/);
+    expect(load(() => {})).toBe('loaded');
+  });
+
+  it('says what is wrong with a version that is not a number', () => {
+    for (const [v, re] of [['"1"', /not a number/], ['null', /not a number/], ['1.5', /not a whole number/]] as const) {
+      const text = json.replace(`"version":${SAVE_VERSION}`, `"version":${v}`);
+      let msg = '';
+      try {
+        deserialize(text);
+      } catch (e) {
+        msg = (e as SaveError).message;
+      }
+      expect(msg, v).toMatch(re);
+      expect(msg, v).not.toMatch(/save version 1; this game reads/);
+      const ui = parseSave(text);
+      expect(ui.ok).toBe(false);
+      if (!ui.ok) expect(ui.message, v).toMatch(/unrecognised version/);
+    }
+  });
+
   it('the UI turns the typed errors into plain-language results', () => {
     const newer = parseSave(json.replace(`"version":${SAVE_VERSION}`, `"version":${SAVE_VERSION + 1}`));
     expect(newer).toMatchObject({ ok: false, kind: 'unsupportedVersion' });

@@ -278,8 +278,12 @@ export class HudController {
    */
   cancelQueueItem(buildingId: EntityId, index: number): void {
     if (this.livePendingCancels().some((p) => p.buildingId === buildingId && p.index === index)) return;
+    // The sim applies a tick's cancels one after another, each removing an item and shifting the ones behind
+    // it, so the index sent is the clicked index minus the earlier cancels of the same building that sit ahead
+    // of it. `pendingCancels` keeps the indexes as shown (they are what the queue display is keyed by).
+    const shift = this.livePendingCancels().filter((p) => p.buildingId === buildingId && p.index < index).length;
     this.pendingCancels.push({ buildingId, index, tick: this.match.sim.state.tick });
-    this.match.commands.issue({ type: 'cancelQueue', buildingId, index });
+    this.match.commands.issue({ type: 'cancelQueue', buildingId, index: index - shift });
     if (this.match.loop.paused) this.notifications.push('info', CANCEL_PAUSED_TEXT);
     this.refresh();
   }
