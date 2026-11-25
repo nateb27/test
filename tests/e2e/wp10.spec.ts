@@ -1,45 +1,35 @@
 import { expect, test, type Page } from '@playwright/test';
+import {
+  collectErrors,
+  frames as frame,
+  openGround,
+  inputMode,
+  overlayStats as stats,
+  selectAllVillagers,
+  selection,
+  shot,
+  slot,
+  startMatch as start,
+  step,
+  toMinimap,
+  toScreen,
+  townCenter as tcEntry,
+  type Pt,
+} from './helpers';
 
-/** WP10: minimap, overlays and placement ghost. Screenshots go to the git-ignored test-results/screenshots/wp10/. */
-const SHOTS = 'test-results/screenshots/wp10';
+/** WP10: minimap, overlays and placement ghost, now through the real HUD. Screenshots go to the git-ignored test-results/screenshots/. */
 
-interface Pt {
-  x: number;
-  y: number;
-}
+const startMatch = (page: Page): Promise<void> => start(page, { paused: true });
+const townCenter = async (page: Page): Promise<{ id: number; cx: number; cy: number }> => {
+  const t = await tcEntry(page);
+  return { id: t.id, cx: t.x, cy: t.y };
+};
 
-function collectErrors(page: Page): string[] {
-  const errors: string[] = [];
-  page.on('console', (msg) => {
-    if (msg.type() === 'error') errors.push(msg.text());
-  });
-  page.on('pageerror', (err) => errors.push(err.message));
-  return errors;
-}
-
-async function startMatch(page: Page): Promise<void> {
-  await page.goto('/');
-  await expect(page.getByTestId('main-menu')).toBeVisible();
-  await page.getByTestId('new-game').click();
-  await expect(page.locator('canvas.world-canvas')).toBeVisible({ timeout: 5_000 });
-  await expect.poll(() => page.evaluate(() => window.__game?.state?.entities.length ?? 0)).toBeGreaterThan(10);
-  await expect(page.locator('[data-testid="minimap"]')).toBeVisible();
-  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
-  await page.evaluate(() => window.__game!.setPaused(true));
-}
-
-const toScreen = (page: Page, x: number, y: number): Promise<Pt> => page.evaluate(([wx, wy]) => window.__game!.worldToScreen(wx!, wy!), [x, y] as const);
-const toMinimap = (page: Page, x: number, y: number): Promise<Pt> => page.evaluate(([wx, wy]) => window.__wp10!.minimapToPage(wx!, wy!), [x, y] as const);
-const selection = (page: Page): Promise<number[]> => page.evaluate(() => [...(window.__game?.selection ?? [])]);
-const stats = (page: Page): Promise<Record<string, number>> => page.evaluate(() => window.__wp10!.overlayStats());
-const frame = (page: Page): Promise<unknown> => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
-
-async function townCenter(page: Page): Promise<{ id: number; cx: number; cy: number }> {
-  return page.evaluate(() => {
-    const tc = window.__game!.state!.entities.find((e) => e.kind === 'building' && e.owner === 1 && e.typeId === 'townCenter');
-    if (tc === undefined || tc.kind !== 'building') throw new Error('no town center');
-    return { id: tc.id, cx: tc.tile.tx + 2, cy: tc.tile.ty + 2 };
-  });
+/** With villagers selected: Economy page, then the House button. */
+async function startHousePlacement(page: Page): Promise<void> {
+  await slot(page, 0).click();
+  await slot(page, 0).click();
+  expect(await inputMode(page)).toBe('placement');
 }
 
 /** Camera centre in world tiles (what is under the middle of the canvas). */
@@ -52,20 +42,6 @@ const cameraWorld = (page: Page): Promise<Pt> =>
     const sy = (360 - o.y) / 1;
     return { x: (sx / 32 + sy / 16) / 2, y: (sy / 16 - sx / 32) / 2 };
   });
-
-async function selectAllVillagers(page: Page): Promise<number[]> {
-  const vs = await page.evaluate(() =>
-    window.__game!.state!.entities
-      .filter((e) => e.kind === 'unit' && e.owner === 1 && e.typeId === 'villager')
-      .map((e) => (e.kind === 'unit' ? { id: e.id, x: e.pos.x, y: e.pos.y } : { id: e.id, x: 0, y: 0 })),
-  );
-  const front = [...vs].sort((a, b) => b.x + b.y - (a.x + a.y))[0]!;
-  const p = await toScreen(page, front.x, front.y);
-  await page.mouse.dblclick(p.x, p.y - 14);
-  const sel = await selection(page);
-  expect(sel).toHaveLength(vs.length);
-  return sel;
-}
 
 /** Pixels of the visible minimap base canvas around a page point. */
 function minimapPixels(page: Page, px: number, py: number, radius = 0): Promise<{ r: number; g: number; b: number; a: number }[]> {
@@ -97,7 +73,7 @@ const near = (c: { r: number; g: number; b: number }, hex: number, tol = 14): bo
  * A point on the map (on screen or not) with no building or node nearby, preferring the widest margin: picking
  * uses tall sprite hit boxes, so a right click close to a deposit or tree would resolve to that entity.
  */
-function openGround(page: Page): Promise<Pt> {
+function farOpenGround(page: Page): Promise<Pt> {
   return page.evaluate(() => {
     const ents = window.__game!.state!.entities;
     for (const margin of [12, 10, 8, 6]) {
@@ -117,7 +93,7 @@ function openGround(page: Page): Promise<Pt> {
 test('minimap: left click and drag move the camera; right click orders units there', async ({ page }) => {
   const errors = collectErrors(page);
   await startMatch(page);
-  await page.screenshot({ path: `${SHOTS}/01-match-with-minimap.png` });
+  await shot(page, 'wp10-01-match-with-minimap');
 
   // Click a world point well inside the map: the camera centres on it.
   const target = { x: 40, y: 70 };
@@ -127,7 +103,7 @@ test('minimap: left click and drag move the camera; right click orders units the
   const c = await cameraWorld(page);
   expect(Math.abs(c.x - target.x)).toBeLessThan(1.5);
   expect(Math.abs(c.y - target.y)).toBeLessThan(1.5);
-  await page.screenshot({ path: `${SHOTS}/02-minimap-click.png` });
+  await shot(page, 'wp10-02-minimap-click');
 
   // Dragging follows the pointer.
   const a = await toMinimap(page, 80, 30);
@@ -149,10 +125,10 @@ test('minimap: left click and drag move the camera; right click orders units the
   // Back to the Town Center, select the villagers, right click the minimap: they are ordered to move there.
   await page.keyboard.press('KeyH');
   await selectAllVillagers(page);
-  const dest = await openGround(page); // the seed is random: a tree or deposit under the click would turn the order into a gather
+  const dest = await farOpenGround(page); // the seed is random: a tree or deposit under the click would turn the order into a gather
   const d = await toMinimap(page, dest.x, dest.y);
   await page.mouse.click(d.x, d.y, { button: 'right' });
-  await page.evaluate(() => window.__game!.step(2));
+  await step(page, 2);
   const orders = await page.evaluate(() =>
     window.__game!.state!.entities
       .filter((e) => e.kind === 'unit' && e.owner === 1 && e.typeId === 'villager')
@@ -240,8 +216,8 @@ test('minimap shows the Town Center, resource nodes, units and the camera outlin
   expect(outline).toBeGreaterThan(30);
 
   const box = await page.locator('[data-testid="minimap"]').boundingBox();
-  await page.screenshot({ path: `${SHOTS}/03-minimap.png`, clip: { x: box!.x - 8, y: box!.y - 8, width: box!.width + 16, height: box!.height + 16 } });
-  await page.screenshot({ path: `${SHOTS}/04-minimap-full-view.png` });
+  await page.screenshot({ path: `test-results/screenshots/wp10-03-minimap.png`, clip: { x: box!.x - 8, y: box!.y - 8, width: box!.width + 16, height: box!.height + 16 } });
+  await shot(page, 'wp10-04-minimap-full-view');
   expect(errors).toEqual([]);
 });
 
@@ -253,49 +229,75 @@ test('selection rings, drag box, bars, carried marker, rally flag and order mark
   const ids = await selectAllVillagers(page);
   await frame(page);
   expect((await stats(page)).rings).toBe(ids.length);
-  await page.screenshot({ path: `${SHOTS}/05-selection-rings.png` });
+  await shot(page, 'wp10-05-selection-rings');
 
   // Drag box overlay is visible while dragging (screenshot only; selection logic is WP5's).
   await page.mouse.move(300, 150);
   await page.mouse.down();
   await page.mouse.move(520, 280, { steps: 4 });
   await frame(page);
-  await page.screenshot({ path: `${SHOTS}/06-drag-box.png` });
+  await shot(page, 'wp10-06-drag-box');
   await page.mouse.up();
 
-  // Order marker: right click ground with villagers selected.
+  // Order marker: right click open ground with villagers selected.
   await selectAllVillagers(page);
   const tc = await townCenter(page);
-  const ground = await toScreen(page, tc.cx + 7, tc.cy + 6);
+  const ground = await openGround(page, tc.cx, tc.cy + 5, 3);
   const addedBefore = (await stats(page)).markersAdded!;
-  await page.mouse.click(ground.x, ground.y, { button: 'right' });
+  await page.mouse.click(ground.sx, ground.sy, { button: 'right' });
   await frame(page);
-  expect((await stats(page)).markersAdded).toBe(addedBefore! + 1);
-  await page.screenshot({ path: `${SHOTS}/07-move-marker.png` });
+  expect((await stats(page)).markersAdded).toBe(addedBefore + 1);
+  await shot(page, 'wp10-07-move-marker');
   // The marker is brief: it disappears by itself.
   await expect.poll(async () => {
     await frame(page);
     return (await stats(page)).markers;
   }, { timeout: 5000 }).toBe(0);
 
-  // Bars, carried marker and rally flag: put the state into the shape the later sim packages produce.
-  await page.evaluate(() => {
-    const s = window.__game!.state! as unknown as { entities: Record<string, unknown>[] };
-    const tcE = s.entities.find((e) => e.kind === 'building' && e.owner === 1) as Record<string, unknown>;
-    tcE.queue = [{ kind: 'unit', unitType: 'villager', costPaid: {}, ticksDone: 40, ticksTotal: 100, popCapNotified: false }];
-    tcE.rally = { x: (tcE.tile as { tx: number }).tx + 9, y: (tcE.tile as { ty: number }).ty + 3, targetId: null };
-    const v = s.entities.find((e) => e.kind === 'unit' && e.owner === 1) as Record<string, unknown>;
-    v.carried = { type: 'wood', amount: 8 };
-  });
+  // Carried marker: send the villagers to the nearest tree and let them work for a while.
+  const tree = await page.evaluate(
+    ([cx, cy]) => {
+      const g = window.__game!;
+      let best: { x: number; y: number } | null = null;
+      let bestD = Infinity;
+      for (const e of g.state!.entities) {
+        if (e.kind !== 'node' || e.typeId !== 'tree') continue;
+        const x = e.tile.tx + 0.5;
+        const y = e.tile.ty + 0.5;
+        const s = g.worldToScreen(x, y);
+        if (s.x < 100 || s.x > 1180 || s.y < 120 || s.y > 480) continue;
+        const d = Math.hypot(x - cx!, y - cy!);
+        if (d < bestD) {
+          bestD = d;
+          best = { x, y };
+        }
+      }
+      return best;
+    },
+    [tc.cx, tc.cy] as const,
+  );
+  expect(tree).not.toBeNull();
+  const tp = await toScreen(page, tree!.x, tree!.y);
+  await page.mouse.click(tp.x, tp.y, { button: 'right' });
+  await step(page, 500);
+  await frame(page);
+  expect((await stats(page)).carry).toBeGreaterThanOrEqual(1);
+
+  // Queue bar and rally flag: select the Town Center, train a villager with the card, set the rally with the card.
   await page.keyboard.press('KeyH');
-  await page.evaluate(() => window.__game!.step(1));
+  await slot(page, 0).click();
+  await step(page, 60);
+  await page.keyboard.press('KeyB');
+  const rally = await openGround(page, tc.cx, tc.cy + 4, 3);
+  await page.mouse.click(rally.sx, rally.sy);
+  expect(await inputMode(page)).toBeNull();
+  await step(page, 2);
   await frame(page);
   const st = await stats(page);
   expect(st.bars).toBe(1);
-  expect(st.carry).toBe(1);
   expect(st.flags).toBe(1);
   expect(st.outlines).toBe(1);
-  await page.screenshot({ path: `${SHOTS}/08-rally-bars.png` });
+  await shot(page, 'wp10-08-rally-bars');
   expect(errors).toEqual([]);
 });
 
@@ -356,15 +358,15 @@ test('placement mode: ghost follows the cursor, red over the Town Center and tre
   await selectAllVillagers(page);
   const spots = await probeSpots(page);
 
-  await page.evaluate(() => window.__wp10!.startPlacement('house'));
-  expect(await page.evaluate(() => window.__wp10!.mode())).toBe('placement');
+  await startHousePlacement(page);
+  expect(await inputMode(page)).toBe('placement');
 
   const ghostAt = async (w: Pt) => {
     const p = await toScreen(page, w.x, w.y);
     await page.mouse.move(p.x - 30, p.y - 20);
     await page.mouse.move(p.x, p.y, { steps: 2 });
     await frame(page);
-    const g = await page.evaluate(() => window.__wp10!.ghost());
+    const g = await page.evaluate(() => window.__game!.ghost());
     expect(g).not.toBeNull();
     return g!;
   };
@@ -376,61 +378,61 @@ test('placement mode: ghost follows the cursor, red over the Town Center and tre
   expect(Math.abs(grass.tx + 1 - spots.grass.x)).toBeLessThanOrEqual(0.5);
   expect(Math.abs(grass.ty + 1 - spots.grass.y)).toBeLessThanOrEqual(0.5);
   expect((await stats(page)).ghostTiles).toBe(4);
-  await page.screenshot({ path: `${SHOTS}/09-ghost-green.png` });
+  await shot(page, 'wp10-09-ghost-green');
 
   // Over a tree: red, blocked.
   const tree = await ghostAt(spots.tree);
   expect(tree.ok).toBe(false);
   expect(tree.reason).toBe('Blocked');
   expect(tree.tileOk.some((t) => !t)).toBe(true);
-  await page.screenshot({ path: `${SHOTS}/10-ghost-tree-red.png` });
+  await shot(page, 'wp10-10-ghost-tree-red');
 
   // Over the Town Center: red.
   const tcGhost = await ghostAt(spots.tc);
   expect(tcGhost.ok).toBe(false);
   expect(tcGhost.tileOk.every((t) => !t)).toBe(true);
-  await page.screenshot({ path: `${SHOTS}/11-ghost-tc-red.png` });
+  await shot(page, 'wp10-11-ghost-tc-red');
 
   // Overlapping the Town Center's edge: invalid, with some tiles green and some red.
   const edge = await ghostAt({ x: spots.tc.x + 1.9, y: spots.tc.y + 0.2 });
   expect(edge.ok).toBe(false);
   expect(edge.tileOk.some(Boolean) && edge.tileOk.some((t) => !t)).toBe(true);
-  await page.screenshot({ path: `${SHOTS}/12-ghost-edge-red.png` });
+  await shot(page, 'wp10-12-ghost-edge-red');
 
   // Esc cancels; the ghost goes away and the mode ends.
   await page.keyboard.press('Escape');
-  expect(await page.evaluate(() => window.__wp10!.mode())).toBeNull();
+  expect(await inputMode(page)).toBeNull();
   await frame(page);
   expect((await stats(page)).ghostTiles).toBe(0);
 
   // Right click cancels too and issues no order.
-  await page.evaluate(() => window.__wp10!.startPlacement('house'));
+  await startHousePlacement(page);
   await ghostAt(spots.grass);
   const gp = await toScreen(page, spots.grass.x, spots.grass.y);
   await page.mouse.click(gp.x, gp.y, { button: 'right' });
-  expect(await page.evaluate(() => window.__wp10!.mode())).toBeNull();
-  await page.evaluate(() => window.__game!.step(2));
+  expect(await inputMode(page)).toBeNull();
+  await step(page, 2);
   expect(await selection(page)).not.toHaveLength(0);
   const moving = await page.evaluate(() => window.__game!.state!.entities.some((e) => e.kind === 'unit' && e.owner === 1 && e.currentOrder !== null));
   expect(moving).toBe(false);
 
   // Left click on a valid spot issues `build` (shown as an order marker) and ends the mode.
-  await page.evaluate(() => window.__wp10!.startPlacement('house'));
+  await startHousePlacement(page);
   await ghostAt(spots.grass);
   const added = (await stats(page)).markersAdded!;
   await page.mouse.click(gp.x, gp.y);
-  expect(await page.evaluate(() => window.__wp10!.mode())).toBeNull();
+  expect(await inputMode(page)).toBeNull();
   expect((await stats(page)).markersAdded).toBe(added + 1);
 
   // Shift keeps the mode active for repeated placement.
-  await page.evaluate(() => window.__wp10!.startPlacement('house'));
+  await startHousePlacement(page);
   await ghostAt(spots.grass);
   await page.keyboard.down('Shift');
   await page.mouse.click(gp.x, gp.y);
   await page.keyboard.up('Shift');
-  expect(await page.evaluate(() => window.__wp10!.mode())).toBe('placement');
+  expect(await inputMode(page)).toBe('placement');
   await page.keyboard.press('Escape');
-  expect(await page.evaluate(() => window.__wp10!.mode())).toBeNull();
+  expect(await inputMode(page)).toBeNull();
   expect(errors).toEqual([]);
 });
 
@@ -439,11 +441,11 @@ test('rally mode: the next click sets the rally and ends the mode', async ({ pag
   await startMatch(page);
   await page.keyboard.press('KeyH');
   const spots = await probeSpots(page);
-  await page.evaluate(() => window.__wp10!.startRally());
-  expect(await page.evaluate(() => window.__wp10!.mode())).toBe('rally');
+  await page.keyboard.press('KeyB');
+  expect(await inputMode(page)).toBe('rally');
   const p = await toScreen(page, spots.grass.x, spots.grass.y);
   await page.mouse.click(p.x, p.y);
-  expect(await page.evaluate(() => window.__wp10!.mode())).toBeNull();
+  expect(await inputMode(page)).toBeNull();
   // The click that set the rally did not change the selection.
   expect(await selection(page)).toHaveLength(1);
   expect(errors).toEqual([]);

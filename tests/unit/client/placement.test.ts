@@ -179,13 +179,6 @@ describe('placement mode state machine', () => {
     mode.onPointerMove?.({ x: 150, y: 50 }, noMods);
     expect(mode.ghost.visible).toBe(false);
   });
-
-  it('falls back to the overall answer when the sim result does not match the footprint', () => {
-    const stub: PlacementResult = { ok: false, size: 1, tiles: [null], availability: AVAILABLE };
-    const { mode } = harness({ canPlace: () => stub });
-    mode.onPointerMove?.({ x: 52, y: 83 }, noMods);
-    expect(mode.ghost.tileOk).toEqual([false, false, false, false]);
-  });
 });
 
 describe('selectedBuilders', () => {

@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { buildCommandCard, type HudQueries } from '../../../src/client/ui/commandCard';
-import { createFixture, fakeAvailability, fakeQueries } from '../../../src/client/ui/fixtures';
+import { createFixture, fakeQueries } from '../../../src/client/ui/fixtures';
 import { CARD_HOTKEYS } from '../../../src/client/ui/viewModel';
 import { registry } from '../../../src/data';
+import { createGame } from '../../../src/sim';
 import type { DataRegistry } from '../../../src/data/schema';
 import type { AgeNumber, Availability, BuildingEntity, ReadonlyEntity } from '../../../src/sim/types';
 
@@ -163,16 +164,28 @@ describe('villager card', () => {
     expect(vm.buttons.find((b) => b.defId === 'farm')!.cost).toEqual({ food: 0, wood: 40, gold: 0, stone: 0 });
   });
 
-  it('falls back to the data time when resolvedStat cannot answer (sim stub)', () => {
-    const fx = createFixture();
-    const query: HudQueries = {
-      availability: fakeAvailability(fx.state),
-      resolvedStat: () => {
-        throw new Error('not implemented');
-      },
-    };
-    const vm = card(fx, [fx.villagers[0]!], 'economy', query)!;
-    expect(vm.buttons.find((b) => b.defId === 'house')!.timeSeconds).toBe(20);
+  it('uses the real sim queries: resolved costs and times, and the Town Center is in no build menu', () => {
+    const sim = createGame({ seed: 3, mapSize: 120, players: [{ civ: 'byzantines' }] });
+    const villager = sim.state.entities.find((e) => e.kind === 'unit' && e.owner === 1)!;
+    const seen = new Set<string>();
+    for (const page of ['main', 'economy', 'military'] as const) {
+      const vm = buildCommandCard({ playerId: 1, civ: 'byzantines', registry, query: sim.query, selected: [villager], page })!;
+      for (const b of vm.buttons) if (b.defId !== null) seen.add(b.defId);
+    }
+    expect(seen.has('townCenter')).toBe(false);
+    expect(seen.has('house')).toBe(true);
+    expect(seen.has('silkWorkshop')).toBe(true);
+    const eco = buildCommandCard({ playerId: 1, civ: 'byzantines', registry, query: sim.query, selected: [villager], page: 'economy' })!;
+    const farm = eco.buttons.find((b) => b.defId === 'farm')!;
+    expect(farm.cost).toEqual({ food: 0, wood: 40, gold: 0, stone: 0 });
+    expect(farm.timeSeconds).toBe(12);
+    expect(farm.enabled).toBe(true);
+    // The Lancer is never offered to the Byzantines, the Cataphract is (greyed until Age 3).
+    const stable = sim.state.entities.find((e) => e.kind === 'building' && e.owner === 1)!;
+    const asStable = { ...stable, typeId: 'stable' } as ReadonlyEntity;
+    const stableCard = buildCommandCard({ playerId: 1, civ: 'byzantines', registry, query: sim.query, selected: [asStable], page: 'main' })!;
+    expect(stableCard.buttons.some((b) => b.defId === 'lancer')).toBe(false);
+    expect(stableCard.buttons.find((b) => b.defId === 'cataphract')!.enabled).toBe(false);
   });
 
   it('ignores the requested page unless every selected unit builds', () => {

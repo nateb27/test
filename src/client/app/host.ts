@@ -97,6 +97,23 @@ function createDebugHook(host: AppHost): GameDebugHook {
     hash() {
       return hashState(host.requireMatch().sim.state);
     },
+    inputMode() {
+      return host.match?.modes.active?.kind ?? null;
+    },
+    ghost() {
+      const g = host.match?.modes.ghost() ?? null;
+      return g === null
+        ? null
+        : { tx: g.tx, ty: g.ty, size: g.size, ok: g.ok, visible: g.visible, reason: g.reason, tileOk: [...g.tileOk] };
+    },
+    overlayStats() {
+      return { ...host.requireMatch().overlays.stats };
+    },
+    minimapToPage(x, y) {
+      const minimap = host.requireMatch().minimap;
+      if (minimap === null) throw new Error('The minimap is not mounted');
+      return minimap.worldToPage(x, y);
+    },
     setPaused(paused) {
       host.requireMatch().loop.paused = paused;
     },

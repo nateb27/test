@@ -8,11 +8,10 @@ import type { EntityId, Sim, SimEvent } from '../../sim/types';
 import { registry } from '../../data';
 import type { AssetManifest } from '../art/manifest';
 import { GameInput } from '../input';
-import { createModeController, type ModeController } from '../input/placement';
-import { installPlacementDebug, tempCanPlace } from '../input/placement/tempDev';
+import { createModeController, type ActiveMode, type ModeController } from '../input/placement';
 import { WorldOverlays } from '../render/overlays';
 import type { WorldRendererApi } from '../render/renderer';
-import { mountTempMinimap } from '../ui/minimap';
+import type { Minimap } from '../ui/minimap';
 import { CommandBuffer } from './commandBuffer';
 import { FixedTickLoop } from './loop';
 
@@ -20,6 +19,7 @@ import { FixedTickLoop } from './loop';
 export const LOCAL_PLAYER_ID = 1;
 
 export type SimEventListener = (events: readonly SimEvent[]) => void;
+export type ModeListener = (mode: ActiveMode | null) => void;
 
 export class Match {
   readonly loop = new FixedTickLoop();
@@ -30,8 +30,13 @@ export class Match {
   readonly modes: ModeController;
   /** Selection rings, bars, rally flags, order markers, placement ghost (WP10). */
   readonly overlays: WorldOverlays;
+  /** The mounted minimap, set by the game screen once the HUD slot exists (null before). */
+  minimap: Minimap | null = null;
+  /** Receives the text of a refused placement or rally click; the game screen points it at the HUD toasts. */
+  onInvalid: (text: string) => void = () => {};
   private readonly cleanup: (() => void)[] = [];
   private readonly listeners = new Set<SimEventListener>();
+  private readonly modeListeners = new Set<ModeListener>();
   private rafId: number | null = null;
   private lastFrameMs: number | null = null;
   private alpha = 0;
@@ -49,7 +54,10 @@ export class Match {
       commands: this.commands,
       playerId: LOCAL_PLAYER_ID,
       registry,
-      canPlace: tempCanPlace(sim, LOCAL_PLAYER_ID, registry), // TEMPORARY (WP10): drop once WP7's canPlace is merged
+      onInvalid: (text) => this.onInvalid(text),
+      onChange: (mode) => {
+        for (const l of this.modeListeners) l(mode);
+      },
     });
     this.overlays = new WorldOverlays({
       sim,
@@ -62,10 +70,12 @@ export class Match {
       ...(manifest !== undefined ? { manifest } : {}),
     });
     this.cleanup.push(this.commands.onIssue((c) => this.overlays.notifyCommand(c)));
-    // TEMPORARY (WP10): minimap before the HUD's `#minimap-slot` exists, and debug entry points for placement.
-    const tmp = mountTempMinimap({ getState: () => sim.state, registry, playerId: LOCAL_PLAYER_ID, renderer, input: this.input });
-    this.cleanup.push(() => tmp.dispose());
-    this.cleanup.push(installPlacementDebug(this.modes, (x, y) => tmp.minimap.worldToPage(x, y), () => ({ ...this.overlays.stats })));
+  }
+
+  /** Be told when placement or rally mode starts or ends (`null` = no mode). */
+  onModeChange(listener: ModeListener): () => void {
+    this.modeListeners.add(listener);
+    return () => this.modeListeners.delete(listener);
   }
 
   /** Selected entity ids (client state, ascending). */
@@ -124,6 +134,7 @@ export class Match {
   destroy(): void {
     this.stop();
     this.listeners.clear();
+    this.modeListeners.clear();
     for (const c of this.cleanup) c();
     this.cleanup.length = 0;
     this.overlays.destroy();

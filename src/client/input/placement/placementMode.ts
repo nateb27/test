@@ -77,9 +77,7 @@ export function createPlacementMode(buildingType: BuildingId, deps: PlacementDep
     const r = deps.canPlace(buildingType, t.tx, t.ty);
     ghost.result = r;
     ghost.ok = r.ok;
-    // A result for another footprint size (a stub) cannot colour individual tiles: fall back to the overall answer.
-    const perTile = r.tiles.length === size * size;
-    for (let i = 0; i < ghost.tileOk.length; i++) ghost.tileOk[i] = perTile ? r.tiles[i] === null : r.ok;
+    for (let i = 0; i < ghost.tileOk.length; i++) ghost.tileOk[i] = r.tiles[i] === null;
     ghost.reason = describePlacementProblem(r);
     ghost.visible = true;
   };

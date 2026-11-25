@@ -30,6 +30,22 @@ export interface GameDebugHook {
   hash(): string;
   setPaused(paused: boolean): void;
   setSpeed(speed: GameSpeed): void;
+  /** Active input mode (set by a Build or Set Rally button), or null. */
+  inputMode(): 'placement' | 'rally' | null;
+  /** The placement ghost under the cursor, or null outside placement mode. */
+  ghost(): {
+    tx: number;
+    ty: number;
+    size: number;
+    ok: boolean;
+    visible: boolean;
+    reason: string | null;
+    tileOk: boolean[];
+  } | null;
+  /** Counts of what the world overlays drew on the last frame. */
+  overlayStats(): Record<string, number>;
+  /** World tiles -> page CSS pixels on the minimap. Throws while the minimap is not mounted. */
+  minimapToPage(x: number, y: number): { x: number; y: number };
   /** Cheats are issued as `cheat` commands for the local player and apply on the next tick. */
   readonly cheat: {
     addResources(amounts: Partial<ResourceAmounts>): void;

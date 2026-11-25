@@ -45,11 +45,15 @@ export interface ModeControllerDeps {
   commands: CommandSink;
   playerId: PlayerId;
   registry: DataRegistry;
-  /** Replaces `sim.query.canPlace` (tests, and the temporary fallback while the sim's is a stub). */
+  /** Replaces `sim.query.canPlace` (tests only; the game uses the sim's). */
   canPlace?(buildingType: BuildingId, tx: number, ty: number): PlacementResult;
   /** Toast text for a refused click ("Not enough wood", "Blocked"). */
   onInvalid?(reason: string): void;
+  /** The active mode changed (started, replaced or ended); `null` when none is active. */
+  onChange?(mode: ActiveMode | null): void;
 }
+
+export type ActiveMode = PlacementMode | RallyMode;
 
 export interface ModeController {
   /** Enter placement mode for a building type (replaces any active mode). */
@@ -70,12 +74,14 @@ export function createModeController(deps: ModeControllerDeps): ModeController {
   const enter = <T extends PlacementMode | RallyMode>(mode: T): T => {
     active = mode;
     deps.input.setMode(mode);
+    deps.onChange?.(mode);
     return mode;
   };
   const leave = (mode: PlacementMode | RallyMode): void => {
     if (active === mode) {
       active = null;
       deps.input.setMode(null);
+      deps.onChange?.(null);
     }
   };
 
@@ -117,6 +123,7 @@ export function createModeController(deps: ModeControllerDeps): ModeController {
         active = null;
         deps.input.setMode(null);
         m.onCancel?.();
+        deps.onChange?.(null);
       }
     },
     get active() {

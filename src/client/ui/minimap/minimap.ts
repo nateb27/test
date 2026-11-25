@@ -186,8 +186,13 @@ export function mountMinimap(deps: MinimapDeps): Minimap {
       const c = worldToMinimap(view, e.tile.tx + size / 2, e.tile.ty + size / 2);
       g.fillStyle = css(def.minimapColor);
       if (def.resource === 'wood') {
-        diamondPath(g, view, e.tile.tx, e.tile.ty, e.tile.tx + size, e.tile.ty + size);
-        g.fill();
+        // Exact footprint when it is big enough to see, else a crisp pixel (at the HUD's size a tile is under 1 px).
+        if (view.k * size >= 2) {
+          diamondPath(g, view, e.tile.tx, e.tile.ty, e.tile.tx + size, e.tile.ty + size);
+          g.fill();
+        } else {
+          g.fillRect(Math.round(c.x - 0.5), Math.round(c.y - 0.5), 1, 1);
+        }
       } else {
         // Ore and food stand out: a pixel-aligned square of at least 3 px with a dark rim.
         mark(g, c.x, c.y, Math.max(3, Math.round(size * view.k * 1.2)), css(def.minimapColor));

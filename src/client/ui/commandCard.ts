@@ -9,7 +9,7 @@
  * - Items for which `availability(...).hidden` is true (other civs, replaced
  *   defs) never appear. Everything else appears; unavailable ones are greyed
  *   (`enabled: false`) with the reasons from `availability`.
- * - Costs are the resolved (modifier-adjusted) ones from `availability`.
+ * - Costs are the resolved (modifier-adjusted) ones from `availability`; times are `resolvedStat`.
  */
 
 import type { BuildingDef, DataRegistry, ProducibleDef } from '../../data/schema';
@@ -63,24 +63,15 @@ interface Item {
   body: ButtonBody;
 }
 
-/** Resolved stat or the data's base value when the query cannot answer. */
-function statOr(query: HudQueries, playerId: PlayerId, defId: DefId, stat: StatKey, fallback: number): number {
-  try {
-    const v = query.resolvedStat(playerId, defId, stat);
-    return Number.isFinite(v) ? v : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function baseTime(def: ProducibleDef): { stat: StatKey; seconds: number } {
+/** The stat holding a def's production time in seconds. */
+function timeStat(def: ProducibleDef): StatKey {
   switch (def.kind) {
     case 'unit':
-      return { stat: 'trainTime', seconds: def.trainTime };
+      return 'trainTime';
     case 'building':
-      return { stat: 'buildTime', seconds: def.buildTime };
+      return 'buildTime';
     case 'tech':
-      return { stat: 'researchTime', seconds: def.researchTime };
+      return 'researchTime';
   }
 }
 
@@ -94,7 +85,6 @@ function defItem(input: CardInput, defId: ProducibleId, action: CardAction, pref
   if (def === undefined) return null;
   const av = input.query.availability(input.playerId, defId);
   if (av.hidden || neverForCiv(def, input.civ)) return null;
-  const time = baseTime(def);
   return {
     key: `${action.type}:${defId}`,
     fixedSlot: null,
@@ -105,7 +95,7 @@ function defItem(input: CardInput, defId: ProducibleId, action: CardAction, pref
       icon: def.icon,
       defId,
       cost: { ...av.cost },
-      timeSeconds: statOr(input.query, input.playerId, defId, time.stat, time.seconds),
+      timeSeconds: input.query.resolvedStat(input.playerId, defId, timeStat(def)),
       description: def.description,
       enabled: av.available,
       reasons: [...av.reasons],
