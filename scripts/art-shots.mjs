@@ -149,11 +149,12 @@ try {
   });
   page.on('pageerror', (e) => errors.push(e.message));
   const t0 = Date.now();
-  await start();
+  await start(process.env.ART_QUERY ?? '');
   console.log('boot ms', Date.now() - t0, JSON.stringify(await page.evaluate(() => window.__art.report())));
   if (want('start')) await shot('start');
 
   if (want('ages') || want('army') || want('work') || want('zoom') || want('construction')) {
+    await page.waitForFunction(() => window.__art?.report()?.complete === true, null, { timeout: 300_000 });
     const placed = await placeTown(['house', 'house', 'mill', 'lumberCamp', 'miningCamp', 'farm', 'farm', 'barracks']);
     console.log('placed', placed.join(','));
     await focusTC();

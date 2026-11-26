@@ -300,8 +300,8 @@ function villager(state: UnitAnimState, frame: number): UnitBuild {
     const p = withArms(walkPose(frame, 0.3), [-0.25 * (frame === 0 ? 1 : -1), 0.14], 0.35, [2.7, 0.35], 0.9, 0.12);
     const h = human(f, look, p);
     // Sack over the right shoulder.
-    f.ell(add(h.back, [0.0, -0.05, 0.08]), 0.075, 0.065, 0.06, M.SACK);
-    f.ell(add(h.back, [0.03, -0.07, 0.12]), 0.04, 0.035, 0.03, M.SACK);
+    f.ell(add(h.back, [0.0, -0.05, 0.09]), 0.095, 0.085, 0.075, M.SACK);
+    f.ell(add(h.back, [0.03, -0.08, 0.15]), 0.05, 0.045, 0.04, M.STRAW);
   } else if (state === 'walk') {
     const h = human(f, look, walkPose(frame));
     held(f, h.r, 0.15, 1, 0.2, 0.08, 0.009, M.TOOLWOOD);

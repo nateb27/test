@@ -33,7 +33,7 @@ export async function createGameArt(registry: DataRegistry, search = typeof loca
   if (mode === 'fast') return Object.assign(fast, { artMode: 'fast' as const, rendered: null });
   const q = new URLSearchParams(search);
   const [{ createRenderedManifest }, { createCompositeManifest }] = await Promise.all([import('./rendered/manifest'), import('./composite')]);
-  const rendered = createRenderedManifest({ registry, noWorkers: q.get('artWorkers') === '0', noCache: q.get('artCache') === '0' });
+  const rendered = createRenderedManifest({ registry, noWorkers: q.get('artWorkers') === '0', noCache: q.get('artCache') === '0', fallback: fast });
   const composite = createCompositeManifest([{ manifest: rendered, sprites: (id) => rendered.has(id), icons: () => true }], fast);
   return Object.assign(composite, { artMode: 'rendered' as const, rendered });
 }

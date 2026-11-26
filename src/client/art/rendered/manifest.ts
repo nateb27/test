@@ -58,6 +58,8 @@ export interface RenderedManifestOptions {
   noWorkers?: boolean;
   /** Neither read nor write the IndexedDB cache. */
   noCache?: boolean;
+  /** Serves sprites that are still rendering in the background (the procedural art). */
+  fallback?: TeamAssetManifest;
   onReport?: (r: ArtLoadReport) => void;
 }
 
@@ -75,6 +77,9 @@ const NODE_VARIANTS: Readonly<Record<NodeKey, number>> = {
   goldDeposit: DEPOSIT_VARIANTS,
   stoneDeposit: DEPOSIT_VARIANTS,
 };
+
+/** Earthy icon frames: the rendered buildings and nodes are light and wash out on the pale procedural ones. */
+const ICON_THEMES = { building: { top: '#6f6a4c', bottom: '#2f2c1f' }, node: { top: '#5d6b39', bottom: '#28311a' } };
 
 const FRAME_MS: Readonly<Record<UnitAnimState, number>> = { idle: 700, walk: 220, work: 300, carry: 240 };
 const STAGES: readonly BuildingStage[] = ['foundation', 'scaffold', 'complete'];
@@ -243,10 +248,8 @@ export function createRenderedManifest(options: RenderedManifestOptions = {}): R
     return byName.has(`node.${p.key}|0`);
   }
 
-  function teamSprite(id: SpriteId, primary: number, _secondary: number): SpriteAsset {
-    const resolved = spriteAlias.get(id) ?? id;
-    const p = parseSpriteId(resolved);
-    if (p === null || p.key === null || !isReady(resolved)) throw new Error(`rendered art has no sprite ${id} (yet)`);
+  function realAsset(id: string, resolved: string, primary: number): SpriteAsset {
+    const p = parseSpriteId(resolved)!;
     const ck = p.kind === 'node' ? resolved : `${resolved}#${primary}`;
     let a = assets.get(ck);
     if (a === undefined) {
@@ -256,6 +259,43 @@ export function createRenderedManifest(options: RenderedManifestOptions = {}): R
       assets.set(ck, a);
     }
     return a;
+  }
+
+  /**
+   * The asset for a known id. Callers keep assets (the entity layer holds one per entity), so an id whose sprites
+   * are still rendering in the background gets an asset that delegates to the fallback art and switches to the
+   * rendered sprites as soon as they arrive (the anchor follows, it is read again when the texture changes).
+   */
+  function teamSprite(id: SpriteId, primary: number, secondary: number): SpriteAsset {
+    const resolved = spriteAlias.get(id) ?? id;
+    const p = parseSpriteId(resolved);
+    if (p === null || p.key === null) throw new Error(`rendered art has no sprite ${id}`);
+    if (isReady(resolved)) return realAsset(id, resolved, primary);
+    const lk = `lazy|${resolved}#${primary}`;
+    const hit = assets.get(lk);
+    if (hit !== undefined) return hit;
+    const fb = options.fallback;
+    let real: SpriteAsset | null = null;
+    const current = (): SpriteAsset | null => {
+      if (real === null && isReady(resolved)) real = realAsset(id, resolved, primary);
+      return real ?? fb?.teamSprite(id, primary, secondary) ?? null;
+    };
+    const blank: SpriteAnimation = { frames: [Texture.EMPTY], frameMs: 0, mirrorX: false };
+    const lazy: SpriteAsset = {
+      id,
+      get anchor() {
+        return current()?.anchor ?? { x: 0.5, y: 1 };
+      },
+      get states() {
+        return current()?.states ?? ['default'];
+      },
+      get variants() {
+        return current()?.variants;
+      },
+      animation: (state, facing, ctx) => current()?.animation(state, facing, ctx) ?? blank,
+    };
+    assets.set(lk, lazy);
+    return lazy;
   }
 
   /** Opaque pixels of an atlas entry (no shadow) as a canvas Surface for the icon painter. */
@@ -309,7 +349,7 @@ export function createRenderedManifest(options: RenderedManifestOptions = {}): R
       building: (k) => iconSources.building(k) ?? ((missing = true), null),
       node: (k) => iconSources.node(k) ?? ((missing = true), null),
     };
-    const surface = drawIcon(spec, DEFAULT_TEAM, sources);
+    const surface = drawIcon(spec, DEFAULT_TEAM, sources, ICON_THEMES);
     const texture = new Texture({ source: new CanvasSource({ resource: surface.canvas, resolution: SS }) });
     owned.push(texture);
     const e = { surface, texture, url: null as string | null };
@@ -410,7 +450,7 @@ export function createRenderedManifest(options: RenderedManifestOptions = {}): R
         if (options.noCache !== true) void saveCached({ key, atlas: { pages: atlas.pages, entries: atlas.entries.map((e) => ({ ...e })) }, terrain: terrainTex });
       });
     },
-    has: (id) => isReady(id),
+    has: (id) => isKnown(id),
     sprite: (id) => teamSprite(id, DEFAULT_PRIMARY, 0),
     teamSprite,
     isFallback: (id) => !isKnown(id),

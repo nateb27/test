@@ -54,8 +54,14 @@ export interface IconSources {
   node(key: string): Surface | null;
 }
 
+/** Optional frame colours for sprite-based icons (the rendered art uses darker, earthier frames). */
+export interface IconThemes {
+  building?: { top: string; bottom: string };
+  node?: { top: string; bottom: string };
+}
+
 /** Draw an icon for a resolved spec; `null` spec draws the fallback "?" tile. */
-export function drawIcon(spec: IconSpec | null, team: TeamColors, src: IconSources): Surface {
+export function drawIcon(spec: IconSpec | null, team: TeamColors, src: IconSources, themes: IconThemes = {}): Surface {
   const s = makeSurface(ICON_SIZE, ICON_SIZE);
   const { ctx } = s;
   if (spec === null) {
@@ -75,13 +81,13 @@ export function drawIcon(spec: IconSpec | null, team: TeamColors, src: IconSourc
       break;
     }
     case 'building': {
-      frame(ctx, { top: '#d9e6c4', bottom: '#8aa56a', border: team.secondary });
+      frame(ctx, { top: themes.building?.top ?? '#d9e6c4', bottom: themes.building?.bottom ?? '#8aa56a', border: team.secondary });
       const b = src.building(spec.key);
       if (b !== null) blit(ctx, b, 5);
       break;
     }
     case 'node': {
-      frame(ctx, { top: '#a8d27e', bottom: '#4f7a32', border: '#d8cfae' });
+      frame(ctx, { top: themes.node?.top ?? '#a8d27e', bottom: themes.node?.bottom ?? '#4f7a32', border: '#d8cfae' });
       const n = src.node(spec.key);
       if (n !== null) blit(ctx, n, 5);
       break;
