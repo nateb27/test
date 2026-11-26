@@ -317,7 +317,7 @@ export class WorldOverlays {
     if (asset === null) {
       this.ghostArt.visible = false;
     } else {
-      const anim = asset.animation('complete', 0);
+      const anim = asset.animation('complete', 0, { age: this.deps.sim.state.players[this.deps.playerId]?.age ?? 1 });
       const art = this.ghostArt;
       art.visible = true;
       art.texture = anim.frames[0]!;

@@ -28,6 +28,20 @@ export interface SpriteAnimation {
    * mirror the other 4.
    */
   readonly mirrorX: boolean;
+  /**
+   * Optional, per frame: empty rows above the model in texture pixels (not counting a baked shadow). Overlays that
+   * sit on top of a sprite use it instead of scanning the texture.
+   */
+  readonly modelTop?: readonly number[];
+}
+
+/**
+ * Optional per-entity context for `SpriteAsset.animation`: the owner's age (buildings show the look of the current
+ * age) and a stable seed (entity id) for assets with several variants (trees).
+ */
+export interface SpriteContext {
+  readonly age?: number;
+  readonly seed?: number;
 }
 
 export interface SpriteAsset {
@@ -41,7 +55,26 @@ export interface SpriteAsset {
   /** States this sprite supports. */
   readonly states: readonly SpriteState[];
   /** Animation for a state and facing. Unsupported states fall back to the first state. */
-  animation(state: SpriteState, facing: Facing): SpriteAnimation;
+  animation(state: SpriteState, facing: Facing, context?: SpriteContext): SpriteAnimation;
+  /**
+   * Optional: number of looks chosen by `context.seed`. When set the asset varies itself, so the renderer does not
+   * mirror it for variety (that would flip its baked shadow).
+   */
+  readonly variants?: number;
+}
+
+/**
+ * Optional terrain art: seamless RGBA textures that repeat every `period` world tiles, each `width` x `height`
+ * screen pixels (64*period x 32*period). The terrain layer picks per pixel between them.
+ */
+export interface TerrainArt {
+  readonly period: number;
+  readonly width: number;
+  readonly height: number;
+  readonly grass: Uint8ClampedArray;
+  readonly grass2: Uint8ClampedArray;
+  readonly dry: Uint8ClampedArray;
+  readonly dirt: Uint8ClampedArray;
 }
 
 /** Progress callback for loading: fraction in [0, 1]. */
@@ -59,6 +92,8 @@ export interface AssetManifest {
   iconUrl(id: IconId): string;
   /** Release GPU resources. */
   destroy(): void;
+  /** Optional terrain textures (the default grass is drawn when absent or null). */
+  terrain?(): TerrainArt | null;
 }
 
 /** Placeholder manifest used until WP3 provides the procedural one: everything is blank. */

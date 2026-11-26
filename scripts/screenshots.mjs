@@ -4,6 +4,9 @@
  *   E2E_PORT=5480 npm run e2e          # leaves its screenshots in the git-ignored test-results/screenshots/
  *   node scripts/screenshots.mjs       # menu and civ select are captured here; the rest are copied from that run
  *
+ * With the rendered art (the curated set): run the scenarios with `E2E_ART=rendered` (and the default port, or
+ * point SRC at that port's folder), then `E2E_ART=rendered node scripts/screenshots.mjs`.
+ *
  * The in-match images come from the e2e scenarios (real UI, real sim); this script only adds the two menu
  * screens, which no scenario photographs. It serves dist-e2e/ itself on a free port (build it first with
  * `npx vite build --mode e2e --outDir dist-e2e`, which the e2e run does).
@@ -15,7 +18,7 @@ import process from 'node:process';
 import { chromium } from '@playwright/test';
 
 const OUT = 'docs/screenshots';
-const SRC = 'test-results/screenshots';
+const SRC = process.env.SHOT_SRC ?? 'test-results/screenshots';
 const PORT = Number(process.env.SHOT_PORT ?? 5481);
 const LOCAL_CHROMIUM = '/opt/pw-browsers/chromium';
 
@@ -55,7 +58,7 @@ try {
     args: ['--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
   });
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
-  await page.goto(`http://localhost:${PORT}/`);
+  await page.goto(`http://localhost:${PORT}/${process.env.E2E_ART ? `?art=${process.env.E2E_ART}` : ''}`);
   await page.getByTestId('main-menu').waitFor();
   await page.screenshot({ path: `${OUT}/01-main-menu.png` });
   await page.getByTestId('new-game').click();

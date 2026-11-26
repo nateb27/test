@@ -14,7 +14,7 @@ import { registry as defaultRegistry } from '../../data';
 import type { DataRegistry } from '../../data/schema';
 import type { EntityId, ReadonlyGameState, Vec2 } from '../../sim/types';
 import { Camera, CameraInput, type CameraInputOptions, type WorldPxRect } from './camera';
-import { EntityLayer, type DrawnEntity } from './entities';
+import { EntityLayer, footprintOf, type DrawnEntity } from './entities';
 import { mapScreenBounds, screenToWorld, worldToScreen, type ScreenPoint } from './iso';
 import { pickDrawn, pickRect } from './picking';
 import { TerrainLayer } from './terrain';
@@ -61,6 +61,8 @@ export interface WorldRendererApi extends WorldRenderer {
   visibleWorldCorners(): [Vec2, Vec2, Vec2, Vec2];
   /** Entities drawn on the last frame, back to front. */
   readonly lastDrawn: readonly DrawnEntity[];
+  /** Label of the texture an entity was drawn with on the last frame, or null (debug and tests). */
+  drawnTexture(id: EntityId): string | null;
 }
 
 export interface RendererOptions {
@@ -114,7 +116,7 @@ export async function createWorldRenderer(options: RendererOptions): Promise<Wor
   let needsAutoFocus = options.focus === undefined;
 
   const world = new Container();
-  const terrain = new TerrainLayer();
+  const terrain = new TerrainLayer(options.manifest.terrain?.() ?? null, (e) => footprintOf(registry, e));
   const groundOverlays = new Container();
   const entities = new EntityLayer(options.manifest, registry);
   const worldOverlays = new Container();
@@ -151,7 +153,7 @@ export async function createWorldRenderer(options: RendererOptions): Promise<Wor
       world.scale.set(camera.zoom);
       const rect = camera.visibleRect();
       const t0 = perf.start();
-      terrain.update(rect, state.map, state.mapSeed);
+      terrain.update(rect, state.map, state.mapSeed, state.entities);
       const t1 = perf.start();
       perf.end('render.terrain', t0);
       entities.update(state, alpha, rect, now);
@@ -169,6 +171,7 @@ export async function createWorldRenderer(options: RendererOptions): Promise<Wor
       const c = camera.canvasToWorldPx(Math.max(x0, x1), Math.max(y0, y1));
       return pickRect(entities.drawn, { minX: a.x, minY: a.y, maxX: c.x, maxY: c.y }, worldToScreen, kinds);
     },
+    drawnTexture: (id) => entities.drawnTexture(id),
     entityCanvasBounds(id) {
       const d = entities.getDrawn(id);
       if (d === undefined) return null;
