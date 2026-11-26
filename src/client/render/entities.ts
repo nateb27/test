@@ -237,6 +237,8 @@ export class EntityLayer {
   private drawnEntries: Entry[] = [];
   private visibleStatics: Entry[] = [];
   private visibleUnits: Entry[] = [];
+  /** Players of the state being drawn (owner ages pick building looks). */
+  private players: ReadonlyGameState['players'] = [];
 
   constructor(
     private readonly manifest: AssetManifest,
@@ -247,6 +249,12 @@ export class EntityLayer {
 
   private assetFor(id: string, primary: number, secondary: number): SpriteAsset {
     return isTeamManifest(this.manifest) ? this.manifest.teamSprite(id, primary, secondary) : this.manifest.sprite(id);
+  }
+
+  /** Label of the texture an entity was drawn with on the last frame (debug and tests). */
+  drawnTexture(id: EntityId): string | null {
+    const entry = this.staticById.get(id) ?? this.units.get(id);
+    return entry !== undefined && entry.gen === this.gen && entry.tex !== null ? (entry.tex.label ?? null) : null;
   }
 
   getDrawn(id: EntityId): DrawnEntity | undefined {
@@ -310,6 +318,7 @@ export class EntityLayer {
     const maxY = visible.maxY + margin;
     const a = Math.min(1, Math.max(0, alpha));
     const team = teamLookup(state, this.registry);
+    this.players = state.players;
 
     this.syncStatics(state);
 
@@ -405,7 +414,7 @@ export class EntityLayer {
     let animState: SpriteState = 'default';
     if (e.kind === 'unit') animState = unitAnimState(e);
     else if (e.kind === 'building') animState = buildingStage(e);
-    const anim: SpriteAnimation = asset.animation(animState, e.kind === 'unit' ? e.facing : 0);
+    const anim: SpriteAnimation = asset.animation(animState, e.kind === 'unit' ? e.facing : 0, { age: this.players[e.owner]?.age ?? 1, seed: e.id });
     const frameIdx =
       anim.frames.length > 1 && anim.frameMs > 0 ? Math.floor((nowMs + e.id * 137) / anim.frameMs) % anim.frames.length : 0;
     const tex = anim.frames[frameIdx]!;
@@ -416,7 +425,8 @@ export class EntityLayer {
       entry.tex = tex;
       spr.texture = tex;
       spr.anchor.set(asset.anchor.x, asset.anchor.y);
-      const mirror = e.kind === 'node' ? (e.id & 1) === 1 : anim.mirrorX;
+      // Nodes are mirrored for variety unless the art has its own variants (a mirror would flip a baked shadow).
+      const mirror = e.kind === 'node' ? asset.variants === undefined && (e.id & 1) === 1 : anim.mirrorX;
       entry.mirror = mirror;
       spr.scale.x = mirror ? -1 : 1;
       spr.position.set(entry.sx, entry.sy);
@@ -435,8 +445,11 @@ export class EntityLayer {
         d.hit.maxY = entry.sy + h * 0.06;
       } else {
         d.hit = hitBox(e.kind, e.kind === 'node' ? e.typeId : '', b, { x: entry.sx, y: entry.sy }, w, h, d.size);
+        // The art may say where its model starts (its texture can hold a taller look's frame, or a baked shadow).
+        const modelTop = anim.modelTop?.[frameIdx];
+        if (modelTop !== undefined) d.hit.minY = Math.max(d.hit.minY, b.minY + modelTop);
         if (e.kind === 'building') {
-          const pad = emptyRowsAbove(tex);
+          const pad = modelTop ?? emptyRowsAbove(tex);
           d.top = pad === null ? null : b.minY + pad;
         }
       }

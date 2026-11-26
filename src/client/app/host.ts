@@ -17,9 +17,10 @@ import type { CommandInput } from '../../sim/types';
 /** Creates the (unloaded) art manifest. Injected so tests need no WebGL. */
 export type ManifestFactory = () => Promise<TeamAssetManifest>;
 
+/** `?art=rendered` (voxel renderer; default in dev and production) or `?art=fast` (procedural; default in e2e). */
 const defaultManifestFactory: ManifestFactory = async () => {
-  const { createProceduralManifest } = await import('../art/procedural');
-  return createProceduralManifest({ registry });
+  const { createGameArt } = await import('../art/select');
+  return createGameArt(registry);
 };
 
 export class AppHost {
