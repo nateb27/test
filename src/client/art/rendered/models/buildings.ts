@@ -9,6 +9,7 @@ import { M } from '../materials';
 import { fract, hash2 } from '../noise';
 import type { Model } from '../voxel';
 import {
+  ladder as ladderLean,
   banner,
   barrel,
   blockPile,
@@ -589,17 +590,28 @@ export function archeryLate(m: Model): void {
     m.archRing('y', c, 1.1, 0.2, 0.5, 0.08, 0.32, 0.05, M.BRICK);
   }
   m.box(0.15, 0.15, 0.78, 2.62, 1.15, 0.82, M.ASHLAR);
-  const s = m.gable(0.08, 0.08, 2.68, 1.22, 0.82, 0.32, 'x', 0.06, M.TILE, { sag: 0.03, jit: 0.012 });
-  ridge(m, s, 'x', 0.08, 2.68, 0.65, M.BRICK);
+  // Lean-to loggia roof falling towards the range, and a square target store with a pyramid roof at the end.
+  m.op(0.08, 0.08, 0.7, 2.68, 1.26, 1.2, (x, y, z) => {
+    const sz = 1.12 - (y - 0.08) * 0.33;
+    return z <= sz && z > sz - 0.06 && x >= 0.08 && x < 2.68 ? M.TILE : 0;
+  }, 0);
+  m.box(0.15, 0.15, 0.8, 2.6, 0.3, 1.12, M.BYZ);
+  m.box(1.95, 1.3, 0, 2.75, 2.1, 1.0, M.BYZ);
+  m.box(1.92, 1.27, 0.95, 2.78, 2.13, 1.0, M.ASHLAR);
+  m.hip(1.88, 1.23, 2.82, 2.17, 1.0, 1.2, 0.42, 0.07, M.TILE, { jit: 0.01 });
+  m.arch('y', 2.35, 2.1, 0.12, 0.24, 0.0, 0.3, 1);
+  m.archRing('y', 2.35, 2.1, 0.12, 0.24, 0.0, 0.3, 0.04, M.BRICK);
+  m.arch('x', 1.7, 2.75, 0.12, 0.12, 0.6, 0.14, 1);
+  wallBanner(m, 'x', 1.5, 2.75, 0.9, 0.36, 0.15);
+  for (let i = 0; i < 3; i++) butt(m, 2.0 + i * 0.25, 2.35 + i * 0.05, 0.08);
   bowRack(m, 0.6, 0.45, 7);
   wallBanner(m, 'x', 0.65, 2.57, 0.74, 0.3, 0.14);
   // Range: sanded lane, butts in a turf bank.
   m.box(0.3, 1.3, 0, 2.7, 1.34, 0.02, M.ASHLAR);
   m.op(0.2, 2.7, 0, 2.7, 3.0, 0.38, (x, y, z) => (y > 2.78 && z < 0.34 - (y - 2.78) * 0.6 + 0.03 * Math.sin(x * 11) ? M.EARTH : 0), 0);
-  butt(m, 0.6, 2.5, 0.17);
-  butt(m, 1.35, 2.55, 0.17);
-  butt(m, 2.1, 2.6, 0.17);
-  barrel(m, 2.75, 1.35, 0.06, 0.15);
+  butt(m, 0.5, 2.45, 0.2);
+  butt(m, 1.2, 2.5, 0.2);
+  barrel(m, 1.75, 1.45, 0.06, 0.15);
   banner(m, 2.8, 1.25, 1.05, 0.44, 0.17);
 }
 
@@ -695,26 +707,29 @@ export function siegeWorkshop(m: Model): void {
   for (const x of [1.05, 1.95, 2.75]) m.box(x - 0.09, 1.27, 0.08, x + 0.09, 1.45, 0.95, M.BYZ);
   m.box(2.66, 0.35, 0.08, 2.84, 0.55, 0.95, M.BYZ);
   m.box(0.35, 1.27, 0.86, 2.84, 1.45, 0.95, M.TIMBH);
-  const s = m.gable(0.06, 0.06, 2.94, 1.56, 0.95, 0.5, 'x', 0.07, M.TILE, { sag: 0.04, jit: 0.014 });
-  ridge(m, s, 'x', 0.06, 2.94, 0.81, M.BRICK);
+  // Steep timber-shingled workshop roof (the hall is a workshop, not a dwelling).
+  const s = m.gable(0.06, 0.06, 2.94, 1.56, 0.95, 0.72, 'x', 0.08, M.SHINGLE, { sag: 0.05, jit: 0.02 });
+  ridge(m, s, 'x', 0.06, 2.94, 0.81, M.TIMBH);
   // Inside: timber A-frames.
   for (const x of [0.75, 1.5, 2.25]) {
     m.capsule(x - 0.2, 0.5, 0.08, x, 0.8, 0.85, 0.022, 0.022, M.TIMBV);
     m.capsule(x + 0.2, 0.5, 0.08, x, 0.8, 0.85, 0.022, 0.022, M.TIMBV);
   }
-  // Yard: a half-built trebuchet frame and ram wheels, logs, a treadwheel crane.
-  const tx = 1.3;
-  const ty = 2.2;
-  for (const dy of [-0.18, 0.18]) {
-    m.capsule(tx - 0.4, ty + dy, 0.03, tx + 0.4, ty + dy, 0.03, 0.03, 0.03, M.TIMBH);
-    m.capsule(tx - 0.3, ty + dy, 0.03, tx, ty + dy * 0.6, 0.75, 0.026, 0.024, M.TIMBV);
-    m.capsule(tx + 0.3, ty + dy, 0.03, tx, ty + dy * 0.6, 0.75, 0.026, 0.024, M.TIMBV);
+  // Yard: a half-built trebuchet frame (big enough to read at 1x) and ram wheels, logs, a treadwheel crane.
+  const tx = 1.25;
+  const ty = 2.25;
+  for (const dy of [-0.24, 0.24]) {
+    m.capsule(tx - 0.55, ty + dy, 0.04, tx + 0.55, ty + dy, 0.04, 0.04, 0.04, M.TIMBH);
+    m.capsule(tx - 0.42, ty + dy, 0.04, tx, ty + dy * 0.6, 1.05, 0.035, 0.03, M.TIMBV);
+    m.capsule(tx + 0.42, ty + dy, 0.04, tx, ty + dy * 0.6, 1.05, 0.035, 0.03, M.TIMBV);
+    m.capsule(tx - 0.22, ty + dy, 0.5, tx + 0.22, ty + dy, 0.5, 0.025, 0.025, M.TIMBH);
   }
-  m.capsule(tx - 0.4, ty - 0.18, 0.03, tx - 0.4, ty + 0.18, 0.03, 0.03, 0.03, M.TIMBH);
-  m.capsule(tx + 0.4, ty - 0.18, 0.03, tx + 0.4, ty + 0.18, 0.03, 0.03, 0.03, M.TIMBH);
-  m.capsule(tx, ty - 0.14, 0.76, tx, ty + 0.14, 0.76, 0.025, 0.025, M.IRONDARK);
-  m.capsule(tx - 0.7, ty, 0.1, tx + 0.35, ty, 1.05, 0.03, 0.02, M.TIMBH);
-  m.capsule(tx - 0.7, ty, 0.1, tx - 0.7, ty, 0.0, 0.005, 0.005, M.ROPE);
+  m.capsule(tx - 0.55, ty - 0.24, 0.04, tx - 0.55, ty + 0.24, 0.04, 0.04, 0.04, M.TIMBH);
+  m.capsule(tx + 0.55, ty - 0.24, 0.04, tx + 0.55, ty + 0.24, 0.04, 0.04, 0.04, M.TIMBH);
+  m.capsule(tx, ty - 0.18, 1.06, tx, ty + 0.18, 1.06, 0.03, 0.03, M.IRONDARK);
+  m.capsule(tx - 0.95, ty, 0.12, tx + 0.45, ty, 1.4, 0.04, 0.026, M.TIMBH);
+  m.capsule(tx - 0.95, ty, 0.12, tx - 0.95, ty, 0.0, 0.006, 0.006, M.ROPE);
+  ladderLean(m, tx + 0.7, ty + 0.3, tx + 0.35, ty + 0.2, 0.9);
   for (const [wx, wy] of [[0.45, 2.75], [0.62, 2.85]] as const) m.disc(wx, wy, 0.13, 0.7071, 0.7071, 0, 0.12, 0.022, M.PLANK, M.IRONDARK, M.IRONDARK);
   logPileX(m, 2.0, 2.8, 1.7, 3, 0.05);
   // Treadwheel crane.

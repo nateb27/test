@@ -177,7 +177,7 @@ export function pickTexture(dirt: number, dry: number, alt: number, jitter: numb
   const d = dirt + jitter;
   if (d > 0.52) return 3;
   if (d > 0.36) return 2;
-  if (dry + jitter * 0.8 > 0.6) return 2;
+  if (dry + jitter * 0.8 > 0.66) return 2;
   return alt + jitter > 0.5 ? 1 : 0;
 }
 
@@ -324,7 +324,8 @@ export class TerrainLayer {
         }
       }
     }
-    const texture = new Texture({ source: new CanvasSource({ resource: canvas }) });
+    // Rendered terrain is pixel art: crisp when zoomed in.
+    const texture = new Texture({ source: new CanvasSource({ resource: canvas, ...(this.art !== null ? { magFilter: 'nearest' as const, minFilter: 'linear' as const } : {}) }) });
     const sprite = new Sprite(texture);
     sprite.position.set(originX, originY);
     this.container.addChild(sprite);

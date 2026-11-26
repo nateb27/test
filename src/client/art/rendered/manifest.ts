@@ -133,7 +133,8 @@ export function createRenderedManifest(options: RenderedManifestOptions = {}): R
         data[i + 2] = ramp[lv + 2]!;
       }
       ctx.putImageData(new ImageData(data, pg.w, pg.h), 0, 0);
-      list.push(new Texture({ source: new CanvasSource({ resource: canvas }) }));
+      // Crisp pixels when zoomed in, smooth when zoomed out.
+      list.push(new Texture({ source: new CanvasSource({ resource: canvas, magFilter: 'nearest', minFilter: 'linear' }) }));
     }
     return list;
   }

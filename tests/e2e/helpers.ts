@@ -26,9 +26,12 @@ export const DEFAULT_SEED = 1;
  * The map seed is pinned (`?seed=`, honoured by dev and e2e builds only). The match starts paused (`?paused=1`, unless `paused: false`),
  * so not a single tick runs before the test takes over; time then only advances through `step`.
  */
-export async function startMatch(page: Page, opts: { paused?: boolean; seed?: number } = {}): Promise<void> {
+export async function startMatch(page: Page, opts: { paused?: boolean; seed?: number; art?: 'fast' | 'rendered' } = {}): Promise<void> {
   const query = new URLSearchParams({ seed: String(opts.seed ?? DEFAULT_SEED) });
   if (opts.paused !== false) query.set('paused', '1');
+  // E2E_ART=rendered runs any scenario with the rendered art (used to photograph the gallery with it).
+  const art = opts.art ?? process.env.E2E_ART;
+  if (art !== undefined && art !== '') query.set('art', art);
   await page.goto(`/?${query.toString()}`);
   await expect(page.getByTestId('main-menu')).toBeVisible();
   await page.getByTestId('new-game').click();

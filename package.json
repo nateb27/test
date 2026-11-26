@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "eslint . --max-warnings 0",
     "test": "vitest run",
-    "e2e": "playwright test --trace off"
+    "e2e": "playwright test --trace off",
+    "art:palette": "node scripts/art-tool.mjs palette"
   },
   "dependencies": {
     "pixi.js": "^8.23.0",

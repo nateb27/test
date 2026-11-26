@@ -58,10 +58,10 @@ export const BUILDING_LOOKS: readonly BuildingLook[] = [
   L('barracks', 'early', [1, 2], false, 3, 1.4, B.barracksEarly, [0.3, 0.35, 2.7, 1.45], 0.66),
   L('barracks', 'late', [3, 4], true, 3, 1.75, B.barracksLate, [0.25, 0.25, 2.75, 1.55], 0.82),
   L('archeryRange', 'early', [2], false, 3, 1.2, B.archeryEarly, [0.22, 0.22, 2.28, 1.05], 0.6),
-  L('archeryRange', 'late', [3, 4], true, 3, 1.3, B.archeryLate, [0.18, 0.18, 2.57, 1.12], 0.82),
+  L('archeryRange', 'late', [3, 4], true, 3, 1.6, B.archeryLate, [0.18, 0.18, 2.57, 1.12], 0.82),
   L('stable', 'early', [2], false, 3, 1.1, B.stableEarly, [0.27, 0.27, 2.73, 1.0], 0.55),
   L('stable', 'late', [3, 4], true, 3, 1.4, B.stableLate, [0.2, 0.2, 2.8, 1.18], 0.78),
-  L('siegeWorkshop', 'late', [3, 4], true, 3, 1.6, B.siegeWorkshop, [0.17, 0.17, 2.83, 1.45], 0.95),
+  L('siegeWorkshop', 'late', [3, 4], true, 3, 1.85, B.siegeWorkshop, [0.17, 0.17, 2.83, 1.45], 0.95),
   L('silkWorkshop', 'late', [3, 4], true, 3, 1.5, B.silkWorkshop, [0.18, 0.18, 1.97, 1.37], 0.9),
 ];
 

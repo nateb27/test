@@ -192,6 +192,15 @@ try {
       await shot('army');
     }
   }
+  if (want('cache')) {
+    // Wait for the background pass (it writes the cache), then load again: the art should come from IndexedDB.
+    await page.waitForFunction(() => window.__art?.report()?.complete === true, null, { timeout: 300_000 });
+    console.log('full set', JSON.stringify(await page.evaluate(() => window.__art.report())));
+    await page.waitForTimeout(1500); // let the IndexedDB write finish (tooling only, not a test)
+    const t1 = Date.now();
+    await start();
+    console.log('second boot ms', Date.now() - t1, JSON.stringify(await page.evaluate(() => window.__art.report())));
+  }
   console.log('total ms', Date.now() - t0);
   await browser.close();
 } finally {

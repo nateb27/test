@@ -56,7 +56,7 @@ function shadeGround(kind: TerrainKind, x: number, y: number, lin: Float32Array,
   mixc(0.18, 0.24, 0.1, smooth(0.4, 0.7, L2) * 0.9);
   mixc(0.15, 0.2, 0.09, smooth(0.5, 0.75, F + (L2 - 0.5) * 0.5) * 0.45);
   const dryBase = smooth(0.46, 0.72, L1 * 0.7 + F * 0.3) * LIGHT.dry;
-  const dry = kind === 'dry' ? Math.min(1, 0.55 + dryBase * 0.6) : dryBase * 0.55;
+  const dry = kind === 'dry' ? Math.min(1, 0.42 + dryBase * 0.5) : dryBase * 0.5;
   mixc(0.48, 0.43, 0.27, dry * 0.75);
   mixc(0.4, 0.38, 0.22, smooth(0.55, 0.8, F) * 0.35);
   mulc(0.62 + 0.62 * MM * (0.5 + 0.5 * Mi));
