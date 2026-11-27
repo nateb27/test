@@ -222,6 +222,8 @@ describe('(b) an army destroys an undefended base', () => {
     createBuilding(s, 'barracks', 1, 2, 2, true);
     const army: number[] = [];
     for (let i = 0; i < 6; i++) army.push(createUnit(s, i < 4 ? 'swordsman' : 'spearman', 1, 10.5 + (i % 3), 30.5 + Math.floor(i / 3)).id);
+    // Infantry barely scratches stone production buildings (melee armour 7, docs/BALANCE.md): two rams do the razing.
+    for (let i = 0; i < 2; i++) army.push(createUnit(s, 'batteringRam', 1, 10.5 + i, 32.5).id);
     // Defender: a Barracks (its only producer), a House and two villagers (Town-Center builders). No Town Center.
     const barracks = createBuilding(s, 'barracks', 2, 32, 32, true).id;
     createBuilding(s, 'house', 2, 38, 32, true);

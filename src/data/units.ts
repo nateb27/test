@@ -93,7 +93,7 @@ export const units: UnitDef[] = [
     combat: {
       ...melee,
       hp: 32, attack: 5, attackType: 'pierce', meleeArmor: 0, pierceArmor: 0, range: 5, windup: 0.6, cooldown: 1.6, sight: 7,
-      classes: ['archer'], bonus: { infantry: 4 }, projectile: 'arrow',
+      classes: ['archer'], bonus: { infantry: 5 }, projectile: 'arrow',
     },
     icon: 'icon.unit.archer',
     sprite: 'unit.archer',
@@ -149,7 +149,7 @@ export const units: UnitDef[] = [
     speed: 0.6,
     combat: {
       ...melee,
-      hp: 140, attack: 4, meleeArmor: 0, pierceArmor: 40, windup: 1.0, cooldown: 4.0, sight: 4,
+      hp: 140, attack: 4, meleeArmor: 0, pierceArmor: 40, windup: 1.0, cooldown: 3.5, sight: 4,
       classes: ['siege'], bonus: { building: 60 }, targets: 'buildings',
     },
     icon: 'icon.unit.batteringRam',
@@ -210,7 +210,7 @@ export const units: UnitDef[] = [
     combat: {
       ...melee,
       hp: 45, attack: 10, meleeArmor: 0, pierceArmor: 0, range: 2, windup: 0.6, cooldown: 2.5, sight: 5,
-      classes: ['infantry'], bonus: { building: 18, siege: 12 }, projectile: 'fire', splash: { radius: 1.0, percent: 60 },
+      classes: ['infantry'], bonus: { building: 18, siege: 12 }, projectile: 'fire', splash: { radius: 1.25, percent: 60 },
     },
     icon: 'icon.unit.siphonarios',
     sprite: 'unit.siphonarios',

@@ -3,9 +3,8 @@
  * through `sim.step`. Two groups face each other 10 tiles apart and are given `attackMove` at each other; siege rows
  * use `attack` against a building or a unit.
  *
- * It needs the combat systems of WP21 to WP24 (acquisition, attacks, projectiles, death), which are still stubs when
- * this file is written. `duels.test.ts` runs the harness's own smoke tests always and the duels only when
- * `COMBAT_INTEGRATED` is true: flip the constant (or run with `DUELS=1`) at integration.
+ * It needs the combat systems of WP21 to WP24 (acquisition, attacks, projectiles, death), which have merged:
+ * `COMBAT_INTEGRATED` is permanently true and the duels always run.
  *
  * Set-up is built from the public pieces the other sim tests use: `createInitialState` and `simFromState` for the
  * empty arena, `createUnit`/`createBuilding` to place entities (there is no placement cheat for buildings) and
@@ -30,8 +29,8 @@ import {
   type UnitId,
 } from '../../src/sim/types';
 
-/** Flip to true when WP21 to WP24 have merged; `DUELS=1` in the environment does the same for one run. */
-export const COMBAT_INTEGRATED: boolean = process.env.DUELS === '1' || false;
+/** Combat (WP21 to WP24) is integrated; kept as a constant so a test can still refer to it. */
+export const COMBAT_INTEGRATED = true;
 
 export const MAP_SIZE = 48;
 /** Distance between the two group centres at the start (PLAN-M2 8.1). */
@@ -213,8 +212,10 @@ export function runDuel(spec: DuelSpec): DuelResult {
     ua = alive(idsA);
     ub = alive(idsB);
   }
-  const fightersA = ua.some((u) => canHurt(u, ub));
-  const fightersB = ub.some((u) => canHurt(u, ua));
+  // A side that is wiped out has no fighters; a side left with only siege (which cannot hurt units) has none either.
+  const fighter = (u: UnitEntity) => registry.unit(u.typeId).combat.targets === 'any' && registry.unit(u.typeId).combat.autoAcquire;
+  const fightersA = ua.some(fighter);
+  const fightersB = ub.some(fighter);
   const winner: DuelResult['winner'] = fightersA && !fightersB ? 'a' : fightersB && !fightersA ? 'b' : 'none';
   const keep = (list: UnitEntity[]) => list.reduce((s, u) => s + costOf(u.typeId), 0);
   return {

@@ -86,7 +86,7 @@ describe('computeDamage (PLAN-M2 4.1)', () => {
     ['spearman', 'cataphract', 5 - 3 + 6], // 50% resist halves +12
     ['spearman', 'swordsman', 5 - 2],
     ['swordsman', 'spearman', 8 - 0 + 4],
-    ['archer', 'swordsman', 5 - 1 + 4], // pierce against pierce armour
+    ['archer', 'swordsman', 5 - 1 + 5], // pierce against pierce armour
     ['archer', 'batteringRam', 1], // armour floor at minDamage
     ['horseman', 'archer', 6 + 5],
     ['horseman', 'trebuchet', 6 + 8],
@@ -96,7 +96,7 @@ describe('computeDamage (PLAN-M2 4.1)', () => {
   });
 
   it('bonus against buildings is added after armour', () => {
-    expect(computeDamage(u('batteringRam'), b('barracks'), MIN)).toBe(4 - 2 + 60);
+    expect(computeDamage(u('batteringRam'), b('barracks'), MIN)).toBe(1 + 60);
     expect(computeDamage(u('trebuchet'), b('townCenter'), MIN)).toBe(1 + 150);
     expect(computeDamage(u('archer'), b('house'), MIN)).toBe(1);
   });
@@ -137,9 +137,9 @@ describe('isEnemy, distSqToTarget, combat profiles', () => {
     expect(unitCombat(ctx, 1, 'archer')).toMatchObject({ reach: 5.75, projectile: 'arrow', attackType: 'pierce', windupTicks: 12 });
     expect(unitCombat(ctx, 1, 'trebuchet')).toMatchObject({ minRange: 3, reach: 11.75, targets: 'buildings', cooldownTicks: 160 });
     expect(unitCombat(ctx, 1, 'villager').autoAcquire).toBe(false);
-    expect(unitCombat(ctx, 1, 'siphonarios').splash).toEqual({ radius: 1, percent: 60 });
+    expect(unitCombat(ctx, 1, 'siphonarios').splash).toEqual({ radius: 1.25, percent: 60 });
     expect(buildingCombat(ctx, 1, 'townCenter')).toMatchObject({
-      maxHp: 2400, meleeArmor: 3, pierceArmor: 8, classes: ['building'],
+      maxHp: 2400, meleeArmor: 8, pierceArmor: 8, classes: ['building'],
       attack: { attack: 5, attackType: 'pierce', range: 7, reach: 7.75, cooldownTicks: 40, arrows: 2, projectile: 'arrow' },
     });
     expect(buildingCombat(ctx, 1, 'house').attack).toBeNull();

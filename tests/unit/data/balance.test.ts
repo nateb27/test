@@ -87,25 +87,24 @@ describe('siege rows on paper (PLAN-M2 5.3)', () => {
 
   it('2 Battering Rams destroy a Barracks in under 60 s', () => {
     expect(buildingKillSeconds('batteringRam', 2, 'barracks', GAP)).toBeLessThan(60);
-    expect(hitBuilding(baseProfile('batteringRam'), barracks)).toBe(4 - barracks.combat.meleeArmor + 60);
+    // 4 attack against melee armour 7 is floored at 1 damage, then the +60 against buildings.
+    expect(hitBuilding(baseProfile('batteringRam'), barracks)).toBe(1 + 60);
   });
 
-  // KNOWN PLAN DEFECT (docs/BALANCE.md, "Findings"): with the section 5.2 Barracks (melee armour 2) a Swordsman does 6
-  // damage a blow, so 10 of them need about as long as 2 rams, not more than 3 times as long. The row holds once
-  // production buildings have melee armour 7 (Swordsman: 1 a blow); that change is pinned by `m2contracts.test.ts` and
-  // needs the orchestrator. `it.fails` turns green-to-red when someone fixes the numbers, which is the cue to drop it.
-  it.fails('10 Swordsmen need more than 3 times as long as 2 rams for a Barracks (plan 5.3; fails on the plan numbers)', () => {
+  // Production buildings have melee armour 7 (Town Center 8): a Swordsman does 1 damage a blow, so infantry cannot raze
+  // them (docs/BALANCE.md, "Building armour"). With the plan's armour of 2 the row failed: 10 Swordsmen were about as fast
+  // as 2 rams.
+  it('10 Swordsmen need more than 3 times as long as 2 rams for a Barracks', () => {
     const rams = buildingKillSeconds('batteringRam', 2, 'barracks', GAP);
     const swords = buildingKillSeconds('swordsman', 10, 'barracks', GAP);
     expect(swords).toBeGreaterThan(3 * rams);
   });
 
-  it('what the same row gives with melee armour 7 on the Barracks (the proposed fix)', () => {
-    const fixed = { meleeArmor: 7 };
-    const rams = buildingKillSeconds('batteringRam', 2, 'barracks', GAP, fixed);
-    const swords = buildingKillSeconds('swordsman', 10, 'barracks', GAP, fixed);
-    expect(rams).toBeLessThan(60);
-    expect(swords).toBeGreaterThan(3 * rams);
+  it('the row would fail with the plan 5.2 armour (melee armour 2): the reason for armour 7', () => {
+    const old = { meleeArmor: 2 };
+    const rams = buildingKillSeconds('batteringRam', 2, 'barracks', GAP, old);
+    const swords = buildingKillSeconds('swordsman', 10, 'barracks', GAP, old);
+    expect(swords).toBeLessThan(3 * rams);
   });
 
   it('a Trebuchet outranges the Town Center arrows by at least 3 tiles', () => {
@@ -130,8 +129,8 @@ describe('siege rows on paper (PLAN-M2 5.3)', () => {
   });
 
   it('4 Siphonarioi deal at least 2.5x the damage per second of 4 Swordsmen to a tight clump of 10 Spearmen', () => {
-    // A clump with six or more other Spearmen inside the 1.0 splash radius of the target: the duel harness packs the
-    // 10 stand-ground Spearmen on a 0.5 grid (a 3x3 block and one more), where the middle ones have 8 neighbours.
+    // A clump with six or more other Spearmen inside the splash radius (1.25) of the target: the duel harness packs the
+    // 10 stand-ground Spearmen on a 0.5 grid, where the middle ones have 8 or 9 neighbours.
     const siph = clumpDps('siphonarios', 4, 'spearman', 8);
     const swords = clumpDps('swordsman', 4, 'spearman', 0);
     expect(siph / swords).toBeGreaterThanOrEqual(2.5);
@@ -157,7 +156,7 @@ describe('time to kill (1 against 1, from the damage formula)', () => {
     expect(timeToKill(spear, horse)).toBeLessThan(timeToKill(horse, spear));
     expect(hit(spear, cata)).toBe(8); // 5 - 3 + floor(12 * 50%)
     expect(hit(sword, spear)).toBe(12);
-    expect(hit(archer, spear)).toBe(8);
+    expect(hit(archer, spear)).toBe(9);
     expect(hit(cata, sword)).toBe(11);
   });
 

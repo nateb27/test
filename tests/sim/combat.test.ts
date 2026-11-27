@@ -782,11 +782,14 @@ describe('determinism: scripted melee and ranged skirmish', () => {
     const hc = hashes(loaded, 300, 900, 50);
     expect([...hb, ...hc]).toEqual(ha);
 
-    // It really was a fight: hp lost on both sides, projectiles fired, melee blows landed.
-    const units = a.sim.state.entities.filter((e) => e.kind === 'unit');
+    // It really was a fight: hp lost on both sides, projectiles fired, melee blows landed. Looked at mid-fight (tick 600):
+    // by tick 900 one side may be wiped out (the armies are even, the outcome depends on the balance numbers).
+    const mid = skirmish();
+    for (let t = 1; t < 600; t++) mid.sim.step([]);
+    const units = mid.sim.state.entities.filter((e) => e.kind === 'unit');
     for (const owner of [1, 2]) {
-      expect(units.some((u) => u.owner === owner && u.kind === 'unit' && u.hp < unitCombat(sideCtx(a.b), owner, u.typeId).maxHp)).toBe(true);
+      expect(units.some((u) => u.owner === owner && u.kind === 'unit' && u.hp < unitCombat(sideCtx(mid.b), owner, u.typeId).maxHp)).toBe(true);
     }
-    expect(a.sim.state.nextProjectileId).toBeGreaterThan(5);
+    expect(mid.sim.state.nextProjectileId).toBeGreaterThan(5);
   });
 });
