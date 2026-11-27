@@ -74,7 +74,8 @@ export interface RunOptions {
   onTick?: (sim: Sim) => void;
 }
 
-function isMoving(u: UnitEntity): boolean {
+/** Does the unit's order want it to be walking (the 30 s stuck rule)? Shared with the AI harness. */
+export function isMoving(u: Readonly<UnitEntity>): boolean {
   const o = u.currentOrder;
   if (o === null) return false;
   if (u.pendingPathRequestId !== null) return true;

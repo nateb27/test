@@ -6,7 +6,36 @@
 
 import type { ResourceType } from '../sim';
 
-export const PLAN = {
+/** An economy plan: the shape of `PLAN`. The AI (`src/bot/ai/economy.ts`) passes per-difficulty variants to `decide`. */
+export interface BotPlan {
+  decisionIntervalTicks: number;
+  villagerTarget: number;
+  /** Optional villager cap per age (the hard AI advances with about 18 villagers). Absent: `villagerTarget` only. */
+  villagerCapByAge?: Readonly<Record<number, number>>;
+  /** Highest age the plan advances to (default 4). */
+  maxAge?: number;
+  tcQueueDepth: number;
+  houseMargin: number;
+  campMaxDropDistance: number;
+  farmPriorityFood: number;
+  workRadius: number;
+  millMinFood: number;
+  houseBuilders: number;
+  campBuilders: number;
+  bigBuilders: number;
+  woodLow: number;
+  stockHigh: Readonly<Record<ResourceType, number>>;
+  stockHeadroom: number;
+  shares: Readonly<Record<number, Readonly<Record<ResourceType, number>>>>;
+  ageBuildings: Readonly<Record<number, readonly string[]>>;
+  holdSeconds: Readonly<Record<number, number>>;
+  foodPerGatherer: number;
+  ageBuildingsFoodShare: number;
+  techs: readonly { id: string; building: string; needs: { slot: ResourceType | 'all'; count: number } }[];
+  maxSilkWorkshops: number;
+}
+
+export const PLAN: BotPlan = {
   /** One decision per second of game time (TICK_RATE ticks). */
   decisionIntervalTicks: 20,
   /** Keep training villagers until this many exist. */
@@ -65,4 +94,4 @@ export const PLAN = {
   ] as { id: string; building: string; needs: { slot: ResourceType | 'all'; count: number } }[],
   /** Silk Workshops beyond the one the age needs, built when stone allows. */
   maxSilkWorkshops: 3,
-} as const;
+};

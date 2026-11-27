@@ -19,7 +19,7 @@ import type { DataRegistry } from '../data';
 import type { BuildingId, Command, CommandInput, EntityId, PlayerId, ResourceAmounts, ResourceType, Sim, SimQuery } from '../sim';
 import { blockedFromView, findSpot, floodReach, ringReachable, solidFromView } from './placement';
 import type { Blocked } from './placement';
-import { PLAN } from './plan';
+import { PLAN, type BotPlan } from './plan';
 import { readView, type BotView, type BuildingView, type NodeView, type VillagerView } from './view';
 import type { Controller } from './controller';
 
@@ -60,9 +60,27 @@ export class EconomyBot implements Controller {
   }
 }
 
-/** One decision: a pure function of the view and read-only queries. */
-export function decide(view: BotView, query: SimQuery, data: DataRegistry = registry): CommandInput[] {
-  return new Decision(view, query, data).run();
+/**
+ * One decision: a pure function of the view and read-only queries.
+ *
+ * `plan` (default `PLAN`) is the build order to follow. `reserve` (default none) is held back from the stockpile: the
+ * decision sees `resources - reserve` (never below 0) and cannot spend it (the AI's army share, PLAN-M2 6.4). The
+ * defaults reproduce the M1 economy bot exactly.
+ */
+export function decide(
+  view: BotView,
+  query: SimQuery,
+  data: DataRegistry = registry,
+  plan: BotPlan = PLAN,
+  reserve?: ResourceAmounts,
+): CommandInput[] {
+  let v = view;
+  if (reserve !== undefined) {
+    const resources = { ...view.resources };
+    for (const r of RESOURCES) resources[r] = Math.max(0, resources[r] - Math.max(0, reserve[r]));
+    v = { ...view, resources };
+  }
+  return new Decision(v, query, data, plan).run();
 }
 
 class Decision {
@@ -84,6 +102,7 @@ class Decision {
     private readonly view: BotView,
     private readonly query: SimQuery,
     private readonly data: DataRegistry,
+    private readonly plan: BotPlan,
   ) {
     this.budget = { ...view.resources };
     this.blocked = blockedFromView(view);
@@ -268,18 +287,18 @@ class Decision {
   private houses(): void {
     const inFlight = this.ofType('house').filter((h) => !h.constructed).length;
     const futureCap = Math.min(200, this.view.popCap + inFlight * 10);
-    if (futureCap >= 200 || futureCap - this.popUsed >= PLAN.houseMargin || inFlight >= 2) return;
+    if (futureCap >= 200 || futureCap - this.popUsed >= this.plan.houseMargin || inFlight >= 2) return;
     if (!this.affordableNow(this.cost('house'))) return;
     const spot = this.baseSpot('house', 7);
     if (spot === null) return;
-    const builders = this.pickBuilders(spot.tx + 1, spot.ty + 1, PLAN.houseBuilders);
+    const builders = this.pickBuilders(spot.tx + 1, spot.ty + 1, this.plan.houseBuilders);
     this.construct('house', spot, builders, true);
   }
 
   /** Reserve for the next age advance, or zeros when there is none or its buildings are missing. */
   private ageUpCost(): ResourceAmounts | null {
     const next = this.view.age + 1;
-    if (next > 4) return null;
+    if (next > (this.plan.maxAge ?? 4)) return null;
     const tech = this.data.age(next as 2 | 3 | 4).advanceTech;
     if (tech === null) return null;
     return this.cost(tech);
@@ -287,7 +306,7 @@ class Decision {
 
   private ageUpAvailable(): string | null {
     const next = this.view.age + 1;
-    if (next > 4) return null;
+    if (next > (this.plan.maxAge ?? 4)) return null;
     const tech = this.data.age(next as 2 | 3 | 4).advanceTech;
     if (tech === null) return null;
     return this.available(tech) ? tech : null;
@@ -303,11 +322,12 @@ class Decision {
     const villagers = this.view.villagers.length + queued;
     const unitCost = this.cost('villager');
     let n = villagers;
-    while (queued < PLAN.tcQueueDepth && n < PLAN.villagerTarget && this.popUsed < this.view.popCap) {
+    const target = Math.min(this.plan.villagerTarget, this.plan.villagerCapByAge?.[this.view.age] ?? this.plan.villagerTarget);
+    while (queued < this.plan.tcQueueDepth && n < target && this.popUsed < this.view.popCap) {
       // Age advance is ready except for food: stop feeding the queue so the advance goes in at once.
       if (ageCost !== null && queued >= 1 && this.budget.food - unitCost.food < ageCost.food) break;
       if (ageCost !== null && this.budget.food < ageCost.food) {
-        const wait = this.counts.food * PLAN.foodPerGatherer * (PLAN.holdSeconds[this.view.age] ?? 0);
+        const wait = this.counts.food * this.plan.foodPerGatherer * (this.plan.holdSeconds[this.view.age] ?? 0);
         if (ageCost.food - this.budget.food <= wait) break;
       }
       if (!this.affordableNow(unitCost)) break;
@@ -342,10 +362,10 @@ class Decision {
    * so farms and techs do not eat the wood.
    */
   private ageBuildings(): void {
-    const wanted = PLAN.ageBuildings[this.view.age];
+    const wanted = this.plan.ageBuildings[this.view.age];
     const ageCost = this.ageUpCost();
     if (wanted === undefined || ageCost === null) return;
-    if (this.view.resources.food < ageCost.food * PLAN.ageBuildingsFoodShare) return;
+    if (this.view.resources.food < ageCost.food * this.plan.ageBuildingsFoodShare) return;
     for (const type of wanted) {
       if (this.ofType(type).length > 0) continue;
       if (!this.available(type)) continue;
@@ -356,7 +376,7 @@ class Decision {
       }
       const spot = this.baseSpot(type, 8);
       const size = this.data.building(type).footprint;
-      const builders = spot === null ? [] : this.pickBuilders(spot.tx + size / 2, spot.ty + size / 2, PLAN.bigBuilders);
+      const builders = spot === null ? [] : this.pickBuilders(spot.tx + size / 2, spot.ty + size / 2, this.plan.bigBuilders);
       this.construct(type, spot, builders, true);
       return;
     }
@@ -366,13 +386,13 @@ class Decision {
   private extraSilkWorkshops(): void {
     if (this.view.age < 3 || !this.available('silkWorkshop')) return;
     const have = this.ofType('silkWorkshop').length;
-    if (have === 0 || have >= PLAN.maxSilkWorkshops || this.ofType('silkWorkshop').some((b) => !b.constructed)) return;
+    if (have === 0 || have >= this.plan.maxSilkWorkshops || this.ofType('silkWorkshop').some((b) => !b.constructed)) return;
     if (this.ofType('siegeWorkshop').length === 0) return;
     const reserve = this.view.age < 4 ? (this.ageUpCost() ?? undefined) : undefined;
     const cost = this.cost('silkWorkshop');
     if (!this.affordable(cost, reserve)) return;
     const spot = this.baseSpot('silkWorkshop', 8);
-    const builders = spot === null ? [] : this.pickBuilders(spot.tx + 1.5, spot.ty + 1.5, PLAN.bigBuilders);
+    const builders = spot === null ? [] : this.pickBuilders(spot.tx + 1.5, spot.ty + 1.5, this.plan.bigBuilders);
     this.construct('silkWorkshop', spot, builders);
   }
 
@@ -381,7 +401,7 @@ class Decision {
   // -------------------------------------------------------------------------
 
   private deficits(): { resource: ResourceType; deficit: number }[] {
-    const shares = PLAN.shares[this.view.age] ?? PLAN.shares[4]!;
+    const shares = this.plan.shares[this.view.age] ?? this.plan.shares[4]!;
     const total = this.view.villagers.length;
     return RESOURCES.map((resource) => ({
       resource,
@@ -396,9 +416,9 @@ class Decision {
   private pressure(resource: ResourceType): number {
     const stock = this.view.resources[resource];
     if (resource === 'food') return 0;
-    if (resource === 'wood' && stock - this.reserved.wood < PLAN.woodLow) return Math.min(5, (PLAN.woodLow + this.reserved.wood - stock) / 40);
+    if (resource === 'wood' && stock - this.reserved.wood < this.plan.woodLow) return Math.min(5, (this.plan.woodLow + this.reserved.wood - stock) / 40);
     const ageCost = this.ageUpCost();
-    const high = Math.max(PLAN.stockHigh[resource], (ageCost?.[resource] ?? 0) + PLAN.stockHeadroom);
+    const high = Math.max(this.plan.stockHigh[resource], (ageCost?.[resource] ?? 0) + this.plan.stockHeadroom);
     return stock > high ? -Math.min(3, (stock - high) / 100) : 0;
   }
 
@@ -432,7 +452,7 @@ class Decision {
       const cur = this.view.nodes.find((n) => n.id === task.targetId);
       if (cur === undefined) continue;
       const dd = this.dropDistance(cur);
-      if (dd <= PLAN.campMaxDropDistance + 1.5) continue;
+      if (dd <= this.plan.campMaxDropDistance + 1.5) continue;
       if (this.assign(v, task.resource, false)) budget--;
     }
   }
@@ -485,7 +505,7 @@ class Decision {
     let best: NodeView | null = null;
     let bestScore = Infinity;
     for (const n of nodes) {
-      if (dist(n.cx, n.cy, this.tcCentre.x, this.tcCentre.y) > PLAN.workRadius || !this.reachable(n)) continue;
+      if (dist(n.cx, n.cy, this.tcCentre.x, this.tcCentre.y) > this.plan.workRadius || !this.reachable(n)) continue;
       const score = this.dropDistance(n) + 0.3 * dist(v.x, v.y, n.cx, n.cy);
       if (score < bestScore - 1e-9 || (Math.abs(score - bestScore) <= 1e-9 && best !== null && n.id < best.id)) {
         best = n;
@@ -506,7 +526,7 @@ class Decision {
 
   /** Help an unfinished camp or mill of this type if it is short of builders. */
   private assistCamp(v: VillagerView, type: BuildingId): boolean {
-    const site = this.ofType(type).find((b) => !b.constructed && b.id >= 0 && b.builders < PLAN.campBuilders && dist(v.x, v.y, b.cx, b.cy) < 14);
+    const site = this.ofType(type).find((b) => !b.constructed && b.id >= 0 && b.builders < this.plan.campBuilders && dist(v.x, v.y, b.cx, b.cy) < 14);
     if (site === undefined) return false;
     this.emit({ type: 'assist', unitIds: [v.id], buildingId: site.id, queue: false });
     site.builders++;
@@ -518,7 +538,7 @@ class Decision {
     const nodes = this.view.nodes.filter((n) => n.resource === resource && slots.includes(n.slot) && n.gatherers < n.maxGatherers);
     const best = this.pickNode(v, nodes);
     if (best === null) return false;
-    if (this.dropDistance(best) > PLAN.campMaxDropDistance) {
+    if (this.dropDistance(best) > this.plan.campMaxDropDistance) {
       const camp = CAMP_FOR[resource];
       if (this.assistCamp(v, camp)) return true;
       const spot = this.campSpot(camp, resource, slots, nodes);
@@ -559,7 +579,7 @@ class Decision {
 
   private assignFood(v: VillagerView): boolean {
     const berries = this.view.nodes.filter((n) => n.slot === 'berries' && n.gatherers < n.maxGatherers);
-    const near = berries.filter((n) => this.dropDistance(n) <= PLAN.campMaxDropDistance);
+    const near = berries.filter((n) => this.dropDistance(n) <= this.plan.campMaxDropDistance);
     const bush = this.pickNode(v, near);
     if (bush !== null) {
       this.gather(v, bush);
@@ -571,7 +591,7 @@ class Decision {
       const patch = this.view.nodes
         .filter((n) => n.slot === 'berries' && dist(n.cx, n.cy, far.cx, far.cy) <= 4)
         .reduce((sum, n) => sum + n.amount, 0);
-      if (patch >= PLAN.millMinFood) {
+      if (patch >= this.plan.millMinFood) {
         if (this.assistCamp(v, 'mill')) return true;
         const spot = this.campSpot('mill', 'food', ['berries'], berries);
         if (spot !== null && this.construct('mill', spot, [v]) !== null) return true;
@@ -604,7 +624,7 @@ class Decision {
     }
     // Farms jump the queue for saved-up wood only while food is short; with food banked the age comes first.
     const farmCost = this.cost('farm');
-    const foodShort = this.budget.food < PLAN.farmPriorityFood;
+    const foodShort = this.budget.food < this.plan.farmPriorityFood;
     if (foodShort ? this.affordableNow(farmCost) : this.affordable(farmCost)) {
       const spot = this.farmSpot();
       if (spot !== null && this.construct('farm', spot, [v], foodShort) !== null) return true;
@@ -635,7 +655,7 @@ class Decision {
   private techs(): void {
     const reserveTech = this.ageUpAvailable();
     const reserve = reserveTech !== null ? this.cost(reserveTech) : undefined;
-    for (const t of PLAN.techs) {
+    for (const t of this.plan.techs) {
       if (this.view.researched.has(t.id) || !this.available(t.id)) continue;
       const have = t.needs.slot === 'all' ? this.view.villagers.length : this.counts[t.needs.slot];
       if (have < t.needs.count) continue;
