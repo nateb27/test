@@ -11,7 +11,7 @@ import type { PerfSnapshotEntry } from './perf';
 
 export const DEBUG_HOOKS_ENABLED: boolean = import.meta.env.DEV || import.meta.env.MODE === 'e2e';
 
-export type ScreenName = 'menu' | 'civSelect' | 'loading' | 'game';
+export type ScreenName = 'menu' | 'setup' | 'loading' | 'game';
 
 export interface GameDebugHook {
   /** Current screen. */

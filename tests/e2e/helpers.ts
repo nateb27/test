@@ -22,20 +22,31 @@ export function collectErrors(page: Page): string[] {
 export const DEFAULT_SEED = 1;
 
 /**
- * Menu -> New Game -> civilization select -> Start; waits until the match, HUD and minimap are up.
+ * Menu -> New Game -> match setup -> Start; waits until the match, HUD and minimap are up. The e2e build's setup
+ * default is "No opponent" (a sandbox match, as in Milestone 1); `opponent` / `ai` / `color` set `?opponent=`, `?ai=` and
+ * `?color=` for specs that want an opponent (combat specs use `opponent: 'standard', ai: 'off'`).
  * The map seed is pinned (`?seed=`, honoured by dev and e2e builds only). The match starts paused (`?paused=1`, unless `paused: false`),
  * so not a single tick runs before the test takes over; time then only advances through `step`.
  */
-export async function startMatch(page: Page, opts: { paused?: boolean; seed?: number; art?: 'fast' | 'rendered' } = {}): Promise<void> {
+export async function startMatch(page: Page, opts: { paused?: boolean; seed?: number; art?: 'fast' | 'rendered'; opponent?: 'none' | 'easy' | 'standard' | 'hard'; ai?: 'off'; color?: string } = {}): Promise<void> {
   const query = new URLSearchParams({ seed: String(opts.seed ?? DEFAULT_SEED) });
   if (opts.paused !== false) query.set('paused', '1');
+  if (opts.opponent !== undefined) query.set('opponent', opts.opponent);
+  if (opts.ai !== undefined) query.set('ai', opts.ai);
+  if (opts.color !== undefined) query.set('color', opts.color);
   // E2E_ART=rendered runs any scenario with the rendered art (used to photograph the gallery with it).
   const art = opts.art ?? process.env.E2E_ART;
   if (art !== undefined && art !== '') query.set('art', art);
   await page.goto(`/?${query.toString()}`);
   await expect(page.getByTestId('main-menu')).toBeVisible();
   await page.getByTestId('new-game').click();
+  await expect(page.getByTestId('setup-screen')).toBeVisible();
   await page.getByTestId('start-match').click();
+  await waitForMatch(page);
+}
+
+/** After Start Game (or a load): wait until the match, HUD and minimap are up, then freeze the client clock. */
+export async function waitForMatch(page: Page): Promise<void> {
   // Booting generates the art and the map, which takes real time on a loaded machine: wait for the state, not a delay.
   await expect(page.locator('canvas.world-canvas')).toBeVisible({ timeout: BOOT_MS });
   await expect.poll(() => page.evaluate(() => window.__game?.state?.entities.length ?? 0), { timeout: BOOT_MS }).toBeGreaterThan(10);
