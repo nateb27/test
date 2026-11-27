@@ -13,7 +13,13 @@ import { createInitialState, simFromState } from '../../src/sim/sim';
 import type { Command, GameState, Sim, UnitEntity } from '../../src/sim/types';
 
 const house = registry.building('house');
-const post: BuildingDef = { ...house, id: 'testPost', name: 'Post', footprint: 1, buildable: false };
+const post: BuildingDef = {
+  ...house,
+  id: 'testPost',
+  name: 'Post',
+  footprint: 1,
+  buildable: false,
+};
 const data: DataRegistry = createRegistry({
   units: registry.units,
   buildings: [...registry.buildings, post],
@@ -26,7 +32,12 @@ const data: DataRegistry = createRegistry({
   combat: registry.combat,
 });
 
-const BY_SIZE: Record<number, string> = { 1: 'testPost', 2: 'house', 3: 'barracks', 4: 'townCenter' };
+const BY_SIZE: Record<number, string> = {
+  1: 'testPost',
+  2: 'house',
+  3: 'barracks',
+  4: 'townCenter',
+};
 const ATTACKERS = ['villager', 'spearman', 'swordsman', 'archer', 'horseman', 'lancer', 'cataphract', 'batteringRam', 'trebuchet', 'siphonarios'];
 
 /** The 8 approach directions: (sx, sy) in {-1, 0, 1}², not both 0. */
@@ -42,7 +53,15 @@ const DIRS: [number, number][] = [
 ];
 
 function emptyState(size = 40): GameState {
-  return createInitialState({ seed: 1, mapSize: size, players: [{ civ: 'byzantines' }, { civ: 'byzantines' }], mode: 'sandbox' }, data);
+  return createInitialState(
+    {
+      seed: 1,
+      mapSize: size,
+      players: [{ civ: 'byzantines' }, { civ: 'byzantines' }],
+      mode: 'sandbox',
+    },
+    data,
+  );
 }
 
 /**
@@ -63,11 +82,14 @@ function attackCmd(unitIds: number[], targetId: number): Command {
 
 /** Ticks until the building first loses hp (or -1 after `max`). */
 function ticksToFirstDamage(sim: Sim, buildingId: number, max: number): number {
-  const hp0 = findEntity(sim.state as GameState, buildingId)!.hp;
+  const hpOf = (): number => {
+    const e = findEntity(sim.state as GameState, buildingId);
+    return e !== undefined && e.kind === 'building' ? e.hp : 0;
+  };
+  const hp0 = hpOf();
   for (let t = 1; t <= max; t++) {
     sim.step([]);
-    const b = findEntity(sim.state as GameState, buildingId);
-    if (b === undefined || b.hp < hp0) return t;
+    if (hpOf() < hp0) return t;
   }
   return -1;
 }
@@ -91,7 +113,9 @@ describe('a unit beside a footprint reaches it (defect: empty path next to a bui
           const t = ticksToFirstDamage(sim, b.id, 600);
           if (t < 0) {
             const me = findEntity(sim.state as GameState, u.id) as UnitEntity;
-            failures.push(`(${sx},${sy}) from (${p.x},${p.y}) stuck at (${me.pos.x.toFixed(3)},${me.pos.y.toFixed(3)}) order ${JSON.stringify(me.currentOrder)}`);
+            failures.push(
+              `(${sx},${sy}) from (${p.x},${p.y}) stuck at (${me.pos.x.toFixed(3)},${me.pos.y.toFixed(3)}) order ${JSON.stringify(me.currentOrder)}`,
+            );
           }
         }
         expect(failures).toEqual([]);
@@ -110,7 +134,7 @@ describe('a unit beside a footprint reaches it (defect: empty path next to a bui
     // 24 melee attackers in a ring 0.6 to 1.0 tiles off the 3x3 footprint, all 8 directions and between.
     for (let i = 0; i < 24; i++) {
       const side = i % 4;
-      const along = 0.25 + ((i >> 2) * 0.5) % 3.4;
+      const along = 0.25 + (((i >> 2) * 0.5) % 3.4);
       const off = 0.6 + (i % 3) * 0.2;
       const x = side === 0 ? tx - off : side === 1 ? tx + 3 + off : tx - 0.5 + along;
       const y = side === 2 ? ty - off : side === 3 ? ty + 3 + off : ty - 0.5 + along;
