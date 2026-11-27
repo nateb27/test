@@ -9,7 +9,7 @@
 import { Application, Container, UPDATE_PRIORITY } from 'pixi.js';
 import { DEBUG_HOOKS_ENABLED } from '../debug/hook';
 import { perf } from '../debug/perf';
-import type { AssetManifest } from '../art/manifest';
+import type { AssetManifest, UnitAnimState } from '../art/manifest';
 import { registry as defaultRegistry } from '../../data';
 import type { DataRegistry } from '../../data/schema';
 import { TICK_RATE, type EntityId, type ReadonlyGameState, type SimEvent, type Vec2 } from '../../sim/types';
@@ -68,6 +68,10 @@ export interface WorldRendererApi extends WorldRenderer {
   pushEvents(events: readonly SimEvent[]): void;
   /** What the effect layer holds and drew on the last frame (debug hook `effects()`). */
   effectStats(): EffectStats;
+  /** Optional: force a unit's animation state, null clears (dev/e2e art previews of attack, death, corpse). */
+  previewAnimation?(id: EntityId, state: UnitAnimState | null): void;
+  /** Optional: draw one entity in another player colour, null clears (dev/e2e art previews). */
+  previewColour?(id: EntityId, primary: number | null): void;
 }
 
 /** Counts reported by `WorldRendererApi.effectStats`. */
@@ -136,7 +140,7 @@ export async function createWorldRenderer(options: RendererOptions): Promise<Wor
   const groundOverlays = new Container();
   const entities = new EntityLayer(options.manifest, registry);
   const worldOverlays = new Container();
-  world.addChild(terrain.container, groundOverlays, entities.container, worldOverlays);
+  world.addChild(terrain.container, entities.shadows, groundOverlays, entities.container, worldOverlays);
   app.stage.addChild(world);
   const cameraInput = new CameraInput(camera, app.canvas, options.cameraInput);
 
@@ -192,6 +196,8 @@ export async function createWorldRenderer(options: RendererOptions): Promise<Wor
     // STUB (TODO(WP27)): the decal and effect layer; until then events are ignored and nothing is counted.
     pushEvents: () => {},
     effectStats: () => ({ projectiles: 0, corpses: 0, rubble: 0, fires: 0, effects: 0 }),
+    previewAnimation: (id, state) => entities.previewAnimation(id, state),
+    previewColour: (id, primary) => entities.previewColour(id, primary),
     entityCanvasBounds(id) {
       const d = entities.getDrawn(id);
       if (d === undefined) return null;

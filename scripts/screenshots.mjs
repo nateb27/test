@@ -1,5 +1,5 @@
 /**
- * Regenerates the curated gallery in docs/screenshots/ (12 images of the current game).
+ * Regenerates the curated gallery in docs/screenshots/ (13 images of the current game).
  *
  *   E2E_PORT=5480 npm run e2e          # leaves its screenshots in the git-ignored test-results/screenshots/
  *   node scripts/screenshots.mjs       # menu and civ select are captured here; the rest are copied from that run
@@ -8,7 +8,8 @@
  * point SRC at that port's folder), then `E2E_ART=rendered node scripts/screenshots.mjs`.
  *
  * The in-match images come from the e2e scenarios (real UI, real sim); this script only adds the two menu
- * screens, which no scenario photographs. It serves dist-e2e/ itself on a free port (build it first with
+ * screens, which no scenario photographs. The unit line-up (13) comes from `node scripts/art-shots.mjs <dir> lineup`
+ * (`LINEUP_SRC`, default test-results/art-shots/lineup-town-1.5x.png). It serves dist-e2e/ itself on a free port (build it first with
  * `npx vite build --mode e2e --outDir dist-e2e`, which the e2e run does).
  */
 
@@ -37,6 +38,7 @@ const PLAN = [
   ['11-minimap', 'wp10-04-minimap-full-view'],
   ['12-debug-overlay', 'wp13-3-debug-overlay'],
 ];
+const LINEUP = process.env.LINEUP_SRC ?? 'test-results/art-shots/lineup-town-1.5x.png';
 
 const files = existsSync(SRC) ? readdirSync(SRC) : [];
 const find = (stem) => files.find((f) => f === `${stem}.png`);
@@ -49,6 +51,8 @@ if (missing.length > 0) {
 rmSync(OUT, { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
 for (const [name, stem] of PLAN) if (stem !== null) copyFileSync(`${SRC}/${find(stem)}`, `${OUT}/${name}.png`);
+if (existsSync(LINEUP)) copyFileSync(LINEUP, `${OUT}/13-unit-lineup.png`);
+else console.warn(`no line-up image at ${LINEUP} (node scripts/art-shots.mjs test-results/art-shots lineup)`);
 
 const server = spawn('npx', ['vite', 'preview', '--outDir', 'dist-e2e', '--port', String(PORT), '--strictPort'], { stdio: 'ignore' });
 try {

@@ -9,7 +9,7 @@
 
 import type { DataRegistry } from '../../../data/schema';
 import type { ReadonlyEntity } from '../../../sim/types';
-import { UNIT_STATE_FALLBACK, type AssetManifest, type SpriteAnimation, type SpriteAsset, type UnitAnimState } from '../../art/manifest';
+import { resolveUnitState, type AssetManifest, type SpriteAnimation, type SpriteAsset, type SpriteState } from '../../art/manifest';
 import { emptyRowsAbove, unitAnimState, type DrawnEntity } from '../entities';
 
 const NO_PAD = -1;
@@ -26,8 +26,8 @@ export function animationPad(anim: SpriteAnimation): number | null {
 
 export class UnitTopCache {
   private readonly assets = new Map<string, SpriteAsset | null>();
-  /** Per asset: pad by `stateIndex * 8 + facing`; `undefined` = not measured yet, `NO_PAD` = unknown. */
-  private readonly pads = new WeakMap<SpriteAsset, number[]>();
+  /** Per asset: pad by `state|facing`; absent = not measured yet, `NO_PAD` = unknown. */
+  private readonly pads = new WeakMap<SpriteAsset, Map<string, number>>();
 
   constructor(
     private readonly registry: DataRegistry,
@@ -50,30 +50,25 @@ export class UnitTopCache {
     if (e.kind !== 'unit') return null;
     const asset = this.asset(e.typeId);
     if (asset === null) return null;
-    const state = unitAnimState(e);
+    // Assets lacking a state fall back the way the renderer does (the unit is drawn from the fallback's frames).
+    const state = resolveUnitState(asset.states, unitAnimState(e));
     let table = this.pads.get(asset);
     if (table === undefined) {
-      table = [];
+      table = new Map();
       this.pads.set(asset, table);
     }
-    const key = STATE_INDEX[state] * 8 + (e.facing & 7);
-    let pad = table[key];
+    const key = `${state}|${e.facing & 7}`;
+    let pad = table.get(key);
     if (pad === undefined) {
       const found = this.pad(asset, state, e);
       pad = found ?? NO_PAD;
-      table[key] = pad;
+      table.set(key, pad);
     }
     return pad === NO_PAD ? null : d.bounds.minY + pad;
   }
 
-  private pad(asset: SpriteAsset, state: UnitAnimState, e: ReadonlyEntity): number | null {
+  private pad(asset: SpriteAsset, state: SpriteState, e: ReadonlyEntity): number | null {
     if (e.kind !== 'unit') return null;
-    // Assets lacking a state fall back the way the renderer does (the unit is drawn from the fallback's frames).
-    let use: UnitAnimState | null = state;
-    while (use !== null && !asset.states.includes(use)) use = UNIT_STATE_FALLBACK[use];
-    if (use === null) return null;
-    return animationPad(asset.animation(use, e.facing, { age: 1, seed: e.id }));
+    return animationPad(asset.animation(state, e.facing, { age: 1, seed: e.id }));
   }
 }
-
-const STATE_INDEX = { idle: 0, walk: 1, work: 2, carry: 3, attack: 4, death: 5 } as const;

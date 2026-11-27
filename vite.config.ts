@@ -11,7 +11,7 @@ function artSourceHash(): string {
     for (const name of readdirSync(dir).sort()) {
       const p = join(dir, name);
       if (statSync(p).isDirectory()) walk(p);
-      else if (name.endsWith('.ts')) h.update(name).update(readFileSync(p));
+      else if (name.endsWith('.ts') || name.endsWith('.json')) h.update(name).update(readFileSync(p));
     }
   };
   for (const d of ['src/client/art/rendered']) walk(d);

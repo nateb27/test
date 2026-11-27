@@ -10,22 +10,78 @@ import type { Facing } from '../../sim/types';
 
 export type { IconId, SpriteId } from '../../data/schema';
 
-/** Animation states for units. `attack` and `death` are M2 (PLAN-M2 3.8). */
-export type UnitAnimState = 'idle' | 'walk' | 'work' | 'carry' | 'attack' | 'death';
-/** Visual construction stages for buildings. */
-export type BuildingStage = 'foundation' | 'scaffold' | 'complete';
-/** Any sprite state. Nodes and other static sprites use 'default'. */
-export type SpriteState = UnitAnimState | BuildingStage | 'default';
+/**
+ * Animation states for units. The first four are what every unit art has; the rest are optional, more specific states
+ * (added with the pre-rendered sheets and M2): a villager's job (`chop`, `mine`, `farm`, `forage`, `build`, otherwise
+ * `work`), walking with a load (`carryWood`... otherwise `carry`), `attack` (with `hitFrame`), `death` (plays once,
+ * `loop: false`) and `corpse` (the body left on the ground). Art that lacks one is asked for the next state along
+ * `UNIT_STATE_FALLBACK` (`resolveUnitState`).
+ */
+export type UnitAnimState =
+  | 'idle'
+  | 'walk'
+  | 'work'
+  | 'carry'
+  | 'chop'
+  | 'mine'
+  | 'farm'
+  | 'forage'
+  | 'build'
+  | 'carryWood'
+  | 'carryFood'
+  | 'carryGold'
+  | 'carryStone'
+  | 'attack'
+  | 'death'
+  | 'corpse';
 
-/** Fallback when an asset lacks a state (applied by the renderer, not the asset). */
+/** The four states every unit art has. */
+export type BasicUnitState = 'idle' | 'walk' | 'work' | 'carry';
+
+/**
+ * The one fallback chain for unit states (PLAN-M2 3.8; applied by the renderer and the overlays through
+ * `resolveUnitState`, never by an asset): a state an art lacks is replaced by the next one along the chain until the
+ * art has it. Every chain ends at `idle`, which every unit art has.
+ */
 export const UNIT_STATE_FALLBACK: Readonly<Record<UnitAnimState, UnitAnimState | null>> = {
   idle: null,
   walk: 'idle',
   work: 'idle',
   carry: 'walk',
+  chop: 'work',
+  mine: 'work',
+  farm: 'work',
+  forage: 'work',
+  build: 'work',
+  carryWood: 'carry',
+  carryFood: 'carry',
+  carryGold: 'carry',
+  carryStone: 'carry',
   attack: 'idle',
-  death: null,
+  death: 'idle',
+  corpse: 'death',
 };
+
+/**
+ * The state to ask an art for: `wanted` when the art lists it, else the first state along `UNIT_STATE_FALLBACK` that
+ * it lists, else its first state.
+ */
+export function resolveUnitState(states: readonly SpriteState[], wanted: UnitAnimState): SpriteState {
+  // `?? null` guards a caller passing a non-unit state (e.g. 'default'), which has no entry.
+  for (let s: UnitAnimState | null = wanted; s !== null; s = UNIT_STATE_FALLBACK[s] ?? null) if (states.includes(s)) return s;
+  return states[0] ?? 'idle';
+}
+
+/** True when `state` is `kind` or falls back to it (e.g. `chop` is a kind of `work`). */
+export function isUnitStateKind(state: SpriteState, kind: UnitAnimState): boolean {
+  let s: UnitAnimState | null = state in UNIT_STATE_FALLBACK ? (state as UnitAnimState) : null;
+  for (; s !== null; s = UNIT_STATE_FALLBACK[s] ?? null) if (s === kind) return true;
+  return false;
+}
+/** Visual construction stages for buildings. */
+export type BuildingStage = 'foundation' | 'scaffold' | 'complete';
+/** Any sprite state. Nodes and other static sprites use 'default'. */
+export type SpriteState = UnitAnimState | BuildingStage | 'default';
 
 /** One looping animation for a state and facing. */
 export interface SpriteAnimation {
@@ -43,6 +99,21 @@ export interface SpriteAnimation {
    * sit on top of a sprite use it instead of scanning the texture.
    */
   readonly modelTop?: readonly number[];
+  /**
+   * Optional, per frame: the ground shadow as its own texture (same frame size and anchor as `frames`). The renderer
+   * draws it on a layer under every entity, so shadows never cover figures.
+   */
+  readonly shadows?: readonly Texture[];
+  /**
+   * Optional, per frame: the figure's box (no shadow, no outline) in texture pixels of the untrimmed frame, for
+   * picking.
+   */
+  readonly bodies?: readonly { readonly x: number; readonly y: number; readonly w: number; readonly h: number }[];
+  /**
+   * Optional, locomotion: ground distance in tiles covered by one loop. The renderer then advances frames by the
+   * distance the unit moved (feet do not slide at any speed) instead of by time.
+   */
+  readonly cycle?: number;
   /** false = play once and hold the last frame (death). Default true. */
   readonly loop?: boolean;
   /** For `attack`: index of the frame on which the blow lands (synchronised with the release tick). */
