@@ -166,13 +166,36 @@ export const HP_UNIT_GAP = 6;
 export const HP_BUILDING_H = 5;
 export const HP_BUILDING_GAP = 3;
 
+/** Compact unit bars (crowds, zoomed out): 18 x 2 screen px, so neighbouring bars in a packed army stay apart. */
+export const HP_UNIT_COMPACT_W = 18;
+export const HP_UNIT_COMPACT_H = 2;
+/** More selected units than this: selection alone no longer shows a bar, only damage does (the rings show the selection). */
+export const HP_CROWD_SELECTION = 12;
+/** More unit bars than this on screen, or a zoom below HP_COMPACT_ZOOM: unit bars are compact. */
+export const HP_CROWD_BARS = 24;
+export const HP_COMPACT_ZOOM = 0.75;
+
 const UNIT_BAR_SIZE: Readonly<{ w: number; h: number }> = { w: HP_UNIT_W, h: HP_UNIT_H };
+const UNIT_BAR_COMPACT: Readonly<{ w: number; h: number }> = { w: HP_UNIT_COMPACT_W, h: HP_UNIT_COMPACT_H };
 const buildingBarSizes: { w: number; h: number }[] = [];
 
-/** Screen-pixel width and height of a health bar (the frame adds 1 px all round). Shared objects: never mutate. */
-export function healthBarSize(kind: 'unit' | 'building', footprint: number): Readonly<{ w: number; h: number }> {
-  if (kind === 'unit') return UNIT_BAR_SIZE;
+/**
+ * Screen-pixel width and height of a health bar (the frame adds 1 px all round). `compact` unit bars for crowds and
+ * zoomed-out views. Shared objects: never mutate.
+ */
+export function healthBarSize(kind: 'unit' | 'building', footprint: number, compact = false): Readonly<{ w: number; h: number }> {
+  if (kind === 'unit') return compact ? UNIT_BAR_COMPACT : UNIT_BAR_SIZE;
   return (buildingBarSizes[footprint] ??= { w: 16 * footprint + 16, h: HP_BUILDING_H });
+}
+
+/** Does selection alone show a unit's bar? Not once more than HP_CROWD_SELECTION units are selected. */
+export function selectionShowsBar(selectedUnits: number): boolean {
+  return selectedUnits <= HP_CROWD_SELECTION;
+}
+
+/** Compact unit bars: zoomed out, or more than HP_CROWD_BARS unit bars to draw. */
+export function compactUnitBars(zoom: number, unitBars: number): boolean {
+  return zoom < HP_COMPACT_ZOOM || unitBars > HP_CROWD_BARS;
 }
 
 /**

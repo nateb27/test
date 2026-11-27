@@ -181,7 +181,7 @@ test('minimap shows the Town Center, resource nodes, units and the camera outlin
       trees: s.entities.filter((e) => e.kind === 'node' && e.typeId === 'tree').length,
     };
   });
-  const colors = { gold: 0xe0b020, stone: 0x8a8d93, berry: 0xb03a5b, tree: 0x2d5a1e };
+  const colors = { gold: 0xf4e7a8, stone: 0x8a8d93, berry: 0xc85ad8, tree: 0x1f3d17 };
 
   const tcp = await toMinimap(page, info.tc.x, info.tc.y);
   expect((await minimapPixels(page, tcp.x, tcp.y, 4)).some((c) => near(c, info.color))).toBe(true);

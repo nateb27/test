@@ -3,6 +3,7 @@ export type { OverlayDeps } from './worldOverlays';
 export {
   barFor,
   buildingBarCentres,
+  compactUnitBars,
   healthBarColor,
   healthBarFill,
   healthBarShown,
@@ -17,5 +18,6 @@ export {
   MaxHpCache,
   MAX_MARKERS,
   RESOURCE_COLOR,
+  selectionShowsBar,
 } from './logic';
 export type { BarSpec, MarkerKind, MarkerSpec } from './logic';

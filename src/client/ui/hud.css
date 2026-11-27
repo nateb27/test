@@ -325,8 +325,10 @@
 
 .single-name {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+  row-gap: 2px;
   font-size: 18px;
   font-weight: 700;
   color: var(--hud-gold);
@@ -991,13 +993,15 @@ button.card-slot:not(:has(.cost-row)) {
   color: var(--hud-muted);
 }
 
+/* The owner of an inspected enemy, with the difficulty ("Computer (Standard)"): never cut. A narrow panel (800x600)
+   moves it under the name and lets it wrap at the space before the difficulty. */
 .tag.owner-tag {
   background: rgba(0, 0, 0, 0.4);
   border: 1px solid;
-  max-width: 150px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
 }
 
 /* The current stance on the command card. */

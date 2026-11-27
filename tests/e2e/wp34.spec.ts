@@ -425,6 +425,18 @@ test('a 48-unit selection: dense portraits, whole rows only, the rest scroll; at
   const big = await gridLayout(page);
   expect(big).toMatchObject({ items: 48, cut: 0, scrolls: true, dense: true });
   expect(big.visible).toBeGreaterThanOrEqual(36);
+  // Health bars in a crowd (verification fix D9): 48 selected and unhurt show no bars (the rings show the selection);
+  // a few hurt ones show full bars; a hurt crowd shows compact ones.
+  await frames(page, 2);
+  expect(await overlayStats(page)).toMatchObject({ healthBars: 0, compactBars: 0 });
+  await page.evaluate((hurt) => hurt.forEach((id) => window.__game!.cheat.setHp(id, 20)), ids.slice(0, 3));
+  await step(page, 1);
+  await frames(page, 2);
+  expect(await overlayStats(page)).toMatchObject({ healthBars: 3, compactBars: 0 });
+  await page.evaluate((hurt) => hurt.forEach((id, i) => window.__game!.cheat.setHp(id, 10 + (i % 4) * 10)), ids.slice(0, 30));
+  await step(page, 1);
+  await frames(page, 2);
+  expect(await overlayStats(page)).toMatchObject({ healthBars: 30, compactBars: 1 });
   await shot(page, 'wp34-selection-48-1280');
   // Scrolled to the end: still whole rows.
   await page.getByTestId('multi-grid').evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
@@ -483,3 +495,26 @@ for (const size of [{ width: 640, height: 480 }, { width: 800, height: 600 }] as
     expect(errors).toEqual([]);
   });
 }
+
+test('the frame-rate readout (verification fix D4): ?fps=1 shows fps and the sim cost per tick, F3 hides and shows it', async ({ page }) => {
+  const errors = collectErrors(page);
+  await startMatch(page, { fps: true });
+  const meter = page.getByTestId('fps-meter');
+  await expect(meter).toBeVisible();
+  await expect(meter).toHaveText(/^\d+ fps \| sim \d+\.\d\d ms\/tick \(max \d+\.\d\)$/);
+  // Under the top bar, clear of the HUD's buttons, and never in the way of the pointer.
+  expect(await meter.evaluate((el) => getComputedStyle(el).pointerEvents)).toBe('none');
+  await shot(page, 'wp34-fps-meter');
+  await page.keyboard.press('F3');
+  await expect(meter).toBeHidden();
+  await page.keyboard.press('F3');
+  await expect(meter).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test('without ?fps the readout starts hidden and F3 shows it', async ({ page }) => {
+  await startMatch(page);
+  await expect(page.getByTestId('fps-meter')).toBeHidden();
+  await page.keyboard.press('F3');
+  await expect(page.getByTestId('fps-meter')).toBeVisible();
+});

@@ -28,8 +28,12 @@ export const DEFAULT_SEED = 1;
  * The map seed is pinned (`?seed=`, honoured by dev and e2e builds only). The match starts paused (`?paused=1`, unless `paused: false`),
  * so not a single tick runs before the test takes over; time then only advances through `step`.
  */
-export async function startMatch(page: Page, opts: { paused?: boolean; seed?: number; art?: 'fast' | 'rendered'; opponent?: 'none' | 'easy' | 'standard' | 'hard'; ai?: 'off'; color?: string } = {}): Promise<void> {
+export async function startMatch(
+  page: Page,
+  opts: { paused?: boolean; seed?: number; art?: 'fast' | 'rendered'; opponent?: 'none' | 'easy' | 'standard' | 'hard'; ai?: 'off'; color?: string; fps?: boolean } = {},
+): Promise<void> {
   const query = new URLSearchParams({ seed: String(opts.seed ?? DEFAULT_SEED) });
+  if (opts.fps === true) query.set('fps', '1');
   if (opts.paused !== false) query.set('paused', '1');
   if (opts.opponent !== undefined) query.set('opponent', opts.opponent);
   if (opts.ai !== undefined) query.set('ai', opts.ai);

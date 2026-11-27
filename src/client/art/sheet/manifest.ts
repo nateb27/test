@@ -253,26 +253,17 @@ export function createSheetManifest(options: SheetManifestOptions = {}): SheetMa
     for (let r = 0; r < h; r++) data.set(all.subarray(((y + r) * png.width + x) * 4, ((y + r) * png.width + x + w) * 4), r * w * 4);
     // Keep only opaque pixels (drop the soft outline) for a clean icon.
     for (let i = 3; i < data.length; i += 4) if (data[i]! < 255) data[i] = 0;
-    // Foot units are tall and narrow: the portrait is their head and upper body (the top 60% of the figure), so it
-    // fills the frame. Riders and siege engines keep the whole figure.
-    let top = h;
-    let bottom = -1;
-    for (let r = 0; r < h; r++)
-      for (let c = 0; c < w; c++)
-        if (data[(r * w + c) * 4 + 3]! > 0) {
-          if (r < top) top = r;
-          bottom = r;
-          break;
-        }
-    const bust = iconFacing(name) === 1 && bottom > top;
-    const ch = bust ? Math.max(1, Math.round((bottom - top + 1) * 0.6)) : h;
-    const oy = bust ? top : 0;
+    // Foot units are tall and narrow: the portrait is their head and upper body, so it fills the frame. Riders and
+    // siege engines keep the whole figure.
+    const box = iconFacing(name) === 1 ? bustBox(data, w, h) : { x: 0, y: 0, w, h };
     const canvas = document.createElement('canvas');
-    canvas.width = w;
-    canvas.height = ch;
+    canvas.width = box.w;
+    canvas.height = box.h;
     const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
-    ctx.putImageData(new ImageData(data.slice(oy * w * 4, (oy + ch) * w * 4), w, ch), 0, 0);
-    return { canvas, ctx, w: w / SS, h: ch / SS };
+    const crop = new Uint8ClampedArray(box.w * box.h * 4);
+    for (let r = 0; r < box.h; r++) crop.set(data.subarray(((box.y + r) * w + box.x) * 4, ((box.y + r) * w + box.x + box.w) * 4), r * box.w * 4);
+    ctx.putImageData(new ImageData(crop, box.w, box.h), 0, 0);
+    return { canvas, ctx, w: box.w / SS, h: box.h / SS };
   }
 
   function iconEntry(id: IconId): { surface: Surface; texture: Texture; url: string | null } {
@@ -396,6 +387,58 @@ export function createSheetManifest(options: SheetManifestOptions = {}): SheetMa
     },
   };
 }
+
+/**
+ * The head-and-torso box of a standing figure (RGBA, alpha already 0 or 255), for a portrait that a weapon does not
+ * fill. The body starts at the first of two rows at least BODY_ROW of the widest row wide (a spear shaft or a raised
+ * sword above the head is a few pixels wide and is skipped); the bust is the top BUST of the body from there. Columns
+ * are kept where the bust rows hold at least BODY_COLUMN of its height in figure pixels (a spear crossing the chest is
+ * cut), widened to at least the bust's height times 0.8 so the head is not squeezed. Returns the whole image when it
+ * cannot tell.
+ */
+export function bustBox(data: Uint8ClampedArray, w: number, h: number): { x: number; y: number; w: number; h: number } {
+  const rowCount: number[] = [];
+  let widest = 0;
+  for (let r = 0; r < h; r++) {
+    let n = 0;
+    for (let c = 0; c < w; c++) if (data[(r * w + c) * 4 + 3]! > 0) n++;
+    rowCount.push(n);
+    widest = Math.max(widest, n);
+  }
+  if (widest === 0) return { x: 0, y: 0, w, h };
+  let bottom = h - 1;
+  while (bottom > 0 && rowCount[bottom] === 0) bottom--;
+  let top = -1;
+  for (let r = 0; r + 1 < h; r++) {
+    if (rowCount[r]! >= BODY_ROW * widest && rowCount[r + 1]! >= BODY_ROW * widest) {
+      top = r;
+      break;
+    }
+  }
+  if (top < 0 || bottom <= top) return { x: 0, y: 0, w, h };
+  top = Math.max(0, top - 1);
+  const bh = Math.max(1, Math.round((bottom - top + 1) * BUST));
+  let x0 = w;
+  let x1 = -1;
+  for (let c = 0; c < w; c++) {
+    let n = 0;
+    for (let r = top; r < top + bh; r++) if (data[(r * w + c) * 4 + 3]! > 0) n++;
+    if (n >= BODY_COLUMN * bh) {
+      x0 = Math.min(x0, c);
+      x1 = Math.max(x1, c);
+    }
+  }
+  if (x1 < x0) return { x: 0, y: top, w, h: bh };
+  const minW = Math.min(w, Math.round(bh * 0.8));
+  while (x1 - x0 + 1 < minW) {
+    if (x0 > 0) x0--;
+    if (x1 - x0 + 1 < minW && x1 < w - 1) x1++;
+  }
+  return { x: x0, y: top, w: x1 - x0 + 1, h: bh };
+}
+const BODY_ROW = 0.3;
+const BUST = 0.6;
+const BODY_COLUMN = 0.2;
 
 /** Icon ids the sheet provider serves: unit portraits whose sheet loaded. */
 export function claimsIcon(m: SheetManifest, id: IconId): boolean {
