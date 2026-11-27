@@ -9,11 +9,12 @@
 import { Application, Container, UPDATE_PRIORITY } from 'pixi.js';
 import { DEBUG_HOOKS_ENABLED } from '../debug/hook';
 import { perf } from '../debug/perf';
-import type { AssetManifest } from '../art/manifest';
+import type { AssetManifest, UnitAnimState } from '../art/manifest';
 import { registry as defaultRegistry } from '../../data';
 import type { DataRegistry } from '../../data/schema';
 import { TICK_RATE, type EntityId, type ReadonlyGameState, type SimEvent, type Vec2 } from '../../sim/types';
 import { Camera, CameraInput, type CameraInputOptions, type WorldPxRect } from './camera';
+import { EffectLayer } from './effects/layer';
 import { EntityLayer, footprintOf, type DrawnEntity } from './entities';
 import { mapScreenBounds, screenToWorld, worldToScreen, type ScreenPoint } from './iso';
 import { pickDrawn, pickRect } from './picking';
@@ -68,6 +69,10 @@ export interface WorldRendererApi extends WorldRenderer {
   pushEvents(events: readonly SimEvent[]): void;
   /** What the effect layer holds and drew on the last frame (debug hook `effects()`). */
   effectStats(): EffectStats;
+  /** Optional: force a unit's animation state, null clears (dev/e2e art previews of attack, death, corpse). */
+  previewAnimation?(id: EntityId, state: UnitAnimState | null): void;
+  /** Optional: draw one entity in another player colour, null clears (dev/e2e art previews). */
+  previewColour?(id: EntityId, primary: number | null): void;
 }
 
 /** Counts reported by `WorldRendererApi.effectStats`. */
@@ -135,8 +140,11 @@ export async function createWorldRenderer(options: RendererOptions): Promise<Wor
   const terrain = new TerrainLayer(options.manifest.terrain?.() ?? null, (e) => footprintOf(registry, e));
   const groundOverlays = new Container();
   const entities = new EntityLayer(options.manifest, registry);
+  const effects = new EffectLayer(options.manifest, registry, entities);
   const worldOverlays = new Container();
-  world.addChild(terrain.container, groundOverlays, entities.container, worldOverlays);
+  // Back to front: ground, ground shadows, corpses and rubble, selection rings, entities (with building fires),
+  // projectiles and hit effects, then bars and labels.
+  world.addChild(terrain.container, entities.shadows, effects.decals, groundOverlays, entities.container, effects.fx, worldOverlays);
   app.stage.addChild(world);
   const cameraInput = new CameraInput(camera, app.canvas, options.cameraInput);
 
@@ -174,7 +182,10 @@ export async function createWorldRenderer(options: RendererOptions): Promise<Wor
       perf.end('render.terrain', t0);
       // Sprite animations run on game time (tick + alpha), so a paused match is a still picture (and is not redrawn).
       entities.update(state, alpha, rect, ((state.tick + alpha) * 1000) / TICK_RATE);
+      const t2 = perf.start();
       perf.end('render.entities', t1);
+      effects.update(state, alpha, rect);
+      perf.end('render.effects', t2);
     },
     worldToCanvas: (x, y) => camera.worldToCanvas(x, y),
     canvasToWorld: (cx, cy) => camera.canvasToWorld(cx, cy),
@@ -189,9 +200,10 @@ export async function createWorldRenderer(options: RendererOptions): Promise<Wor
       return pickRect(entities.drawn, { minX: a.x, minY: a.y, maxX: c.x, maxY: c.y }, worldToScreen, kinds);
     },
     drawnTexture: (id) => entities.drawnTexture(id),
-    // STUB (TODO(WP27)): the decal and effect layer; until then events are ignored and nothing is counted.
-    pushEvents: () => {},
-    effectStats: () => ({ projectiles: 0, corpses: 0, rubble: 0, fires: 0, effects: 0 }),
+    pushEvents: (events) => effects.pushEvents(events),
+    effectStats: () => effects.stats(),
+    previewAnimation: (id, state) => entities.previewAnimation(id, state),
+    previewColour: (id, primary) => entities.previewColour(id, primary),
     entityCanvasBounds(id) {
       const d = entities.getDrawn(id);
       if (d === undefined) return null;
@@ -206,6 +218,7 @@ export async function createWorldRenderer(options: RendererOptions): Promise<Wor
     destroy() {
       cameraInput.destroy();
       terrain.destroy();
+      effects.clear();
       entities.destroy();
       app.destroy({ removeView: true }, { children: true });
     },

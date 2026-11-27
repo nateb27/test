@@ -4,9 +4,10 @@
  */
 
 import { UNIT_IDS, type UnitKey } from '../catalog';
-import type { BuildingStage, UnitAnimState } from '../manifest';
+import type { BuildingStage, BasicUnitState as UnitAnimState } from '../manifest';
 import { BUILDING_LOOKS, buildLook, stageModel } from './models/looks';
 import { berryModel, depositModel, TREE_VARIANTS, treeModel } from './models/nature';
+import { RUBBLE_HEIGHT, rubbleModel } from './models/rubble';
 import { unitModel } from './models/units';
 import { frameForBox, renderSprite, type SpriteFrame, type SpriteOut } from './render';
 import { renderTerrainTex, TERRAIN_KINDS, type TerrainKind, type TerrainTexOut } from './terrainTex';
@@ -18,6 +19,7 @@ export type Job =
   | { type: 'tree'; v: number }
   | { type: 'berry'; v: number }
   | { type: 'deposit'; gold: boolean; v: number }
+  | { type: 'rubble'; fp: number; v: number }
   | { type: 'terrain'; kind: TerrainKind };
 
 export interface NamedSprite {
@@ -34,6 +36,16 @@ export const UNIT_STATES: readonly UnitAnimState[] = ['idle', 'walk', 'work', 'c
 export const BUILDING_STAGES: readonly BuildingStage[] = ['complete', 'scaffold', 'foundation'];
 export const BERRY_VARIANTS = 2;
 export const DEPOSIT_VARIANTS = 2;
+/** Rubble of destroyed buildings (WP27): footprints 2, 3 and 4, two variants each. */
+export const RUBBLE_SIZES: readonly number[] = [2, 3, 4];
+export const RUBBLE_VARIANTS = 2;
+export const rubbleSpriteName = (fp: number, v: number): string => `rubble.${fp}|${v}`;
+
+/** Frame of the rubble of a footprint: the building frame's ground box, low. */
+export function rubbleFrame(fp: number): SpriteFrame {
+  const e = fp / 2 + 0.45;
+  return frameForBox(-e, -e, e, e, RUBBLE_HEIGHT);
+}
 
 /** Frames (output px) per unit size class: the procedural art's sizes, so picking boxes behave the same. */
 const HUMAN: SpriteFrame = { w: 64, h: 68, ax: 32, ay: 56 };
@@ -81,6 +93,8 @@ export function isEssential(j: Job): boolean {
     case 'unit':
     case 'unitIcon':
       return j.key === 'villager' || j.key === 'spearman';
+    case 'rubble':
+      return false;
     default:
       return true;
   }
@@ -103,6 +117,7 @@ export function allJobs(): Job[] {
   for (let v = 0; v < TREE_VARIANTS.length; v++) jobs.push({ type: 'tree', v });
   for (let v = 0; v < BERRY_VARIANTS; v++) jobs.push({ type: 'berry', v });
   for (const key of UNIT_IDS) jobs.push({ type: 'unitIcon', key });
+  for (const fp of RUBBLE_SIZES) for (let v = 0; v < RUBBLE_VARIANTS; v++) jobs.push({ type: 'rubble', fp, v });
   return jobs;
 }
 
@@ -125,6 +140,8 @@ export function jobCost(j: Job): number {
       return 1;
     case 'unitIcon':
       return 1;
+    case 'rubble':
+      return 1 + j.fp;
   }
 }
 
@@ -176,6 +193,11 @@ export function* runJob(job: Job, raw = false): Generator<void, JobResult, void>
     case 'deposit': {
       const sprite = yield* renderSprite({ models: [depositModel(job.gold, job.v)], ss: 2, raw, frame: NODE_FRAMES[job.gold ? 'goldDeposit' : 'stoneDeposit']! });
       sprites.push({ name: `node.${job.gold ? 'goldDeposit' : 'stoneDeposit'}|${job.v}`, sprite });
+      break;
+    }
+    case 'rubble': {
+      const sprite = yield* renderSprite({ models: [rubbleModel(job.fp, job.v)], ss: 2, raw, frame: rubbleFrame(job.fp) });
+      sprites.push({ name: rubbleSpriteName(job.fp, job.v), sprite });
       break;
     }
     case 'terrain': {

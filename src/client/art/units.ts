@@ -5,7 +5,7 @@
  */
 
 import type { Facing } from '../../sim/types';
-import type { UnitAnimState } from './manifest';
+import type { BasicUnitState as UnitAnimState } from './manifest';
 import { circle, ellipse, line, outlinedLine, poly, rrect, shadow, type Ctx, type Pt } from './draw';
 import { C, OUTLINE, type TeamColors } from './palette';
 import type { UnitKey } from './catalog';
@@ -784,9 +784,12 @@ export interface UnitFrameRequest {
   unit: UnitKey;
   /** One of DRAWN_FACINGS. */
   facing: Facing;
-  state: UnitAnimState;
+  /** `attack` (M2) is the work pose (every painter's work pose is its blow) leaning into the strike on frame 1. */
+  state: UnitAnimState | 'attack';
   frame: 0 | 1;
   team: TeamColors;
+  /** Skip the ground shadow and the team ring (the figure alone, for the death frames). */
+  bare?: boolean;
 }
 
 /** Draw one animation frame into a context whose origin is the top-left of the unit canvas. */
@@ -796,14 +799,25 @@ export function drawUnitFrame(req: UnitFrameRequest): void {
   const perp: Pt = { x: -dir.y, y: dir.x };
   const { ctx } = req;
   const big = size.w > 100 ? 1.35 : 1;
-  shadow(ctx, size.ax, size.ay, 11 * big, 5 * big, 0.3);
-  // Team-colour ground ring: readable at 0.5x zoom for every unit.
+  if (req.bare !== true) {
+    shadow(ctx, size.ax, size.ay, 11 * big, 5 * big, 0.3);
+    // Team-colour ground ring: readable at 0.5x zoom for every unit.
+    ctx.save();
+    ctx.globalAlpha = 0.95;
+    ellipse(ctx, size.ax, size.ay, 12 * big, 5.6 * big, null, req.team.primary, 2.2);
+    ctx.globalAlpha = 0.9;
+    ellipse(ctx, size.ax, size.ay, 12 * big + 1.4, 5.6 * big + 0.7, null, OUTLINE, 0.8);
+    ctx.restore();
+  }
+  const attack = req.state === 'attack';
+  const state: UnitAnimState = attack ? 'work' : (req.state as UnitAnimState);
   ctx.save();
-  ctx.globalAlpha = 0.95;
-  ellipse(ctx, size.ax, size.ay, 12 * big, 5.6 * big, null, req.team.primary, 2.2);
-  ctx.globalAlpha = 0.9;
-  ellipse(ctx, size.ax, size.ay, 12 * big + 1.4, 5.6 * big + 0.7, null, OUTLINE, 0.8);
-  ctx.restore();
-  const p: P = { ctx, ax: size.ax, ay: size.ay, dir, perp, state: req.state, frame: req.frame, team: req.team };
+  if (attack) {
+    // Wind-up leans back a little, the blow lunges forward along the facing.
+    const k = req.frame === 1 ? 2.2 : -0.8;
+    ctx.translate(dir.x * k, dir.y * k * 0.5);
+  }
+  const p: P = { ctx, ax: size.ax, ay: size.ay, dir, perp, state, frame: req.frame, team: req.team };
   UNIT_PAINTERS[req.unit](p);
+  ctx.restore();
 }

@@ -26,8 +26,7 @@ import {
  * `cheat.spawnUnit(..., 2)`, own units spawned and then selected and ordered with real clicks (every target verified
  * with `pickAt` first), card buttons and hotkeys. Time only moves through `__game.step`.
  *
- * Checks that need the WP27 effect layer (corpses, projectiles drawn, fires, rubble: `__game.effects()`) are recorded
- * as `waiting` annotations, not asserted, until it is merged.
+ * The WP27 effect layer is checked through `__game.effects()` (corpses, projectiles, fires, rubble).
  */
 
 const OPPONENT = { opponent: 'standard', ai: 'off' } as const;
@@ -165,10 +164,8 @@ async function fightGround(page: Page): Promise<Pt> {
   return clearSpot(page, spot.x, spot.y, 0, 3);
 }
 
-/** Record a check that needs the WP27 effect layer (not merged yet). */
-function waiting(what: string): void {
-  test.info().annotations.push({ type: 'waiting', description: `${what} (needs the WP27 effect layer)` });
-}
+const effects = (page: Page): Promise<{ projectiles: number; corpses: number; rubble: number; fires: number; effects: number }> =>
+  page.evaluate(() => window.__game!.effects());
 
 test('scenario 2: right-click an enemy horseman: the selected spearmen attack it with the sword cursor, it loses hp and dies', async ({ page }) => {
   const errors = collectErrors(page);
@@ -190,7 +187,10 @@ test('scenario 2: right-click an enemy horseman: the selected spearmen attack it
   await stepUntil(page, `(g.state.entities.find((e) => e.id === ${horse}) ?? { hp: 0 }).hp < ${hp0}`, 400);
   await stepUntil(page, gone(horse!), 3000);
   expect(await page.evaluate(() => window.__game!.state!.players[1]!.stats.unitsKilled)).toBeGreaterThanOrEqual(1);
-  waiting('effects().corpses >= 1');
+  // The horseman's death plays where it fell and the body stays (WP27 decal layer).
+  expect((await effects(page)).corpses).toBeGreaterThanOrEqual(1);
+  // The pointer never moved: the sword went with the enemy (the cursor follows the world, not only pointer moves).
+  expect(await page.evaluate(() => window.__game!.cursor())).toBe('default');
   await shot(page, 'm2-02-killed');
   expect(errors).toEqual([]);
 });
@@ -307,7 +307,7 @@ test('scenario 7: archers fire projectiles that fly and hurt the target', async 
   const [target] = await spawn(page, [['villager', g.x + 4.5, g.y + 0.5]], ENEMY);
   await stepUntil(page, 'g.state.projectiles.length > 0', 200, 1);
   await shot(page, 'm2-07-projectiles');
-  waiting('effects().projectiles > 0 during flight');
+  expect((await effects(page)).projectiles).toBeGreaterThan(0);
   await stepUntil(page, `(g.state.entities.find((e) => e.id === ${target}) ?? { hp: 0 }).hp < 25`, 200);
   await stepUntil(page, gone(target!), 2000);
   expect(errors).toEqual([]);
@@ -492,10 +492,14 @@ test('scenarios 9 and 14: rams right-clicked onto the enemy Town Center destroy 
   for (const u of await units(page, riders)) expect(u.order).toBe('attackMove');
   await stepUntil(page, `g.state.entities.some((e) => e.id === ${etc!.id} && e.hp < 2400)`, 2000);
   await shot(page, 'm2-09-siege');
+  // Below 66% hp the Town Center burns (three large fires below 33%, for its footprint of 4).
+  await stepUntil(page, `g.state.entities.some((e) => e.id === ${etc!.id} && e.kind === 'building' && e.hp < e.builtHp * 0.6)`, 6000, 25);
+  expect((await effects(page)).fires).toBeGreaterThanOrEqual(1);
+  await shot(page, 'm2-09-burning');
 
   await stepUntil(page, gone(etc!.id), 12000, 50);
   expect(await page.evaluate(() => window.__game!.state!.players[2]!.popCap)).toBeLessThan(enemyPop0);
-  waiting('effects().rubble >= 1 and effects().fires > 0 below 66% hp');
+  expect((await effects(page)).rubble).toBeGreaterThanOrEqual(1);
   // The villagers are hunted down by the attack-moving cavalry (or found by idle units in sight): the match ends.
   const leftovers = await page.evaluate(() => window.__game!.state!.entities.filter((e) => e.owner === 2).map((e) => e.id));
   if (leftovers.length > 0 && (await page.evaluate(() => window.__game!.match()!.winner)) === null) {
@@ -548,19 +552,64 @@ test('save mid-fight, load: the state hash continues identically', async ({ page
 });
 
 test('scenario 17: rendered-art battle gallery: death poses, corpses, fires, rubble, projectiles, both colours, at 0.5x, 1x and 2x', async ({ page }) => {
-  test.skip(true, 'Needs the WP27 effect layer (death animations, corpses, fires, rubble, projectiles are not drawn yet)');
   test.setTimeout(240_000);
+  const errors = collectErrors(page);
   await startMatch(page, { ...OPPONENT, art: 'rendered' });
-  const g = await clearSpot(page, (await townCenter(page)).x, (await townCenter(page)).y, 13, 3);
+  const tc = await townCenter(page);
+  const g = await clearSpot(page, tc.x, tc.y, 13, 3);
   await centreCamera(page, g.x, g.y);
-  await spawn(page, [['archer', g.x, g.y], ['spearman', g.x + 1, g.y], ['batteringRam', g.x, g.y + 1.5]]);
-  await spawn(page, [['archer', g.x + 5, g.y], ['swordsman', g.x + 4, g.y + 1]], ENEMY);
-  await stepUntil(page, 'g.state.projectiles.length > 0', 400, 1);
+  // A House of our own beside the Town Center (instant build), destroyed below: rubble.
+  await page.evaluate(() => {
+    const game = window.__game!;
+    game.cheat.addResources({ wood: 1000 });
+    game.cheat.instantBuild(true);
+  });
+  await step(page, 1);
+  const vills = (await villagers(page)).map((v) => v.id);
+  await centreCamera(page, tc.x, tc.y);
+  const site = await clearSpot(page, tc.x, tc.y, 5, 2);
+  await centreCamera(page, g.x, g.y);
+  await page.evaluate(
+    ([ids, x, y]) => window.__art!.issue({ type: 'build', unitIds: ids as number[], buildingType: 'house', tx: Math.floor((x as number) - 1), ty: Math.floor((y as number) - 1), queue: false }),
+    [vills, site.x, site.y] as const,
+  );
+  await step(page, 1);
+  const house = await page.evaluate(() => window.__game!.state!.entities.find((e) => e.kind === 'building' && e.owner === 1 && e.typeId === 'house')?.id ?? null);
+  expect(house, 'the House was placed').not.toBeNull();
+  await stepUntil(page, `g.state.entities.some((e) => e.id === ${house} && e.kind === 'building' && e.constructed)`, 1200, 5);
+  // Blue (ours) against red, close enough to clash at once: archers shoot, spearmen and swordsmen trade blows.
+  await spawn(page, [['archer', g.x - 1, g.y], ['archer', g.x - 1, g.y + 1.2], ['spearman', g.x + 1, g.y], ['spearman', g.x + 1, g.y + 1.2], ['batteringRam', g.x - 2, g.y + 2.5]]);
+  await spawn(page, [['archer', g.x + 5, g.y], ['swordsman', g.x + 3, g.y + 0.6], ['spearman', g.x + 3, g.y - 0.6], ['archer', g.x + 5, g.y + 1.4]], ENEMY);
+  // Our Town Center below a third of its hp: large fires and smoke; the House destroyed: rubble and dust.
+  await page.evaluate(
+    ([t, h]) => {
+      const game = window.__game!;
+      const e = game.state!.entities.find((x) => x.id === t)!;
+      if (e.kind === 'building') game.cheat.setHp(t as number, Math.floor(e.builtHp * 0.3));
+      game.cheat.setHp(h as number, 0);
+    },
+    [tc.id, house] as const,
+  );
+  await step(page, 1);
+  // Into the fight until a body lies on the field while arrows are in the air.
+  await stepUntil(page, 'g.effects().corpses >= 1 && g.state.projectiles.length > 0', 1500, 1);
+  const owners = await page.evaluate(() => [...new Set(window.__game!.state!.entities.filter((e) => e.kind === 'unit' && e.typeId !== 'villager').map((e) => e.owner))].sort());
+  expect(owners, 'both colours still fight').toEqual([1, 2]);
   for (const zoom of [0.5, 1, 2]) {
     await page.evaluate((z) => window.__game!.setZoom(z), zoom);
-    await step(page, 40);
-    const fx = await page.evaluate(() => window.__game!.effects());
-    expect(fx.projectiles + fx.corpses).toBeGreaterThan(0);
+    await centreCamera(page, g.x + 1, g.y + 0.5);
+    await step(page, 0);
+    const fx = await effects(page);
+    expect(fx.corpses, `corpses at ${zoom}x`).toBeGreaterThanOrEqual(1);
+    expect(fx.projectiles, `projectiles at ${zoom}x`).toBeGreaterThan(0);
+    expect(fx.rubble, `rubble at ${zoom}x`).toBe(1);
+    expect(fx.fires, `fires at ${zoom}x`).toBe(3);
     await shot(page, `m2-17-gallery-${zoom}x`);
   }
+  // The burning Town Center and the rubble of the House.
+  await page.evaluate(() => window.__game!.setZoom(1));
+  await centreCamera(page, tc.x, tc.y);
+  await step(page, 0);
+  await shot(page, 'm2-17-town');
+  expect(errors).toEqual([]);
 });

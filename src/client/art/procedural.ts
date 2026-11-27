@@ -19,15 +19,18 @@ import type {
   SpriteAsset,
   SpriteId,
   SpriteState,
-  UnitAnimState,
+  BasicUnitState,
+  SpriteContext,
 } from './manifest';
 import { buildingCanvasSize, drawBuilding } from './buildings';
 import {
+  allEffectSpriteIds,
   allIconIds,
   allSpriteIds,
   classifyIcon,
   classifySprite,
   iconFacing,
+  isEffectSprite,
   parseIconId,
   parseSpriteId,
   type BuildingKey,
@@ -35,11 +38,12 @@ import {
   type NodeKey,
   type UnitKey,
 } from './catalog';
-import { makeSurface, poly, SS, type Surface } from './draw';
+import { ellipse, makeSurface, poly, SS, type Surface } from './draw';
+import { drawEffect } from './fx';
 import { drawIcon, type IconSources } from './icons';
 import { NODE_SIZES, drawNode } from './nodes';
 import { DEFAULT_PRIMARY, DEFAULT_SECONDARY, DEFAULT_TEAM, teamColors, type TeamColors } from './palette';
-import { DRAWN_FACINGS, FACING_SOURCE, UNIT_SIZES, drawUnitFrame } from './units';
+import { DRAWN_FACINGS, FACING_DIR, FACING_SOURCE, UNIT_SIZES, drawUnitFrame } from './units';
 
 export type { TeamColors } from './palette';
 
@@ -51,6 +55,12 @@ export interface TeamAssetManifest extends AssetManifest {
   isFallback(id: SpriteId): boolean;
   /** True when `id` has no drawing and the "?" fallback icon is used. */
   isFallbackIcon(id: IconId): boolean;
+  /**
+   * Optional "art updated" signal: `listener` runs whenever sprites or icons arrive after `load()` resolved (the
+   * rendered art's background pass), so a reader that cached URLs or textures (the HUD) can read them again. Returns
+   * an unsubscribe function. Art that never changes after loading may leave it out.
+   */
+  onUpdate?(listener: () => void): () => void;
 }
 
 export interface ProceduralManifestOptions {
@@ -58,10 +68,14 @@ export interface ProceduralManifestOptions {
   registry?: DataRegistry;
 }
 
-const UNIT_STATES: readonly UnitAnimState[] = ['idle', 'walk', 'work', 'carry'];
+/** Unit states the procedural art draws: the four basic ones plus `attack` and `death` (PLAN-M2 7.2). */
+type ProcUnitState = BasicUnitState | 'attack' | 'death';
+const UNIT_STATES: readonly ProcUnitState[] = ['idle', 'walk', 'work', 'carry', 'attack', 'death'];
 const BUILDING_STAGES: readonly BuildingStage[] = ['foundation', 'scaffold', 'complete'];
-// attack and death (M2) are not drawn yet (TODO(WP27)); their frame times are placeholders.
-const FRAME_MS: Readonly<Record<UnitAnimState, number>> = { idle: 700, walk: 220, work: 280, carry: 240, attack: 150, death: 200 };
+const FRAME_MS: Readonly<Record<ProcUnitState, number>> = { idle: 700, walk: 220, work: 280, carry: 240, attack: 150, death: 220 };
+/** The attack's blow lands on its second frame (lean forward). */
+const ATTACK_HIT_FRAME = 1;
+const DEATH_FRAMES = 3;
 
 function makeTexture(s: Surface): Texture {
   return new Texture({ source: new CanvasSource({ resource: s.canvas, resolution: SS }) });
@@ -105,12 +119,65 @@ class UnitSprite implements SpriteAsset {
     readonly id: SpriteId,
     readonly anchor: { x: number; y: number },
     /** [state][facing 0..7] */
-    private readonly table: Readonly<Record<UnitAnimState, readonly SpriteAnimation[]>>,
+    private readonly table: Readonly<Record<ProcUnitState, readonly SpriteAnimation[]>>,
   ) {}
   animation(state: SpriteState, facing: Facing): SpriteAnimation {
-    const st: UnitAnimState = state === 'walk' || state === 'work' || state === 'carry' ? state : 'idle';
+    const st: ProcUnitState = (UNIT_STATES as readonly string[]).includes(state) ? (state as ProcUnitState) : 'idle';
     return this.table[st][facing]!;
   }
+}
+
+/** An effect sprite (projectile, hit, fire, smoke, rubble): one animation, or one per variant chosen by the seed. */
+class EffectSprite implements SpriteAsset {
+  readonly states: readonly SpriteState[] = ['default'];
+  readonly variants: number | undefined;
+  constructor(
+    readonly id: SpriteId,
+    readonly anchor: { x: number; y: number },
+    private readonly anims: readonly SpriteAnimation[],
+  ) {
+    this.variants = anims.length > 1 ? anims.length : undefined;
+  }
+  animation(_state: SpriteState, _facing: Facing, ctx?: SpriteContext): SpriteAnimation {
+    const n = this.anims.length;
+    return this.anims[ctx?.seed === undefined ? 0 : ((ctx.seed % n) + n) % n]!;
+  }
+}
+
+/**
+ * One frame of the procedural death (PLAN-M2 7.2: kneel, fall, lie), made from the bare idle figure: squashed onto its
+ * knees, tipping over backwards and lying flat on the ground (the last frame is flattened into the iso ground plane and
+ * darkened). Siege engines and horses tip less and collapse instead.
+ */
+function deathFrame(base: Surface, ax: number, ay: number, frame: number, fall: number, kind: 'human' | 'horse' | 'siege'): Surface {
+  const s = makeSurface(base.w, base.h);
+  const { ctx } = s;
+  const rot = kind === 'siege' ? [0.06, 0.16, 0.24] : kind === 'horse' ? [0.18, 0.7, 1.2] : [0.22, 0.95, 1.5];
+  const squash = kind === 'siege' ? [0.92, 0.78, 0.6] : [0.84, 0.9, 1];
+  const flat = frame === 2 ? (kind === 'siege' ? 1 : 0.62) : 1;
+  if (frame === 2) {
+    ctx.save();
+    ctx.globalAlpha = 0.28;
+    ellipse(ctx, ax + fall * (kind === 'human' ? 9 : 14), ay, kind === 'human' ? 13 : 22, kind === 'human' ? 4 : 7, '#000', null);
+    ctx.restore();
+  }
+  ctx.save();
+  ctx.translate(ax, ay);
+  ctx.scale(1, flat);
+  ctx.rotate(fall * rot[frame]!);
+  ctx.scale(1, squash[frame]!);
+  ctx.translate(-ax, -ay);
+  ctx.drawImage(base.canvas, 0, 0, base.w, base.h);
+  ctx.restore();
+  if (frame === 2) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'source-atop';
+    ctx.globalAlpha = 0.18;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, s.w, s.h);
+    ctx.restore();
+  }
+  return s;
 }
 
 export function createProceduralManifest(options: ProceduralManifestOptions = {}): TeamAssetManifest {
@@ -162,27 +229,48 @@ export function createProceduralManifest(options: ProceduralManifestOptions = {}
 
   function buildUnit(id: string, key: UnitKey, team: TeamColors): SpriteAsset {
     const size = UNIT_SIZES[key];
-    const table = {} as Record<UnitAnimState, SpriteAnimation[]>;
+    const kind = key === 'batteringRam' || key === 'trebuchet' ? 'siege' : size.w > 100 ? 'horse' : 'human';
+    const table = {} as Record<ProcUnitState, SpriteAnimation[]>;
     for (const state of UNIT_STATES) {
       const perFacing: (SpriteAnimation | undefined)[] = [];
-      const base = new Map<Facing, [Texture, Texture]>();
+      const base = new Map<Facing, Texture[]>();
       for (const f of DRAWN_FACINGS) {
         const frames: Texture[] = [];
-        for (const frame of [0, 1] as const) {
-          const s = makeSurface(size.w, size.h);
-          drawUnitFrame({ ctx: s.ctx, unit: key, facing: f, state, frame, team });
-          frames.push(track(s));
+        if (state === 'death') {
+          const bare = makeSurface(size.w, size.h);
+          drawUnitFrame({ ctx: bare.ctx, unit: key, facing: f, state: 'idle', frame: 0, team, bare: true });
+          // Fall backwards: away from the facing on screen (to the right for the south view).
+          const fall = FACING_DIR[f]!.x > 0.01 ? -1 : 1;
+          for (let i = 0; i < DEATH_FRAMES; i++) frames.push(track(deathFrame(bare, size.ax, size.ay, i, fall, kind)));
+        } else {
+          for (const frame of [0, 1] as const) {
+            const s = makeSurface(size.w, size.h);
+            drawUnitFrame({ ctx: s.ctx, unit: key, facing: f, state, frame, team });
+            frames.push(track(s));
+          }
         }
-        base.set(f, [frames[0]!, frames[1]!]);
+        base.set(f, frames);
       }
       for (let f = 0; f < 8; f++) {
         const src = FACING_SOURCE[f]!;
         const frames = base.get(src.src)!;
-        perFacing[f] = { frames, frameMs: FRAME_MS[state], mirrorX: src.mirror };
+        perFacing[f] = {
+          frames,
+          frameMs: FRAME_MS[state],
+          mirrorX: src.mirror,
+          ...(state === 'attack' ? { hitFrame: ATTACK_HIT_FRAME } : {}),
+          ...(state === 'death' ? { loop: false } : {}),
+        };
       }
       table[state] = perFacing as SpriteAnimation[];
     }
     return new UnitSprite(id, { x: size.ax / size.w, y: size.ay / size.h }, table);
+  }
+
+  function buildEffect(id: string): SpriteAsset {
+    const art = drawEffect(id as Parameters<typeof drawEffect>[0]);
+    const anims = art.frames.map((list): SpriteAnimation => ({ frames: list.map(track), frameMs: art.frameMs, mirrorX: false, loop: art.loop }));
+    return new EffectSprite(id, art.anchor, anims);
   }
 
   function buildBuilding(id: string, key: BuildingKey, team: TeamColors): SpriteAsset {
@@ -216,6 +304,15 @@ export function createProceduralManifest(options: ProceduralManifestOptions = {}
   }
 
   function teamSprite(id: SpriteId, primary: number, secondary: number): SpriteAsset {
+    if (isEffectSprite(id)) {
+      // Effects are not team coloured: one asset per id.
+      let fx = spriteCache.get(id);
+      if (fx === undefined) {
+        fx = buildEffect(id);
+        spriteCache.set(id, fx);
+      }
+      return fx;
+    }
     const resolved = resolveSprite(id);
     const parsed = parseSpriteId(resolved);
     if (parsed === null || parsed.key === null) return getFallback();
@@ -287,7 +384,7 @@ export function createProceduralManifest(options: ProceduralManifestOptions = {}
         onProgress?.(1);
         return;
       }
-      const sprites = allSpriteIds();
+      const sprites = [...allSpriteIds(), ...allEffectSpriteIds()];
       const icons = allIconIds();
       const total = sprites.length + icons.length + 1;
       let done = 0;

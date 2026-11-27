@@ -3,6 +3,10 @@
  * low sun, long shadows and desaturation of treatment 3 are deliberately not used.
  */
 
+import ART_CONSTANTS from './artConstants.json';
+
+export { ART_CONSTANTS };
+
 export interface LightParams {
   /** Sun azimuth and elevation in degrees (azimuth 0 = +x, 90 = +y). */
   sunAz: number;
@@ -31,18 +35,23 @@ function withSun(p: Omit<LightParams, 'Lx' | 'Ly' | 'Lz'>): LightParams {
   return { ...p, Lx: Math.cos(el) * Math.cos(az), Ly: Math.cos(el) * Math.sin(az), Lz: Math.sin(el) };
 }
 
+/**
+ * The values live in `artConstants.json`, which the offline sprite pipeline (`scripts/art/`) reads too, so the voxel
+ * renderer and the pre-rendered sheets cannot drift apart.
+ */
+const J = ART_CONSTANTS.light;
 export const LIGHT: LightParams = withSun({
-  sunAz: 150,
-  sunEl: 50,
-  sunCol: [2.9, 2.65, 2.25],
-  skyCol: [0.55, 0.64, 0.82],
-  bounceCol: [0.34, 0.29, 0.21],
-  exposure: 1.12,
-  sat: 0.95,
-  contrast: 1.1,
-  grit: 1.0,
-  dry: 1.15,
-  soft: 0.04,
+  sunAz: J.sunAz,
+  sunEl: J.sunEl,
+  sunCol: [J.sunCol[0]!, J.sunCol[1]!, J.sunCol[2]!],
+  skyCol: [J.skyCol[0]!, J.skyCol[1]!, J.skyCol[2]!],
+  bounceCol: [J.bounceCol[0]!, J.bounceCol[1]!, J.bounceCol[2]!],
+  exposure: J.exposure,
+  sat: J.sat,
+  contrast: J.contrast,
+  grit: J.grit,
+  dry: J.dry,
+  soft: J.soft,
 });
 
 /** Linear radiance -> display 0..255 (exposure, soft shoulder, saturation, contrast). Writes into `rgbOut`. */
