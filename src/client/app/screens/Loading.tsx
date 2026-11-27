@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { createGame } from '../../../sim/sim';
+import { takeLoadedControllers } from '../../ui/saveLoad';
+import { createControllers } from '../controllers';
 import type { Sim } from '../../../sim/types';
 import type { AppHost } from '../host';
 import type { LoadSource, Navigate } from './types';
@@ -21,6 +23,8 @@ export function Loading({ source, host, navigate }: { source: LoadSource; host: 
       performance.mark('rts.mapgen.start');
       const sim: Sim = source.kind === 'new' ? createGame(source.config) : source.sim;
       performance.measure('rts.mapgen', 'rts.mapgen.start');
+      // A loaded save brings its controller memory; a new game starts its AIs fresh.
+      const controllers = createControllers(sim.state, source.kind === 'sim' ? takeLoadedControllers(sim) : []);
       setProgress(0.3);
       setLabel('Drawing the art');
       await nextFrame();
@@ -35,6 +39,7 @@ export function Loading({ source, host, navigate }: { source: LoadSource; host: 
         sim,
         civ: sim.state.players[1]?.civ ?? 'byzantines',
         config: source.kind === 'new' ? source.config : configFromSim(sim),
+        controllers,
       });
     })();
     return () => {

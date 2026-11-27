@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { registry } from '../../../data';
+import type { Controller } from '../../../bot';
 import type { BuildingId, GameConfig, Sim, Vec2 } from '../../../sim/types';
 import { DEBUG_HOOKS_ENABLED } from '../../debug/hook';
 import { entityCentre, findTownCenter } from '../../input/selection';
@@ -10,6 +11,9 @@ import type { DebugController } from '../../debug/controller';
 import type { DebugPanel } from '../../debug/DebugPanel';
 import type { AppHost } from '../host';
 import { LOCAL_PLAYER_ID, Match } from '../match';
+import type { EndScreenVM } from '../../ui/viewModel';
+import { playAgainConfig } from '../setup';
+import { EndScreen } from './EndScreen';
 import { configFromSim, type Navigate } from './types';
 
 /** What a hook implementation (WP10) gets to work with. */
@@ -37,12 +41,15 @@ export interface GameHooks {
 export function GameScreen({
   sim,
   config,
+  controllers,
   host,
   navigate,
   hooks,
 }: {
   sim: Sim;
   config: GameConfig | null;
+  /** The match's AI controllers (new or restored from a save). */
+  controllers: Controller[];
   host: AppHost;
   navigate: Navigate;
   hooks?: GameHooks;
@@ -52,6 +59,7 @@ export function GameScreen({
   // F3 debug overlay: dev and e2e builds only. The module is imported on demand, so production builds never load it.
   const [debug, setDebug] = useState<{ controller: DebugController; Panel: typeof DebugPanel } | null>(null);
   const [debugOpen, setDebugOpen] = useState(false);
+  const [end, setEnd] = useState<{ match: Match; vm: EndScreenVM } | null>(null);
 
   useEffect(() => {
     const parent = parentRef.current;
@@ -61,6 +69,7 @@ export function GameScreen({
     let cleanupHook: (() => void) | void;
     let debugController: DebugController | null = null;
     let offUi: (() => void) | null = null;
+    let offEnd: (() => void) | null = null;
     let disposed = false;
     void (async () => {
       const manifest = await host.loadManifest();
@@ -76,9 +85,11 @@ export function GameScreen({
         renderer.destroy();
         return;
       }
-      match = new Match(sim, renderer, manifest);
+      match = new Match(sim, renderer, manifest, controllers);
+      match.aiEnabled = host.aiEnabled;
       host.setMatch(match);
       const m = match;
+      offEnd = m.onEndScreen((vm) => setEnd(vm === null ? null : { match: m, vm }));
       const ctx = (): GameHookContext => ({
         match: m,
         hud: controller as HudController,
@@ -125,6 +136,8 @@ export function GameScreen({
       setHud(null);
       setDebug(null);
       setDebugOpen(false);
+      setEnd(null);
+      offEnd?.();
       offUi?.();
       debugController?.destroy();
       host.setMatch(null);
@@ -132,10 +145,12 @@ export function GameScreen({
       controller?.stop();
       match?.destroy();
     };
-  }, [sim, host, hooks]);
+  }, [sim, host, hooks, controllers]);
 
   const restart = (): void =>
     navigate({ name: 'loading', source: { kind: 'new', config: config ?? configFromSim(sim) } });
+  const playAgain = (): void =>
+    navigate({ name: 'loading', source: { kind: 'new', config: playAgainConfig(config ?? configFromSim(sim), host.seedPinned) } });
 
   // Plan 8: the browser context menu is suppressed in-game.
   return (
@@ -153,6 +168,7 @@ export function GameScreen({
           onLoaded={(loaded) => navigate({ name: 'loading', source: { kind: 'sim', sim: loaded } })}
         />
       )}
+      {end !== null && <EndScreen vm={end.vm} onViewMap={() => end.match.closeEndScreen()} onPlayAgain={playAgain} onMainMenu={() => navigate({ name: 'menu' })} />}
     </div>
   );
 }

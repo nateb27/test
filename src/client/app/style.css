@@ -204,3 +204,257 @@ body,
 .screen.menu .modal-backdrop {
   position: absolute;
 }
+
+/* ---------------------------------------------------------------- match setup */
+
+.screen.menu.setup {
+  justify-content: safe center;
+  gap: 10px;
+  padding: 12px 16px;
+  box-sizing: border-box;
+  overflow-y: auto;
+}
+
+.screen.menu.setup h2 {
+  margin: 0;
+}
+
+.setup-main {
+  display: flex;
+  gap: 16px;
+  align-items: stretch;
+  width: min(1000px, 100%);
+  min-height: 0;
+}
+
+.setup-main .civ-layout {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+}
+
+.setup .civ-panel {
+  max-height: calc(100vh - 170px);
+  min-height: 0;
+}
+
+.setup-options {
+  flex: none;
+  width: 300px;
+  box-sizing: border-box;
+  padding: 10px 16px 12px;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: calc(100vh - 170px);
+  overflow-y: auto;
+}
+
+.setup-group {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.setup-group legend {
+  padding: 0;
+  margin-bottom: 4px;
+  color: #d4af37;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.screen.menu.setup button {
+  min-width: 0;
+  padding: 7px 12px;
+  font-size: 15px;
+}
+
+.screen.menu.setup button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.seg {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.seg button {
+  padding: 6px 8px;
+}
+
+.seg button:last-child {
+  grid-column: 1 / -1;
+}
+
+.screen.menu.setup .seg button.active {
+  background: #6a2c91;
+  box-shadow: 0 0 0 2px #d4af37;
+}
+
+.swatches {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.screen.menu.setup .swatch {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-radius: 50%;
+}
+
+.screen.menu.setup .swatch:hover {
+  filter: brightness(1.15);
+}
+
+.screen.menu.setup .swatch.active {
+  border-color: #fff;
+  box-shadow: 0 0 0 2px #d4af37;
+}
+
+.seed-row {
+  display: flex;
+  gap: 8px;
+}
+
+.seed-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  font-size: 15px;
+  color: inherit;
+  background: #120a1c;
+  border: 1px solid #8f7424;
+  border-radius: 4px;
+  user-select: text;
+}
+
+.seed-row input[aria-invalid='true'] {
+  border-color: #e0685a;
+}
+
+.setup-error {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #ffb3a8;
+}
+
+@media (max-width: 900px) {
+  .setup .civ-list {
+    display: none;
+  }
+  .setup-options {
+    width: 270px;
+  }
+}
+
+/* ---------------------------------------------------------------- end screen */
+
+.end-backdrop {
+  z-index: 60;
+}
+
+.end-modal {
+  box-sizing: border-box;
+  width: min(660px, calc(100vw - 24px));
+  max-width: none;
+  max-height: calc(100vh - 24px);
+  display: flex;
+  flex-direction: column;
+  padding: 14px 20px 16px;
+}
+
+.end-modal h2.end-title {
+  margin: 0;
+  font-size: 34px;
+}
+
+.end-victory {
+  color: #f0cf62;
+}
+
+.end-defeat {
+  color: #ff9a8c;
+}
+
+.end-draw {
+  color: #d8cfe6;
+}
+
+.end-sub {
+  margin: 4px 0 10px;
+  text-align: center;
+}
+
+.end-sub .muted {
+  margin-left: 8px;
+  color: #b7a9c9;
+  font-size: 13px;
+}
+
+.end-table-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.end-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.end-table thead th {
+  position: sticky;
+  top: 0;
+  background: #20142f;
+  padding: 4px 8px 6px;
+  text-align: right;
+  border-bottom: 1px solid rgba(212, 175, 55, 0.5);
+}
+
+.end-table tbody th {
+  padding: 3px 8px;
+  text-align: left;
+  font-weight: 400;
+  color: #d9cfe8;
+}
+
+.end-table td {
+  padding: 3px 8px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.end-table tbody tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.end-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+}
+
+.end-outcome {
+  font-weight: 400;
+  font-size: 12px;
+}
+
+.end-buttons {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
