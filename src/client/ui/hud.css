@@ -1026,7 +1026,7 @@ button.card-slot:not(:has(.cost-row)) {
 
 @media (max-width: 1023px) {
   .minimap-frame {
-    width: 200px;
+    width: 212px;
   }
   .selection {
     padding: 6px 8px;
