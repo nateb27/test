@@ -12,7 +12,7 @@
  */
 
 import type { DataRegistry } from '../../../data/schema';
-import type { PlayerId, ReadonlyGameState, Vec2 } from '../../../sim/types';
+import type { PlayerId, ReadonlyGameState, SimEvent, Vec2 } from '../../../sim/types';
 import { perf } from '../../debug/perf';
 import { footprintOf } from '../../render/entities';
 import {
@@ -23,6 +23,7 @@ import {
   worldToMinimap,
   type MinimapView,
 } from './geometry';
+import { PING_COLOR, pingLook, PingSet } from './pings';
 
 export interface MinimapDeps {
   /** Element to mount into (the HUD's `#minimap-slot`). The minimap fills it. */
@@ -37,6 +38,11 @@ export interface MinimapDeps {
     worldToCanvas(x: number, y: number): { x: number; y: number };
   };
   input: { issueContextOrder(p: { x: number; y: number }, shift: boolean): unknown };
+  /**
+   * Subscribe to the sim's events (`Match.onEvents`). Own `UnderAttack` events then ping without further wiring;
+   * a caller that also calls `ping` for the same alert causes no second ring.
+   */
+  events?(listener: (events: readonly SimEvent[]) => void): () => void;
 }
 
 export interface Minimap {
@@ -44,6 +50,10 @@ export interface Minimap {
   readonly view: MinimapView;
   /** Redraw everything now (the 5 Hz timer calls the units part). */
   redraw(): void;
+  /** Red expanding ring at a world position, timed on the match clock (`state.tick`): 1.5 s, twice, at most 4 live. */
+  ping(x: number, y: number, color?: number): void;
+  /** Live pings (what the debug hook `alerts()` reports). */
+  alerts(): { x: number; y: number; tick: number }[];
   /** World tiles -> page CSS pixels of the minimap (for tests and tools). */
   worldToPage(x: number, y: number): Vec2;
   destroy(): void;
@@ -104,7 +114,11 @@ export function mountMinimap(deps: MinimapDeps): Minimap {
   let terrain = makeCanvas(1, 1, 1);
   let statics = makeCanvas(1, 1, 1);
   let main = makeCanvas(1, 1, 1);
+  let fx = makeCanvas(1, 1, 1);
   let top = makeCanvas(1, 1, 1);
+  const pings = new PingSet();
+  let pingKey = -1;
+  let pingsDrawn = false;
   let staticKey = '';
   let lastOutline = '';
   let timer: number | null = null;
@@ -122,20 +136,25 @@ export function mountMinimap(deps: MinimapDeps): Minimap {
     dpr = window.devicePixelRatio || 1;
     const map = deps.getState().map;
     view = createMinimapView(map.width, map.height, w, h);
-    for (const c of [main, top]) c.canvas.remove();
+    for (const c of [main, fx, top]) c.canvas.remove();
     terrain = makeCanvas(w, h, dpr);
     statics = makeCanvas(w, h, dpr);
     main = makeCanvas(w, h, dpr);
+    fx = makeCanvas(w, h, dpr);
     top = makeCanvas(w, h, dpr);
     place(main.canvas);
+    place(fx.canvas);
+    fx.canvas.style.pointerEvents = 'none';
+    fx.canvas.dataset.testid = 'minimap-pings';
     place(top.canvas);
     top.canvas.dataset.testid = 'minimap-canvas';
     main.canvas.dataset.testid = 'minimap-base';
-    wrap.append(main.canvas, top.canvas);
+    wrap.append(main.canvas, fx.canvas, top.canvas);
     attach(top.canvas);
     drawTerrain();
     staticKey = '';
     lastOutline = '';
+    pingKey = -1;
   };
 
   // ------------------------------------------------------------- drawing
@@ -230,7 +249,7 @@ export function mountMinimap(deps: MinimapDeps): Minimap {
     for (const e of state.entities) {
       if (e.kind !== 'unit') continue;
       const p = worldToMinimap(view, e.pos.x, e.pos.y);
-      mark(g, p.x, p.y, e.owner === deps.playerId ? 3 : 2, css(state.players[e.owner]?.color ?? 0xffffff));
+      mark(g, p.x, p.y, 3, css(state.players[e.owner]?.color ?? 0xffffff));
     }
     // Frame: the diamond border.
     diamondPath(g, view, 0, 0, view.mapW, view.mapH);
@@ -269,9 +288,47 @@ export function mountMinimap(deps: MinimapDeps): Minimap {
     perf.end('minimap.outline', t0);
   };
 
+  /** Rings on their own canvas, redrawn only when the match clock or the ping set changed (never while paused). */
+  const drawPings = (): void => {
+    const tick = deps.getState().tick;
+    pings.prune(tick);
+    const n = pings.size;
+    if (n === 0) {
+      if (pingsDrawn) {
+        fx.g.clearRect(0, 0, view.width, view.height);
+        pingsDrawn = false;
+      }
+      pingKey = -1;
+      return;
+    }
+    const key = tick * 8 + n;
+    if (key === pingKey) return;
+    pingKey = key;
+    const g = fx.g;
+    g.clearRect(0, 0, view.width, view.height);
+    for (let i = 0; i < n; i++) {
+      const p = pings.at(i);
+      const look = pingLook(tick - p.tick);
+      const c = worldToMinimap(view, p.x, p.y);
+      const radius = 2 + look.t * 13;
+      g.globalAlpha = look.alpha;
+      g.lineWidth = 3.5;
+      g.strokeStyle = 'rgba(8,10,6,0.85)';
+      g.beginPath();
+      g.arc(c.x, c.y, radius, 0, Math.PI * 2);
+      g.stroke();
+      g.lineWidth = 1.75;
+      g.strokeStyle = css(p.color);
+      g.stroke();
+    }
+    g.globalAlpha = 1;
+    pingsDrawn = true;
+  };
+
   const redraw = (): void => {
     drawMain();
     drawOutline(true);
+    drawPings();
   };
 
   // --------------------------------------------------------- interaction
@@ -329,6 +386,7 @@ export function mountMinimap(deps: MinimapDeps): Minimap {
   const loop = (): void => {
     if (destroyed) return;
     drawOutline(false);
+    drawPings();
     raf = requestAnimationFrame(loop);
   };
   raf = requestAnimationFrame(loop);
@@ -340,13 +398,32 @@ export function mountMinimap(deps: MinimapDeps): Minimap {
     }
   });
   ro?.observe(wrap);
+  const offEvents = deps.events?.((events) => {
+    for (const e of events) {
+      if (e.type === 'UnderAttack' && e.playerId === deps.playerId) api.ping(e.x, e.y, PING_COLOR);
+    }
+  });
 
-  return {
+  const api: Minimap = {
     element: wrap,
     get view() {
       return view;
     },
     redraw,
+    ping(x, y, color = PING_COLOR) {
+      if (destroyed) return;
+      pings.add(x, y, color, deps.getState().tick);
+      drawPings();
+    },
+    alerts() {
+      pings.prune(deps.getState().tick);
+      const out: { x: number; y: number; tick: number }[] = [];
+      for (let i = 0; i < pings.size; i++) {
+        const p = pings.at(i);
+        out.push({ x: p.x, y: p.y, tick: p.tick });
+      }
+      return out;
+    },
     worldToPage(x, y) {
       const p = worldToMinimap(view, x, y);
       const r = top.canvas.getBoundingClientRect();
@@ -354,6 +431,7 @@ export function mountMinimap(deps: MinimapDeps): Minimap {
     },
     destroy() {
       destroyed = true;
+      offEvents?.();
       if (timer !== null) window.clearInterval(timer);
       if (raf !== null) cancelAnimationFrame(raf);
       ro?.disconnect();
@@ -361,4 +439,5 @@ export function mountMinimap(deps: MinimapDeps): Minimap {
       wrap.remove();
     },
   };
+  return api;
 }

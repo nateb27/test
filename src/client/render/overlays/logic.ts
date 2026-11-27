@@ -40,7 +40,7 @@ export const RESOURCE_COLOR: Readonly<Record<ResourceType, number>> = {
 // Order markers
 // ---------------------------------------------------------------------------
 
-export type MarkerKind = 'move' | 'gather' | 'build';
+export type MarkerKind = 'move' | 'gather' | 'build' | 'attack' | 'attackMove' | 'repair';
 
 export interface MarkerSpec {
   kind: MarkerKind;
@@ -49,7 +49,14 @@ export interface MarkerSpec {
   y: number;
 }
 
-export const MARKER_COLOR: Readonly<Record<MarkerKind, number>> = { move: 0x62ff7a, gather: 0xffe27a, build: 0xffa24a };
+export const MARKER_COLOR: Readonly<Record<MarkerKind, number>> = {
+  move: 0x62ff7a,
+  gather: 0xffe27a,
+  build: 0xffa24a,
+  attack: 0xff4a3a,
+  attackMove: 0xff8a3a,
+  repair: 0x5cc8ff,
+};
 export const MARKER_LIFE_MS = 750;
 export const MAX_MARKERS = 8;
 
@@ -73,6 +80,21 @@ export function markerForCommand(
       if (t === undefined || t.kind !== 'building') return null;
       const s = footprintOf(registry, t);
       return { kind: 'build', x: t.tile.tx + s / 2, y: t.tile.ty + s / 2 };
+    }
+    case 'attackMove':
+      return { kind: 'attackMove', x: cmd.x, y: cmd.y };
+    case 'attack': {
+      const t = lookup(cmd.targetId);
+      if (t === undefined || t.kind === 'node') return null;
+      if (t.kind === 'unit') return { kind: 'attack', x: t.pos.x, y: t.pos.y };
+      const s = footprintOf(registry, t);
+      return { kind: 'attack', x: t.tile.tx + s / 2, y: t.tile.ty + s / 2 };
+    }
+    case 'repair': {
+      const t = lookup(cmd.buildingId);
+      if (t === undefined || t.kind !== 'building') return null;
+      const s = footprintOf(registry, t);
+      return { kind: 'repair', x: t.tile.tx + s / 2, y: t.tile.ty + s / 2 };
     }
     case 'build': {
       const d = registry.def(cmd.buildingType);
@@ -123,4 +145,101 @@ export function barCentreY(anchorY: number, top: number | null, size: number, co
   if (top !== null) return top - gap;
   const rise = constructed ? 28 * size + 24 : 14 * size + 12;
   return anchorY - rise;
+}
+
+// ---------------------------------------------------------------------------
+// Health bars (PLAN-M2 7.2)
+// ---------------------------------------------------------------------------
+
+/** Fill colours of an own entity's health bar. */
+export const HP_GREEN = 0x4fd05a;
+export const HP_YELLOW = 0xe8c53a;
+export const HP_RED = 0xe0453a;
+/** Frame and empty part of every health bar. */
+export const HP_FRAME = 0x0c0e08;
+
+/** Unit bars are 30 x 4 screen px, 6 px above the top of the art. */
+export const HP_UNIT_W = 30;
+export const HP_UNIT_H = 4;
+export const HP_UNIT_GAP = 6;
+/** Building bars are `16 * footprint + 16` x 5 screen px, 3 px above the top of the art. */
+export const HP_BUILDING_H = 5;
+export const HP_BUILDING_GAP = 3;
+
+const UNIT_BAR_SIZE: Readonly<{ w: number; h: number }> = { w: HP_UNIT_W, h: HP_UNIT_H };
+const buildingBarSizes: { w: number; h: number }[] = [];
+
+/** Screen-pixel width and height of a health bar (the frame adds 1 px all round). Shared objects: never mutate. */
+export function healthBarSize(kind: 'unit' | 'building', footprint: number): Readonly<{ w: number; h: number }> {
+  if (kind === 'unit') return UNIT_BAR_SIZE;
+  return (buildingBarSizes[footprint] ??= { w: 16 * footprint + 16, h: HP_BUILDING_H });
+}
+
+/** Whether an entity shows a health bar: selected (any owner) or damaged. Dead or unknown-max entities never do. */
+export function healthBarShown(hp: number, maxHp: number, selected: boolean): boolean {
+  return maxHp > 0 && hp > 0 && (selected || hp < maxHp);
+}
+
+/** Own entities: green at 50% and above, yellow from 25% up to 50%, red below 25%. Enemy entities are always red. */
+export function healthBarColor(hp: number, maxHp: number, own: boolean): number {
+  if (!own) return HP_RED;
+  const f = maxHp > 0 ? hp / maxHp : 0;
+  return f >= 0.5 ? HP_GREEN : f >= 0.25 ? HP_YELLOW : HP_RED;
+}
+
+/** Filled width in screen px: whole pixels, at least 1 while alive. */
+export function healthBarFill(hp: number, maxHp: number, width: number): number {
+  if (maxHp <= 0 || hp <= 0) return 0;
+  return Math.min(width, Math.max(1, Math.round((width * hp) / maxHp)));
+}
+
+/**
+ * Max hp per (owner, def) as resolved for the player, cached so the per-frame loop does no allocation. The caller
+ * clears a player's entries when its researched list changes (techs raise hp).
+ */
+export class MaxHpCache {
+  private readonly byOwner: Map<string, number>[] = [];
+  private readonly sizes: number[] = [];
+
+  constructor(private readonly resolve: (owner: number, typeId: string) => number) {}
+
+  get(owner: number, typeId: string, researchedCount: number): number {
+    let m = this.byOwner[owner];
+    if (m === undefined) {
+      m = new Map();
+      this.byOwner[owner] = m;
+      this.sizes[owner] = researchedCount;
+    } else if (this.sizes[owner] !== researchedCount) {
+      m.clear();
+      this.sizes[owner] = researchedCount;
+    }
+    let v = m.get(typeId);
+    if (v === undefined) {
+      v = this.resolve(owner, typeId);
+      m.set(typeId, v);
+    }
+    return v;
+  }
+}
+
+/** Screen-pixel half height of a construction or production bar, and the air around it. */
+const PROGRESS_H = 5;
+
+/**
+ * World-pixel y of the centres of a building's health bar (null when it has none) and progress bar. The health bar
+ * sits `HP_BUILDING_GAP` screen px above the art top; the progress bar moves above it when both show, else it takes
+ * the health bar's place (4 px above the art, as in M1). `inv` is 1 / zoom, so gaps stay constant on screen.
+ */
+export function buildingBarCentres(
+  anchorY: number,
+  top: number | null,
+  footprint: number,
+  constructed: boolean,
+  inv: number,
+  showHealth: boolean,
+): { health: number | null; progress: number } {
+  if (!showHealth) return { health: null, progress: barCentreY(anchorY, top, footprint, constructed, (PROGRESS_H / 2 + 4) * inv) };
+  const h = HP_BUILDING_H / 2;
+  const health = barCentreY(anchorY, top, footprint, constructed, (h + HP_BUILDING_GAP) * inv);
+  return { health, progress: health - (h + PROGRESS_H / 2 + 3) * inv };
 }
