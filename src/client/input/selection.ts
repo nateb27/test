@@ -118,6 +118,31 @@ export function isIdleVillager(e: ReadonlyEntity, owner: PlayerId, registry: Dat
 }
 
 /**
+ * A military unit (`autoAcquire`) with nothing to do: no order, no queue, no path (plan 7.3). A unit on hold has
+ * an order, so it does not count.
+ */
+export function isIdleMilitary(e: ReadonlyEntity, owner: PlayerId, registry: DataRegistry): boolean {
+  if (e.kind !== 'unit' || e.owner !== owner || e.hp <= 0) return false;
+  const def = registry.def(e.typeId);
+  if (def === undefined || def.kind !== 'unit' || !def.combat.autoAcquire) return false;
+  return e.currentOrder === null && e.orderQueue.length === 0 && e.path === null && e.pendingPathRequestId === null;
+}
+
+function nextMatching(
+  entities: readonly ReadonlyEntity[],
+  afterId: EntityId | null,
+  matches: (e: ReadonlyEntity) => boolean,
+): EntityId | null {
+  let first: EntityId | null = null;
+  for (const e of entities) {
+    if (!matches(e)) continue;
+    if (first === null) first = e.id;
+    if (afterId === null || e.id > afterId) return e.id;
+  }
+  return first;
+}
+
+/**
  * Next idle villager after `afterId` in ascending id order, wrapping round.
  * `entities` must be ascending by id (as `state.entities` is).
  */
@@ -127,13 +152,17 @@ export function nextIdleVillager(
   afterId: EntityId | null,
   registry: DataRegistry,
 ): EntityId | null {
-  let first: EntityId | null = null;
-  for (const e of entities) {
-    if (!isIdleVillager(e, owner, registry)) continue;
-    if (first === null) first = e.id;
-    if (afterId === null || e.id > afterId) return e.id;
-  }
-  return first;
+  return nextMatching(entities, afterId, (e) => isIdleVillager(e, owner, registry));
+}
+
+/** Next idle military unit after `afterId` in ascending id order, wrapping round (the `,` key). */
+export function nextIdleMilitary(
+  entities: readonly ReadonlyEntity[],
+  owner: PlayerId,
+  afterId: EntityId | null,
+  registry: DataRegistry,
+): EntityId | null {
+  return nextMatching(entities, afterId, (e) => isIdleMilitary(e, owner, registry));
 }
 
 /** The player's first completed Town Center (lowest id), or null. */

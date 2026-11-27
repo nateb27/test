@@ -5,10 +5,13 @@
 
 import type { DataRegistry } from '../../data/schema';
 import {
+  ARMOR_CLASSES,
   RESOURCE_TYPES,
+  type ArmorClass,
   type RejectReason,
   type ResourceAmounts,
   type ResourceType,
+  type Stance,
   type UnavailableReason,
 } from '../../sim/types';
 
@@ -104,6 +107,9 @@ export const REJECT_TEXT: Readonly<Record<RejectReason, string>> = {
 /** Toast shown when a queue item is cancelled while the game is paused. */
 export const CANCEL_PAUSED_TEXT = 'Cancel will apply when the game resumes';
 
+/** Toast shown when a resignation is sent while the game is paused. */
+export const RESIGN_PAUSED_TEXT = 'Resignation will apply when the game resumes';
+
 /** Toast shown by the first Delete press on a completed building. */
 export const DEMOLISH_PROMPT_TEXT = 'Press Delete again to demolish';
 
@@ -127,3 +133,40 @@ export function rejectionText(
 
 /** Message used when the population cap holds a finished unit back. */
 export const POP_CAPPED_TEXT = 'Build more houses';
+
+/** Names of the armour classes in the bonus lines ("+12 vs cavalry"). */
+export const ARMOR_CLASS_TEXT: Readonly<Record<ArmorClass, string>> = {
+  villager: 'villagers',
+  infantry: 'infantry',
+  spear: 'spearmen',
+  archer: 'archers',
+  cavalry: 'cavalry',
+  siege: 'siege',
+  building: 'buildings',
+};
+
+/** "+12 vs cavalry" lines of a unit's bonus table, in armour class order. */
+export function bonusLines(bonus: Readonly<Partial<Record<ArmorClass, number>>>): string[] {
+  const out: string[] = [];
+  for (const c of ARMOR_CLASSES) {
+    const v = bonus[c];
+    if (v !== undefined && v > 0) out.push(`+${v} vs ${ARMOR_CLASS_TEXT[c]}`);
+  }
+  return out;
+}
+
+/** Stance names on the command card and in the selection panel. */
+export const STANCE_TEXT: Readonly<Record<Stance, string>> = { aggressive: 'Aggressive', standGround: 'Stand ground' };
+
+/** Toasts for `UnderAttack` (plan 7.3). */
+export const ALERT_TEXT = {
+  townCenter: 'Your Town Center is under attack!',
+  building: 'Your buildings are under attack!',
+  unit: 'Your units are under attack!',
+} as const;
+
+/** Toast for an own building that was destroyed. */
+export const destroyedText = (name: string): string => `${name} destroyed`;
+
+/** Prompt of the Resign confirmation. */
+export const RESIGN_PROMPT_TEXT = 'Resign this match?';

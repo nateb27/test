@@ -118,7 +118,7 @@ describe('the Byzantine card never offers the Lancer', () => {
 });
 
 describe('villager card', () => {
-  it('main page: Economy, Military, Stop in fixed slots', () => {
+  it('main page: Economy, Military, Stop and Repair in fixed slots', () => {
     const fx = createFixture();
     const vm = card(fx, [fx.villagers[0]!])!;
     expect(vm.page).toBe('main');
@@ -126,7 +126,9 @@ describe('villager card', () => {
       [0, 'page'],
       [1, 'page'],
       [2, 'stop'],
+      [3, 'repair'],
     ]);
+    expect(vm.buttons[3]).toMatchObject({ hotkey: 'R', label: 'Repair', icon: 'icon.command.repair', enabled: true, cost: null });
   });
 
   it('economy page lists economy buildings plus Back in the corner slot', () => {

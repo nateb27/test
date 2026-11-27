@@ -23,7 +23,7 @@ export function useViewModel(controller: Pick<HudController, 'vm' | 'subscribe'>
 }
 
 export interface HudProps {
-  controller: Pick<HudController, 'vm' | 'subscribe' | 'clickSlot' | 'narrowSelection' | 'cancelQueueItem' | 'cycleIdleVillager' | 'setSpeed' | 'togglePause' | 'setMenuOpen'>;
+  controller: Pick<HudController, 'vm' | 'subscribe' | 'clickSlot' | 'narrowSelection' | 'cancelQueueItem' | 'cycleIdleVillager' | 'cycleIdleMilitary' | 'setSpeed' | 'togglePause' | 'setMenuOpen' | 'requestResign' | 'confirmResign' | 'cancelResign'>;
   iconUrl: IconResolver;
   storage: SaveStorage;
   /** The running sim (for saving). */
@@ -70,6 +70,10 @@ export function Hud({ controller, iconUrl, storage, sim, registry, onRestart, on
           <GameMenu
             storage={storage}
             sim={sim}
+            resignConfirmOpen={vm.resignConfirmOpen}
+            onResign={() => controller.requestResign()}
+            onResignYes={() => controller.confirmResign()}
+            onResignNo={() => controller.cancelResign()}
             onResume={() => controller.setMenuOpen(false)}
             onRestart={onRestart}
             onQuit={onQuit}

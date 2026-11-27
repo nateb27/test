@@ -1,4 +1,5 @@
-import type { SelectionVM, SingleSelectionVM } from '../viewModel';
+import { STANCE_TEXT } from '../text';
+import type { CombatStatsVM, SelectionVM, SingleSelectionVM } from '../viewModel';
 import type { HudActions } from './actions';
 import { Icon, resourceIconId } from './Icon';
 
@@ -15,6 +16,42 @@ function Bar({ value, class: cls, label }: { value: number; class?: string; labe
   );
 }
 
+/** Attack (with its type), range, armour and bonuses of a fighting unit or building (plan 7.3). */
+function CombatLine({ combat }: { combat: CombatStatsVM }) {
+  return (
+    <div class="combat" data-testid="sel-combat">
+      <div class="stat combat-row">
+        <span class="combat-item" data-testid="sel-attack" title={`Attack: ${combat.attack} (${combat.attackType})`}>
+          <Icon id="icon.stat.attack" size={14} />
+          <span class="stat-value">{combat.attack}</span>
+          <span class="combat-type">{combat.attackType}</span>
+        </span>
+        {combat.range > 0 && (
+          <span class="combat-item" data-testid="sel-range" title={`Range: ${combat.range} tiles`}>
+            <Icon id="icon.stat.range" size={14} />
+            <span class="stat-value">{combat.range}</span>
+          </span>
+        )}
+        <span class="combat-item" data-testid="sel-armor" title={`Armour: ${combat.meleeArmor} against melee, ${combat.pierceArmor} against arrows`}>
+          <span class="stat-value">M {combat.meleeArmor}</span>
+          <span class="combat-sep">/</span>
+          <span class="stat-value">P {combat.pierceArmor}</span>
+        </span>
+      </div>
+      {combat.bonuses.map((b) => (
+        <div class="stat combat-bonus" key={b} data-testid="sel-bonus">
+          <span class="stat-value">{b}</span>
+        </div>
+      ))}
+      {combat.note !== null && (
+        <div class="stat combat-note" data-testid="sel-combat-note">
+          <span class="stat-value">{combat.note}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Single({ vm, actions }: { vm: SingleSelectionVM; actions: Pick<HudActions, 'cancelQueueItem'> }) {
   const first = vm.queue[0];
   return (
@@ -27,7 +64,11 @@ function Single({ vm, actions }: { vm: SingleSelectionVM; actions: Pick<HudActio
           <div class="single-name">
             <span class="swatch" style={{ background: hex(vm.ownerColor) }} />
             <span data-testid="sel-name">{vm.name}</span>
-            {!vm.own && vm.entityKind !== 'node' && <span class="tag">Enemy</span>}
+            {!vm.own && vm.entityKind !== 'node' && (
+              <span class="tag owner-tag" data-testid="sel-owner" title="Enemy" style={{ color: hex(vm.ownerColor), borderColor: hex(vm.ownerColor) }}>
+                {vm.ownerName === '' ? 'Enemy' : vm.ownerName}
+              </span>
+            )}
           </div>
           {vm.hp !== null && (
             <div class="stat" data-testid="sel-hp">
@@ -36,6 +77,18 @@ function Single({ vm, actions }: { vm: SingleSelectionVM; actions: Pick<HudActio
               <span class="stat-value">
                 {vm.hp.current}/{vm.hp.max}
               </span>
+            </div>
+          )}
+          {vm.combat !== null && <CombatLine combat={vm.combat} />}
+          {vm.stance !== null && (
+            <div class="stat" data-testid="sel-stance" title="Change the stance with Z and X">
+              <span class="stat-label">Stance</span>
+              <span class="stat-value">{STANCE_TEXT[vm.stance]}</span>
+            </div>
+          )}
+          {vm.repairing && (
+            <div class="stat" data-testid="sel-repairing">
+              <span class="stat-value">Repairing</span>
             </div>
           )}
           {vm.carrying !== null && (

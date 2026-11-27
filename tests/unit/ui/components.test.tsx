@@ -23,7 +23,7 @@ function vmFor(fx: ReturnType<typeof createFixture>, selection: number[], client
 }
 
 describe('TopBar', () => {
-  const actions = { cycleIdleVillager: vi.fn(), setSpeed: vi.fn(), togglePause: vi.fn() };
+  const actions = { cycleIdleVillager: vi.fn(), cycleIdleMilitary: vi.fn(), setSpeed: vi.fn(), togglePause: vi.fn() };
   beforeEach(() => vi.clearAllMocks());
 
   it('shows the four resources, population, age, idle count and clock', () => {

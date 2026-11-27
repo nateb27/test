@@ -66,7 +66,7 @@ describe('selection', () => {
       constructionProgress: null,
       queue: [],
     });
-    expect(vm.commandCard?.buttons.length).toBe(3);
+    expect(vm.commandCard?.buttons.length).toBe(4);
   });
 
   it('owner colour comes from the player', () => {

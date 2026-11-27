@@ -31,7 +31,7 @@ import { perf } from '../debug/perf';
 import { buildHudViewModel, type HudClientState } from './buildViewModel';
 import type { HudQueries } from './commandCard';
 import { NotificationCenter } from './notifications';
-import { CANCEL_PAUSED_TEXT, DEMOLISH_PROMPT_TEXT, describeUnavailable } from './text';
+import { CANCEL_PAUSED_TEXT, DEMOLISH_PROMPT_TEXT, RESIGN_PAUSED_TEXT, describeUnavailable } from './text';
 import { HUD_REFRESH_HZ, type CardButtonVM, type CardPage, type HudViewModel } from './viewModel';
 
 /** The slice of `GameInput` the HUD uses. */
@@ -45,6 +45,8 @@ export interface HudInput {
   triggerCardSlot(slot: number): void;
   onUiAction(listener: (action: UiAction) => void): () => void;
   perform(action: HotkeyAction): void;
+  /** M2: an `UnderAttack` alert at a world point (the `Space` target). */
+  noteAlert?(x: number, y: number): void;
 }
 
 /** The slice of `Match` the HUD uses. */
@@ -66,6 +68,12 @@ export interface HudControllerOptions {
   onStartPlacement?: (buildingType: BuildingId) => void;
   /** Called when Set Rally is clicked or its hotkey pressed (WP10 enters rally mode). */
   onStartRally?: () => void;
+  /** Called when Attack-move is clicked or its hotkey pressed (WP28 enters attack-move mode). */
+  onStartAttackMove?: () => void;
+  /** Called when Repair is clicked or its hotkey pressed (WP28 enters repair mode). */
+  onStartRepair?: () => void;
+  /** Called for every `UnderAttack` alert of the local player (the app pings the minimap). */
+  onAlert?: (x: number, y: number) => void;
 }
 
 type Listener = (vm: HudViewModel) => void;
@@ -108,6 +116,9 @@ export class HudController {
   /** Replaceable after construction (the integrator wires WP10 in). */
   onStartPlacement: (buildingType: BuildingId) => void;
   onStartRally: () => void;
+  onStartAttackMove: () => void;
+  onStartRepair: () => void;
+  onAlert: (x: number, y: number) => void;
 
   private readonly match: HudMatch;
   private readonly playerId: PlayerId;
@@ -119,6 +130,7 @@ export class HudController {
   private menuOpen = false;
   private pausedByMenu = false;
   private placing: BuildingId | null = null;
+  private resignConfirmOpen = false;
   /** Queue cancels issued at `tick` and not yet applied (a command applies on the next tick). */
   private pendingCancels: { buildingId: EntityId; index: number; tick: number }[] = [];
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -130,8 +142,19 @@ export class HudController {
     this.registry = options.registry ?? defaultRegistry;
     this.onStartPlacement = options.onStartPlacement ?? ((): void => {});
     this.onStartRally = options.onStartRally ?? ((): void => {});
+    this.onStartAttackMove = options.onStartAttackMove ?? ((): void => {});
+    this.onStartRepair = options.onStartRepair ?? ((): void => {});
+    this.onAlert = options.onAlert ?? ((): void => {});
     const now = options.now ?? ((): number => performance.now());
-    this.notifications = new NotificationCenter({ registry: this.registry, playerId: this.playerId, now });
+    this.notifications = new NotificationCenter({
+      registry: this.registry,
+      playerId: this.playerId,
+      now,
+      onAlert: (x, y) => {
+        this.match.input.noteAlert?.(x, y);
+        this.onAlert(x, y);
+      },
+    });
     this.current = this.build();
   }
 
@@ -205,6 +228,7 @@ export class HudController {
       toasts: this.notifications.toasts,
       banner: this.notifications.banner,
       pendingCancels: this.livePendingCancels(),
+      resignConfirmOpen: this.resignConfirmOpen,
     };
     return buildHudViewModel({
       state: this.match.sim.state,
@@ -233,6 +257,7 @@ export class HudController {
   setMenuOpen(open: boolean): void {
     if (open === this.menuOpen) return;
     this.menuOpen = open;
+    if (!open) this.resignConfirmOpen = false;
     if (open) {
       this.pausedByMenu = !this.match.loop.paused;
       this.match.loop.paused = true;
@@ -257,6 +282,38 @@ export class HudController {
   /** Select and centre the next idle villager (same path as the `.` hotkey). */
   cycleIdleVillager(): void {
     this.match.input.perform({ type: 'cycleIdleVillager' });
+    this.refresh();
+  }
+
+  /** Select and centre the next idle military unit (same path as the `,` hotkey). */
+  cycleIdleMilitary(): void {
+    this.match.input.perform({ type: 'cycleIdleMilitary' });
+    this.refresh();
+  }
+
+  /** Resign in the in-match menu: ask first. */
+  requestResign(): void {
+    if (!this.menuOpen) return;
+    this.resignConfirmOpen = true;
+    this.refresh();
+  }
+
+  /** "No" in the Resign confirmation. */
+  cancelResign(): void {
+    this.resignConfirmOpen = false;
+    this.refresh();
+  }
+
+  /**
+   * "Yes" in the Resign confirmation: send `resign` and leave the menu. Like every command it applies on the next
+   * tick, so a game that was paused before the menu opened says so.
+   */
+  confirmResign(): void {
+    if (!this.resignConfirmOpen) return;
+    this.resignConfirmOpen = false;
+    this.match.commands.issue({ type: 'resign' });
+    this.setMenuOpen(false);
+    if (this.match.loop.paused) this.notifications.push('info', RESIGN_PAUSED_TEXT);
     this.refresh();
   }
 
@@ -322,6 +379,13 @@ export class HudController {
     return out;
   }
 
+  /** Ascending ids of the selected own units. */
+  private selectedUnitIds(): EntityId[] {
+    return this.selectedOwn()
+      .filter((e) => e.kind === 'unit')
+      .map((e) => e.id);
+  }
+
   /** The completed building that should receive a train / research order: shortest queue, then lowest id. */
   private producerFor(defId: string, list: 'trains' | 'researches'): EntityId | null {
     let best: Extract<ReadonlyEntity, { kind: 'building' }> | null = null;
@@ -357,9 +421,7 @@ export class HudController {
         this.setPage(action.page);
         return;
       case 'stop': {
-        const unitIds = this.selectedOwn()
-          .filter((e) => e.kind === 'unit')
-          .map((e) => e.id);
+        const unitIds = this.selectedUnitIds();
         if (unitIds.length > 0) issue({ type: 'stop', unitIds });
         return;
       }
@@ -376,11 +438,21 @@ export class HudController {
         this.match.input.perform({ type: 'deleteSelection' });
         return;
       case 'attackMove':
-      case 'hold':
-      case 'stance':
-      case 'repair':
-        // STUB (TODO(WP29)): the M2 military and repair card actions; no button offers them yet.
+        this.onStartAttackMove();
         return;
+      case 'repair':
+        this.onStartRepair();
+        return;
+      case 'hold': {
+        const unitIds = this.selectedUnitIds();
+        if (unitIds.length > 0) issue({ type: 'hold', unitIds });
+        return;
+      }
+      case 'stance': {
+        const unitIds = this.selectedUnitIds();
+        if (unitIds.length > 0) issue({ type: 'setStance', unitIds, stance: action.stance });
+        return;
+      }
     }
   }
 }

@@ -6,13 +6,15 @@
  *   buildings / research / non-villager units, idle villagers. An identical
  *   live toast is merged into one with a count and its lifetime restarts;
  *   routine ones (units trained) cannot crowd out errors.
- * - Banners: age advances and the objective (with elapsed game time). Banners
+ * - Alerts (M2): `UnderAttack` raises one toast per kind (Town Center, buildings, units) per 15 s of client clock and
+ *   is reported to `onAlert` every time; an own `BuildingDestroyed` toasts.
+ * - Banners: age advances, the objective (with elapsed game time) and the opponent's defeat. Banners
  *   are shown one at a time, in order.
  */
 
 import type { DataRegistry } from '../../data/schema';
 import { TICK_RATE, type PlayerId, type ReadonlyGameState, type SimEvent } from '../../sim/types';
-import { POP_CAPPED_TEXT, defName, formatClock, rejectionText } from './text';
+import { ALERT_TEXT, POP_CAPPED_TEXT, defName, destroyedText, formatClock, rejectionText } from './text';
 import type { BannerVM, ToastKind, ToastVM } from './viewModel';
 
 export interface NotificationOptions {
@@ -23,7 +25,12 @@ export interface NotificationOptions {
   toastMs?: number;
   bannerMs?: number;
   maxToasts?: number;
+  /** Called for every `UnderAttack` of the local player (minimap ping, `Space` target), toast throttling aside. */
+  onAlert?: (x: number, y: number) => void;
 }
+
+/** At most one alert toast per kind in this many ms of the client clock (plan 7.3). */
+export const ALERT_TOAST_INTERVAL_MS = 15_000;
 
 export class NotificationCenter {
   private readonly registry: DataRegistry;
@@ -32,6 +39,8 @@ export class NotificationCenter {
   private readonly toastMs: number;
   private readonly bannerMs: number;
   private readonly maxToasts: number;
+  private readonly onAlert: (x: number, y: number) => void;
+  private readonly lastAlertToast = new Map<keyof typeof ALERT_TEXT, number>();
   private nextId = 1;
   private nextBannerId = 1;
   private toastList: ToastVM[] = [];
@@ -46,6 +55,7 @@ export class NotificationCenter {
     this.toastMs = options.toastMs ?? 4000;
     this.bannerMs = options.bannerMs ?? 5000;
     this.maxToasts = options.maxToasts ?? 4;
+    this.onAlert = options.onAlert ?? ((): void => {});
   }
 
   get toasts(): readonly ToastVM[] {
@@ -118,6 +128,31 @@ export class NotificationCenter {
             this.push('success', `${defName(this.registry, ev.unitType)} trained`, true);
           }
           break;
+        case 'UnderAttack': {
+          if (ev.playerId !== this.playerId) break;
+          const kind = ev.entityKind === 'unit' ? 'unit' : ev.townCenter ? 'townCenter' : 'building';
+          const t = this.now();
+          const last = this.lastAlertToast.get(kind);
+          if (last === undefined || t - last >= ALERT_TOAST_INTERVAL_MS) {
+            this.lastAlertToast.set(kind, t);
+            this.push(kind === 'unit' ? 'info' : 'error', ALERT_TEXT[kind]);
+          }
+          this.onAlert(ev.x, ev.y);
+          break;
+        }
+        case 'BuildingDestroyed':
+          if (ev.playerId === this.playerId) this.push('error', destroyedText(defName(this.registry, ev.buildingType)));
+          break;
+        case 'PlayerDefeated': {
+          if (ev.playerId === this.playerId) break; // the end screen announces the player's own defeat
+          const name = state.players[ev.playerId]?.name ?? 'The opponent';
+          this.pushBanner({
+            kind: 'defeated',
+            title: `${name} has been defeated`,
+            subtitle: ev.reason === 'resigned' ? 'They resigned' : 'Their last stronghold has fallen',
+          });
+          break;
+        }
         case 'VillagerIdle':
           if (ev.playerId === this.playerId) idle++;
           break;

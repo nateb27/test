@@ -14,10 +14,12 @@ import {
   type ReadonlyGameState,
 } from '../../sim/types';
 import type { GameSpeed } from '../app/loop';
-import { isIdleVillager } from '../input/selection';
+import { isIdleMilitary, isIdleVillager } from '../input/selection';
 import { buildCommandCard, type HudQueries } from './commandCard';
+import { bonusLines } from './text';
 import type {
   BannerVM,
+  CombatStatsVM,
   CardPage,
   HudViewModel,
   MultiSelectionVM,
@@ -40,6 +42,8 @@ export interface HudClientState {
   banner: BannerVM | null;
   /** Queue cancels issued but not yet applied by a tick (WP13). */
   pendingCancels?: readonly { buildingId: EntityId; index: number }[];
+  /** The "Resign this match?" confirmation is open (M2). */
+  resignConfirmOpen?: boolean;
 }
 
 export interface BuildViewModelInput {
@@ -73,7 +77,11 @@ export function buildTopBar(input: BuildViewModelInput): TopBarVM {
   const player = state.players[playerId];
   if (player === undefined) throw new Error(`No player ${playerId}`);
   let idle = 0;
-  for (const e of state.entities) if (isIdleVillager(e, playerId, registry)) idle++;
+  let idleMilitary = 0;
+  for (const e of state.entities) {
+    if (isIdleVillager(e, playerId, registry)) idle++;
+    else if (isIdleMilitary(e, playerId, registry)) idleMilitary++;
+  }
   const age = registry.age(player.age);
   return {
     resources: { ...player.resources },
@@ -87,7 +95,7 @@ export function buildTopBar(input: BuildViewModelInput): TopBarVM {
     clockSeconds: Math.floor(state.tick / TICK_RATE),
     speed: client.speed,
     paused: client.paused,
-    idleMilitary: 0, // STUB (TODO(WP29)): count idle military units
+    idleMilitary,
     playerColor: player.color,
   };
 }
@@ -151,15 +159,45 @@ function selectionFacts(input: BuildViewModelInput, e: ReadonlyEntity): Selectio
   return facts;
 }
 
+/** The combat line of a unit or a building that attacks (plan 7.3); null for entities that cannot fight. */
+function combatStats(input: BuildViewModelInput, e: ReadonlyEntity): CombatStatsVM | null {
+  if (e.kind === 'node') return null;
+  const def = input.registry.def(e.typeId);
+  const stat = (key: 'attack' | 'range' | 'meleeArmor' | 'pierceArmor'): number => input.query.resolvedStat(e.owner, e.typeId, key);
+  if (e.kind === 'unit' && def?.kind === 'unit') {
+    if (def.combat.attack <= 0) return null;
+    return {
+      attack: stat('attack'),
+      attackType: def.combat.attackType,
+      range: stat('range'),
+      meleeArmor: stat('meleeArmor'),
+      pierceArmor: stat('pierceArmor'),
+      bonuses: bonusLines(def.combat.bonus),
+      note: null,
+    };
+  }
+  if (e.kind === 'building' && def?.kind === 'building' && def.combat.attack !== undefined) {
+    const a = def.combat.attack;
+    return {
+      attack: stat('attack'),
+      attackType: a.attackType,
+      range: stat('range'),
+      meleeArmor: stat('meleeArmor'),
+      pierceArmor: stat('pierceArmor'),
+      bonuses: [],
+      note: `Fires ${a.arrows} ${a.arrows === 1 ? 'arrow' : 'arrows'}`,
+    };
+  }
+  return null;
+}
+
 function singleSelection(input: BuildViewModelInput, e: ReadonlyEntity): SingleSelectionVM {
   const { registry, state, playerId } = input;
   const def = registry.def(e.typeId);
   const { name, icon } = entityName(registry, e);
   let hp: SingleSelectionVM['hp'] = null;
-  if (def !== undefined && def.kind !== 'node' && def.kind !== 'tech') {
-    const max = def.combat.hp;
-    const current = e.kind === 'building' && !e.constructed ? Math.max(1, Math.round(max * e.progress)) : max;
-    hp = { current, max };
+  if (e.kind !== 'node' && def !== undefined && def.kind !== 'node' && def.kind !== 'tech') {
+    hp = { current: e.hp, max: input.query.resolvedStat(e.owner, e.typeId, 'hp') };
   }
   return {
     kind: 'single',
@@ -177,10 +215,9 @@ function singleSelection(input: BuildViewModelInput, e: ReadonlyEntity): SingleS
     queue: e.kind === 'building' && e.owner === playerId ? queueItems(input, e) : [],
     facts: selectionFacts(input, e),
     ownerName: state.players[e.owner]?.name ?? '',
-    // STUB (TODO(WP29)): combat line, stance and the repairing fact.
-    combat: null,
-    stance: null,
-    repairing: false,
+    combat: combatStats(input, e),
+    stance: e.kind === 'unit' && e.owner === playerId && def?.kind === 'unit' && def.combat.autoAcquire ? e.stance : null,
+    repairing: e.kind === 'building' && e.repairerIds.length > 0,
   };
 }
 
@@ -229,6 +266,6 @@ export function buildHudViewModel(input: BuildViewModelInput): HudViewModel {
     menuOpen: input.client.menuOpen,
     placing: input.client.placing,
     endScreen: null, // STUB (TODO(WP29/WP30)): end screen view-model
-    resignConfirmOpen: false, // STUB (TODO(WP29)): Resign confirmation
+    resignConfirmOpen: input.client.resignConfirmOpen ?? false,
   };
 }
