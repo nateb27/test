@@ -75,6 +75,26 @@ export function baseTier(ctx: SimContext, target: Attackable): 1 | 2 | 3 {
   return p.autoAcquire && p.targets === 'any' ? 1 : 2;
 }
 
+/**
+ * Is `target` hardened against `profile` (WP33, PLAN-M2 4.5)? An enemy building the unit can only scratch: its damage
+ * per blow is at most `minDamage` (the building's armour of the unit's attack type is at least the unit's attack and
+ * the unit has no bonus against it). Siege, Cataphracts and Siphonarioi are never hardened against; infantry, cavalry
+ * and archers are against production buildings and the Town Center.
+ */
+export function isHardened(ctx: SimContext, profile: ResolvedUnitCombat, target: Attackable): boolean {
+  return target.kind === 'building' && damageAgainst(ctx, profile, target) <= ctx.data.combat.minDamage;
+}
+
+/**
+ * Tier of a candidate for automatic target choice by a unit with `profile` (4.5 as amended by WP33), without the
+ * tier-0 retaliation rule: `baseTier`, except that a hardened building (`isHardened`) is tier 4, below everything, and
+ * never a tier-0 last attacker. Explicit `attack` orders ignore tiers.
+ */
+export function autoTier(ctx: SimContext, profile: ResolvedUnitCombat, target: Attackable): 1 | 2 | 3 | 4 {
+  const tier = baseTier(ctx, target);
+  return tier === 3 && isHardened(ctx, profile, target) ? 4 : tier;
+}
+
 /** Stop where the unit stands: drop the path and any outstanding request. */
 export function standStill(unit: UnitEntity): void {
   unit.path = null;
