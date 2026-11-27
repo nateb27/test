@@ -108,15 +108,16 @@ function enemyNear(d: AiDecision, b: BuildingInfo): boolean {
   return false;
 }
 
-/** Foundations (other than farms and camps) nobody is building or walking to get two builders. */
+/** Foundations (other than farms) nobody is building or walking to get two builders (an abandoned camp would otherwise be re-placed by the economy, wasting its cost). */
 export function staffFoundations(d: AiDecision): void {
+  if (d.mem.defence.active) return;
   const coming: Record<number, number> = {};
   for (const v of d.view.villagers) {
     if (v.task.kind === 'build') coming[v.task.buildingId] = (coming[v.task.buildingId] ?? 0) + 1;
   }
   for (const b of d.world.buildings) {
     d.ops.n++;
-    if (b.constructed || ECONOMY_PLACED.includes(b.typeId)) continue;
+    if (b.constructed || b.typeId === 'farm') continue;
     if (b.builders > 0 || (coming[b.id] ?? 0) > 0) continue;
     const pick = d.pickBuilders(b.cx, b.cy, b.typeId === d.data.start.centerBuilding ? 4 : 2);
     if (pick.length === 0) return;

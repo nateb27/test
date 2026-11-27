@@ -9,7 +9,7 @@
 import { TICK_RATE, rngRange, type EntityId } from '../../sim';
 import type { AiDecision } from './context';
 import { waveThreshold } from './difficulty';
-import { centroid, clusters, distSqTo, sumPower, type BuildingInfo, type UnitInfo } from './world';
+import { Buckets, centroid, clusters, distSqTo, sumPower, type BuildingInfo, type UnitInfo } from './world';
 
 const dist = (ax: number, ay: number, bx: number, by: number): number => Math.sqrt((ax - bx) * (ax - bx) + (ay - by) * (ay - by));
 
@@ -18,6 +18,8 @@ const RALLY_SLACK = 8;
 /** A retreat ends when every unit is this close to the rally point, or after RETREAT_MAX_SECONDS. */
 const RETREAT_ARRIVED = 8;
 const RETREAT_MAX_SECONDS = 45;
+/** Reinforcements stream to an active wave in groups of at least this many. */
+const REINFORCE_GROUP = 4;
 /** Re-send the wave when its approach point moved this far. */
 const REORDER_DISTANCE = 3;
 /** Idle wave units farther than this from the approach point are sent again. */
@@ -164,8 +166,9 @@ export function runArmy(d: AiDecision, defenceActive: boolean): void {
   }
   const reinforce = allIn || (p.wave.reinforceFromWave !== null && mem.waveNumber >= p.wave.reinforceFromWave);
   if (reinforce && !defenceActive) {
+    // Reinforcements leave the rally point in groups, never one by one (all-in: at once).
     const fresh = pool.filter((u) => !inWave.has(u.id));
-    if (fresh.length > 0) {
+    if (fresh.length >= (allIn ? 1 : REINFORCE_GROUP)) {
       wave.unitIds = [...wave.unitIds, ...fresh.map((u) => u.id)].sort((a, b) => a - b);
       wave.startPower += sumPower(fresh);
       units = [...units, ...fresh];
@@ -270,20 +273,65 @@ function chooseTarget(d: AiDecision, units: readonly UnitInfo[], c: { x: number;
     }
   }
   if (best === null || d.profile.target !== 'armyAware') return best;
-  // Hard: avoid a defended target; raid the largest villager cluster away from Town Centers instead.
-  let enemyPower = 0;
-  for (const e of w.enemyUnits) {
-    d.ops.n++;
-    if (e.fighting && distSqTo(e.x, e.y, best) <= ARMY_AWARE_RADIUS * ARMY_AWARE_RADIUS) enemyPower += e.power;
+  return armyAware(d, units, best, rams, c);
+}
+
+/** Nominal hp that turns a defensive building's arrows into a power comparable with units'. */
+const TOWER_NOMINAL_HP = 300;
+
+/**
+ * Hard (6.5): the highest-priority building whose defence (enemy fighting power within 15 tiles, plus the arrows of
+ * any building with an attack in reach of it) is at most 1.2x the wave; if every building is defended that well, the
+ * largest cluster of enemy villagers at least 8 tiles from every enemy Town Center; failing that, the planned target.
+ */
+function armyAware(
+  d: AiDecision,
+  units: readonly UnitInfo[],
+  planned: BuildingInfo,
+  rams: boolean,
+  c: { x: number; y: number },
+): BuildingInfo | UnitInfo {
+  const w = d.world;
+  const wavePower = sumPower(units);
+  const fighters = w.enemyUnits.filter((e) => e.fighting);
+  const grid = new Buckets(w.mapWidth, w.mapHeight, fighters, d.ops);
+  const towers: { b: BuildingInfo; reach: number; power: number }[] = [];
+  for (const b of w.enemyBuildings) {
+    const a = d.data.building(b.typeId).combat.attack;
+    if (a === undefined || !b.constructed) continue;
+    const cooldownTicks = Math.max(1, Math.round(a.cooldown * TICK_RATE));
+    towers.push({ b, reach: a.range + d.data.combat.reach + 1, power: ((a.arrows * a.attack * TICK_RATE) / cooldownTicks) * TOWER_NOMINAL_HP });
   }
-  if (enemyPower <= ARMY_AWARE_RATIO * sumPower(units)) return best;
+  let best: BuildingInfo | null = null;
+  let bestP = -1;
+  let bestD = Infinity;
+  for (const b of w.enemyBuildings) {
+    d.ops.n++;
+    let defence = 0;
+    for (const e of grid.near(b.cx, b.cy, ARMY_AWARE_RADIUS + 3, d.ops)) {
+      if (distSqTo(e.x, e.y, b) <= ARMY_AWARE_RADIUS * ARMY_AWARE_RADIUS) defence += e.power;
+    }
+    for (const t of towers) {
+      // Nearest point of b to the tower's centre within the tower's reach.
+      if (distSqTo(t.b.cx, t.b.cy, b) <= t.reach * t.reach) defence += t.power;
+    }
+    if (defence > ARMY_AWARE_RATIO * wavePower) continue;
+    const pr = priorityOf(d, b, rams);
+    const dd = distSqTo(c.x, c.y, b);
+    if (pr > bestP || (pr === bestP && dd < bestD)) {
+      best = b;
+      bestP = pr;
+      bestD = dd;
+    }
+  }
+  if (best !== null) return best;
   const centres = w.enemyBuildings.filter((b) => b.typeId === d.data.start.centerBuilding);
   const exposed = w.enemyUnits.filter((u) => u.villager && centres.every((t) => distSqTo(u.x, u.y, t) > RAID_TC_DISTANCE * RAID_TC_DISTANCE));
   const groups = clusters(exposed, 6, w.mapWidth, w.mapHeight, d.ops);
   let raid: UnitInfo[] | null = null;
   for (const g of groups) if (raid === null || g.length > raid.length) raid = g;
-  if (raid === null) return best;
-  return nearestUnit(d, raid, centroid(raid)) ?? best;
+  if (raid === null) return planned;
+  return nearestUnit(d, raid, centroid(raid)) ?? planned;
 }
 
 function nearestUnit(d: AiDecision, units: readonly UnitInfo[], c: { x: number; y: number }): UnitInfo | null {
@@ -343,4 +391,36 @@ function focusFire(d: AiDecision, units: readonly UnitInfo[], c: { x: number; y:
     ids.push(u.id);
   }
   if (ids.length > 0) d.emit({ type: 'attack', unitIds: ids.sort((a, b) => a - b), targetId: t.id, queue: false });
+}
+
+/** At most this many stalled units are nudged per decision. */
+const UNSTICK_PER_DECISION = 12;
+
+/**
+ * Defensive workaround: a unit chasing a building with no path and no pending request, close to the footprint but
+ * outside its reach, would wait forever (it happens when the unit stands diagonally next to a footprint corner).
+ * Such units get a `move` to a point just outside the footprint's nearest edge; once idle there they acquire the
+ * building again from inside reach.
+ */
+export function unstick(d: AiDecision): void {
+  let n = 0;
+  for (const u of d.world.army) {
+    if (n >= UNSTICK_PER_DECISION) return;
+    d.ops.n++;
+    if (!u.stalled || u.order === null || u.order.type !== 'attack') continue;
+    const t = d.world.byId.get(u.order.targetId);
+    if (t === undefined || !('size' in t)) continue;
+    const c = d.data.unit(u.typeId).combat;
+    const reach = c.range + d.data.combat.reach;
+    const dd = distSqTo(u.x, u.y, t);
+    if (dd <= reach * reach || dd > (reach + 2) * (reach + 2)) continue;
+    const px = Math.min(t.tx + t.size, Math.max(t.tx, u.x));
+    const py = Math.min(t.ty + t.size, Math.max(t.ty, u.y));
+    const len = Math.sqrt(dd);
+    const k = Math.min(reach * 0.5, 0.3) / len;
+    const x = Math.min(d.world.mapWidth - 0.01, Math.max(0.01, px + (u.x - px) * k));
+    const y = Math.min(d.world.mapHeight - 0.01, Math.max(0.01, py + (u.y - py) * k));
+    d.emit({ type: 'move', unitIds: [u.id], x, y, queue: false });
+    n++;
+  }
 }

@@ -447,12 +447,13 @@ describe('a 2-player match with the combat stubs', () => {
     expect(run()).toEqual(a);
   });
 
-  it('a stub AiPlayer issues nothing and saves its memory beside the state', () => {
+  it('an AiPlayer issues nothing off its decision ticks and saves its memory beside the state', () => {
+    // (WP26 replaced the Phase 0 stub, whose memory was `{}`; the AI's own tests are tests/sim/ai*.test.ts.)
     const sim = createGame({ ...TWO, players: [{ civ: 'byzantines' }, { civ: 'byzantines', difficulty: 'easy' }] });
     const ai = AiPlayer.create(2, 'easy', 9);
     expect(ai.update(sim)).toEqual([]);
     const loaded = deserializeSave(serialize(sim, [ai.save()]));
-    expect(loaded.controllers).toEqual([{ playerId: 2, kind: 'ai', difficulty: 'easy', memory: {} }]);
+    expect(loaded.controllers).toEqual([{ playerId: 2, kind: 'ai', difficulty: 'easy', memory: ai.save().memory }]);
     expect(AiPlayer.restore(loaded.controllers[0]!).save()).toEqual(ai.save());
   });
 });

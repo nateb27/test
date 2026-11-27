@@ -46,6 +46,8 @@ export class AiDecision {
   readonly popCap: number;
   /** Army reserve (6.4): the army's part of the stockpile (the bank, capped by the stockpile). Set by `creditBank`. */
   readonly reserve: ResourceAmounts = { food: 0, wood: 0, gold: 0, stone: 0 };
+  /** Held back from the economy for a military building the AI is saving for (this decision only). */
+  readonly saving: ResourceAmounts = { food: 0, wood: 0, gold: 0, stone: 0 };
   private blockedGrid: Blocked | null = null;
 
   constructor(

@@ -4,6 +4,7 @@
  * rejections per player, stuck units, decision cost, the outcome and a command log.
  */
 
+import { expect } from 'vitest';
 import { AiPlayer, EconomyBot, type AiOptions, type Controller } from '../../src/bot';
 import {
   TICK_RATE,
@@ -54,6 +55,8 @@ export interface SeatReport {
   ageTicks: (number | null)[];
   firstWaveTick: number | null;
   commands: number;
+  /** Commands of each type issued (the AI must never issue `cheat`). */
+  byType: Record<string, number>;
   rejections: CommandRejectedEvent[];
   stuck: { unitId: number; type: string; order: string; x: number; y: number; sinceTick: number }[];
   /** AI only: operation counts and (if measured) decision times in ms. */
@@ -100,6 +103,7 @@ export function playMatch(opts: MatchOptions): MatchReport {
     ageTicks: [0, null, null, null],
     firstWaveTick: null,
     commands: 0,
+    byType: {},
     rejections: [],
     stuck: [],
     ops: null,
@@ -123,6 +127,7 @@ export function playMatch(opts: MatchOptions): MatchReport {
       const out = c.update(sim);
       if (opts.timeDecisions && c instanceof AiPlayer && c.isDecisionTick(sim.state.tick)) seats[i]!.decisionMs.push(performance.now() - t0);
       seats[i]!.commands += out.length;
+      for (const c of out) seats[i]!.byType[c.type] = (seats[i]!.byType[c.type] ?? 0) + 1;
       cmds.push(...out);
     });
     if (opts.log) log.push(cmds);
@@ -212,3 +217,38 @@ export function fmtTick(tick: number | null | undefined): string {
 }
 
 export const MIN = 60 * TICK_RATE;
+
+/** PLAN-M2 5.5 windows in game seconds. */
+export const TOWNSHIP: Record<AiDifficulty, [number, number]> = {
+  easy: [8.5 * 60, 10.5 * 60],
+  standard: [6.5 * 60, 7.75 * 60],
+  hard: [5 * 60, 6 * 60],
+};
+export const FIRST_WAVE: Record<AiDifficulty, [number, number]> = {
+  easy: [15 * 60, Infinity],
+  standard: [10 * 60, 12 * 60],
+  hard: [7 * 60, 8.5 * 60],
+};
+
+/** Command hygiene (8.1 item 5): rejections at most 1% of commands, none `invalidCommand`. */
+export function expectHygiene(s: SeatReport): void {
+  expect(s.byType.cheat ?? 0, `player ${s.playerId} cheat commands`).toBe(0);
+  const invalid = s.rejections.filter((e) => e.reason === 'invalidCommand');
+  expect(invalid, `player ${s.playerId} invalidCommand rejections`).toEqual([]);
+  expect(s.rejections.length, `player ${s.playerId} rejections (${JSON.stringify(s.rejections.slice(0, 3))})`).toBeLessThanOrEqual(
+    Math.floor(s.commands / 100),
+  );
+}
+
+/** One AI against an idle opponent until it has launched its first wave and reached Township (cached per key). */
+const openings = new Map<string, MatchReport>();
+export function opening(diff: AiDifficulty, seed: number): MatchReport {
+  const key = `${diff}:${seed}`;
+  let r = openings.get(key);
+  if (r === undefined) {
+    r = playMatch({ seed, seats: [diff, 'idle'], maxTicks: 20 * MIN, stopAfterFirstWave: true, stopOnEnd: false });
+    openings.set(key, r);
+  }
+  return r;
+}
+

@@ -32,7 +32,12 @@ export function buildMilitary(d: AiDecision): void {
     if (d.view.buildings.some((b) => !b.constructed && MILITARY_PRODUCERS.includes(b.typeId))) return;
     if (!d.available(want.type)) continue;
     const cost = d.cost(want.type);
-    if (!d.canAfford(cost)) return;
+    if (!d.canAfford(cost)) {
+      // From the Township Age, save for it: the economy may not spend these resources this decision. (Not in the
+      // Founding Age, where every coin goes to villagers and the advance.)
+      if (w.age >= 2) for (const r of ['food', 'wood', 'gold', 'stone'] as const) d.saving[r] = cost[r];
+      return;
+    }
     const spot = d.baseSpot(want.type, 8);
     if (spot === null) continue;
     const size = d.data.building(want.type).footprint;

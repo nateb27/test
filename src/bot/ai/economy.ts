@@ -2,7 +2,8 @@
  * Economy layer (PLAN-M2 6.4): the economy bot's `decide` with the difficulty's plan and the army reserve.
  *
  * The reserve handed to `decide` is the army share of the stockpile plus whatever earlier layers of this decision
- * committed, so the economy can neither spend the army's share nor double-spend. Villagers claimed by earlier layers (builders,
+ * committed (plus what the military layer is saving for its next building), so the economy can neither spend the
+ * army's share nor double-spend. Villagers claimed by earlier layers (builders,
  * repairers, evacuated or fighting villagers) are marked claimed so the economy leaves them alone.
  */
 
@@ -21,7 +22,8 @@ export function runEconomy(d: AiDecision): void {
   const reserve: ResourceAmounts = { food: 0, wood: 0, gold: 0, stone: 0 };
   for (const r of RESOURCE_TYPES) {
     const committed = view.resources[r] - d.stock[r];
-    reserve[r] = committed + d.reserveAvailable(r);
+    const held = d.reserveAvailable(r);
+    reserve[r] = committed + held + Math.min(d.saving[r], Math.max(0, d.stock[r] - held));
   }
   for (const v of view.villagers) {
     if (d.claimed.has(v.id) || d.mem.defence.villagerIds.includes(v.id)) v.claimed = true;

@@ -145,9 +145,9 @@ export const UPGRADE_LINE: Readonly<Record<string, 'infantry' | 'archer' | 'cava
 
 const RESOURCE_SHARES_HARD: Record<number, Record<ResourceType, number>> = {
   1: { food: 0.8, wood: 0.2, gold: 0, stone: 0 },
-  2: { food: 0.6, wood: 0.3, gold: 0.1, stone: 0 },
-  3: { food: 0.42, wood: 0.2, gold: 0.28, stone: 0.1 },
-  4: { food: 0.42, wood: 0.2, gold: 0.28, stone: 0.1 },
+  2: { food: 0.55, wood: 0.35, gold: 0.1, stone: 0 },
+  3: { food: 0.5, wood: 0.27, gold: 0.18, stone: 0.05 },
+  4: { food: 0.45, wood: 0.25, gold: 0.22, stone: 0.08 },
 };
 
 const RESOURCE_SHARES_STANDARD: Record<number, Record<ResourceType, number>> = {
@@ -231,7 +231,7 @@ export const DIFFICULTY: Readonly<Record<AiDifficulty, DifficultyProfile>> = {
       { age: 2, type: 'barracks', count: 2 },
     ],
     armyShare: 0.45,
-    wave: { earliest: 7 * 60, jitter: 20, forcedAfter: 70, sizes: [8, 16], growth: 0, cap: 16, reinforceFromWave: 3, interval: 90 },
+    wave: { earliest: 7 * 60, jitter: 20, forcedAfter: 70, sizes: [8, 16], growth: 6, cap: 36, reinforceFromWave: null, interval: 90 },
     counterWeight: 1,
     fixed: { sword: 0.35, archer: 0.3, horse: 0.2, spear: 0.15 },
     upgrades: 'all',

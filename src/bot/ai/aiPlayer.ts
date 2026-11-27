@@ -20,7 +20,7 @@ import { registry, type DataRegistry } from '../../data';
 import { SaveError, type AiDifficulty, type Command, type ControllerSave, type PlayerId, type Sim } from '../../sim';
 import type { Controller } from '../controller';
 import { readView } from '../view';
-import { runArmy } from './army';
+import { runArmy, unstick } from './army';
 import { AiDecision, type AiOptions } from './context';
 import { runDefence } from './defence';
 import { DIFFICULTY } from './difficulty';
@@ -101,8 +101,8 @@ export class AiPlayer implements Controller {
       mem.homeY = world.tc.cy;
     }
     const d = new AiDecision(sim, this.playerId, DIFFICULTY[this.difficulty], mem, this.data, world, view, powers, ops, this.options);
-    // The army reserve starts with the first Barracks, but never before the Township Age: in the Founding Age food
-    // is the bottleneck and every coin goes to villagers and the advance (BALANCE.md).
+    // The army bank starts with the first Barracks, but not before the Township advance is clicked: in the Founding
+    // Age food is the bottleneck and every coin goes to villagers and the advance (BALANCE.md).
     const advancing = world.tc !== null && world.tc.queuedTechs.length > 0;
     const armyStarted = (world.age >= 2 || advancing) && world.buildings.some((b) => b.typeId === 'barracks' && b.constructed);
     d.creditBank(player.stats.resourcesGathered, armyStarted);
@@ -120,6 +120,7 @@ export class AiPlayer implements Controller {
     research(d);
     setRallies(d);
     runArmy(d, defending);
+    unstick(d);
     mem.decisions++;
 
     const cost = this.cost;
