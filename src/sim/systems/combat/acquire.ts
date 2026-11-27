@@ -30,7 +30,7 @@ import {
   type UnitEntity,
 } from '../../types';
 import { distSqToTarget, unitCombat } from './damage';
-import { autoTier, inReach, inReachSq, isHardened, standStill, targetFor, type Attackable } from './engage';
+import { autoTier, canTarget, inReach, inReachSq, isHardened, standStill, targetFor, type Attackable } from './engage';
 import { scanBuildingTarget } from '../defence';
 import { rebuildSpatialIndex, visitBuildingsNear, visitUnitsNear } from './spatial';
 
@@ -94,7 +94,8 @@ export function scanForTarget(
   let checks = 0;
   if (profile.targets === 'any' && opts.maxTier >= 1) {
     checks += visitUnitsNear(ctx, x, y, opts.radius, budget, (u) => {
-      if (u.id === unit.id || targetFor(ctx, unit, profile, u.id) === undefined) return false;
+      // `u` is the state's own entity object (the index holds them), so no id lookup is needed (WP33).
+      if (!canTarget(unit, profile, u)) return false;
       const d2 = distSqToTarget(ctx, x, y, u);
       if (!qualifies(d2, r2)) return false;
       const tier = autoTier(ctx, profile, u);
@@ -106,7 +107,7 @@ export function scanForTarget(
   }
   if (opts.maxTier >= 3) {
     checks += visitBuildingsNear(ctx, x, y, opts.radius, budget - checks, (b) => {
-      if (targetFor(ctx, unit, profile, b.id) === undefined) return false;
+      if (!canTarget(unit, profile, b)) return false;
       const d2 = distSqToTarget(ctx, x, y, b);
       if (!qualifies(d2, r2)) return false;
       const tier = autoTier(ctx, profile, b);
