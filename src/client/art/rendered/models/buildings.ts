@@ -625,11 +625,16 @@ function hayBale(m: Model, x: number, y: number, z = 0): void {
   m.box(x + 0.14, y - 0.005, z, x + 0.15, y + 0.135, z + 0.121, M.ROPE);
 }
 
+/** A plank water trough: the water sits below the rim, so the brown sides and rim frame it. */
 function trough(m: Model, x: number, y: number, len: number, alongX: boolean): void {
-  const x1 = alongX ? x + len : x + 0.1;
-  const y1 = alongX ? y + 0.1 : y + len;
-  m.box(x, y, 0, x1, y1, 0.1, M.PLANK);
-  m.box(x + 0.015, y + 0.015, 0.06, x1 - 0.015, y1 - 0.015, 0.1, M.WATER);
+  const x1 = alongX ? x + len : x + 0.14;
+  const y1 = alongX ? y + 0.14 : y + len;
+  m.box(x, y, 0, x1, y1, 0.04, M.PLANK);
+  m.box(x, y, 0.04, x1, y + 0.025, 0.12, M.PLANK);
+  m.box(x, y1 - 0.025, 0.04, x1, y1, 0.12, M.PLANK);
+  m.box(x, y, 0.04, x + 0.025, y1, 0.12, M.PLANK);
+  m.box(x1 - 0.025, y, 0.04, x1, y1, 0.12, M.PLANK);
+  m.box(x + 0.025, y + 0.025, 0.04, x1 - 0.025, y1 - 0.025, 0.09, M.WATER);
 }
 
 export function stableEarly(m: Model): void {

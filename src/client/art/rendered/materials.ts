@@ -551,9 +551,11 @@ export function material(mt: number, lx: number, ly: number, lz: number, nx: num
       mulc(0.8 + 0.3 * vn2(lx * 70 + lz * 30, ly * 70));
       break;
     case M.WATER:
-      setc(0.16, 0.2, 0.2);
-      mixc(0.3, 0.36, 0.34, vn2(lx * 30, ly * 30) * 0.4);
-      out.spec = 0.9;
+      // Dark, still water. A strong highlight (it was 0.9) turned the small water surfaces (troughs, the farm well)
+      // into a flat white blob in the sun, which read as a stray white object on the Stable's apron.
+      setc(0.1, 0.15, 0.17);
+      mixc(0.2, 0.28, 0.3, vn2(lx * 30, ly * 30) * 0.4);
+      out.spec = 0.25;
       break;
     case M.ROPE:
       setc(0.6, 0.5, 0.33);
