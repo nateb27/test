@@ -10,7 +10,8 @@
  * - `hold` without a target in reach (units with `autoAcquire`): scan within reach.
  * Commanded attacks, moves and economic orders never scan; villagers (`autoAcquire: false`) never scan.
  *
- * Building scans (Town Center) happen in step 8b (`defence.ts`, WP22), sharing `runtime.acquireBudget`.
+ * Building scans (Town Center) run in the same ascending-id pass (`scanBuildingTarget`, `defence.ts`), with the same
+ * due/budget rules and the shared `runtime.acquireBudget` (PLAN-M2 2.2 step 4, 4.10); step 8b only fires.
  */
 
 import {
@@ -23,6 +24,7 @@ import {
 } from '../../types';
 import { distSqToTarget, unitCombat } from './damage';
 import { baseTier, inReach, inReachSq, standStill, targetFor, type Attackable } from './engage';
+import { scanBuildingTarget } from '../defence';
 import { rebuildSpatialIndex, visitBuildingsNear, visitUnitsNear } from './spatial';
 
 /**
@@ -172,8 +174,8 @@ function applyHit(ctx: SimContext, unit: UnitEntity, hit: ScanHit): void {
 }
 
 /**
- * Step 4: rebuild the spatial index, reset `runtime.acquireBudget`, then run the target scans of due units in
- * ascending id (due: `tick >= combat.nextScanTick` and in a scanning situation). A scan spends at most
+ * Step 4: rebuild the spatial index, reset `runtime.acquireBudget`, then run the target scans of due units and
+ * buildings (`scanBuildingTarget`) in ascending id (due: `tick >= combat.nextScanTick` and in a scanning situation). A scan spends at most
  * `ACQUIRE_MAX_CHECKS_PER_SCAN` checks out of the tick's budget; a due unit that finds the budget exhausted (fewer
  * than `ACQUIRE_MAX_CHECKS_PER_SCAN` checks left, so no scan is ever cut short by the tick budget) keeps its
  * `nextScanTick` and scans next tick. After a scan, `nextScanTick = tick + ACQUIRE_INTERVAL_TICKS`.
@@ -183,6 +185,10 @@ export function runAcquisition(ctx: SimContext): void {
   ctx.runtime.acquireBudget = ACQUIRE_BUDGET_PER_TICK;
   const tick = ctx.state.tick;
   for (const e of ctx.state.entities) {
+    if (e.kind === 'building') {
+      if (e.attack !== null) scanBuildingTarget(ctx, e);
+      continue;
+    }
     if (e.kind !== 'unit' || e.hp <= 0 || tick < e.combat.nextScanTick) continue;
     const profile = unitCombat(ctx, e.owner, e.typeId);
     const plan = scanPlan(ctx, e, profile);

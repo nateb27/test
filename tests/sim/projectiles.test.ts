@@ -10,8 +10,10 @@ import { hashState } from '../../src/sim/hash';
 import { rebuildRuntime } from '../../src/sim/runtime';
 import { deserialize, serialize } from '../../src/sim/serialize';
 import { createInitialState, simFromState } from '../../src/sim/sim';
-import { ACQUIRE_BUDGET_PER_TICK, type GameConfig, type GameState, type SimContext } from '../../src/sim/types';
+import { type GameConfig, type GameState, type SimContext } from '../../src/sim/types';
 import { computeDamage, unitCombat } from '../../src/sim/systems/combat/damage';
+import { runAcquisition } from '../../src/sim/systems/combat/acquire';
+import { rebuildSpatialIndex } from '../../src/sim/systems/combat/spatial';
 import { runBuildingAttacks } from '../../src/sim/systems/defence';
 import { projectileFlightTicks, runProjectiles, spawnProjectile } from '../../src/sim/systems/projectiles';
 
@@ -26,9 +28,12 @@ function world(): SimContext {
   return { state, runtime: rebuildRuntime(state, registry), data: registry, events: [] };
 }
 
-/** One tick of steps 8b and 9 (the ones this package owns). */
+/**
+ * One tick of steps 4 (acquisition: index rebuild and the Town Center's target scan), 8b and 9. Step 4 runs for real
+ * because building scans live there (PLAN-M2 2.2) and the real spatial index only sees what its rebuild saw.
+ */
 function tick(ctx: SimContext): void {
-  ctx.runtime.acquireBudget = ACQUIRE_BUDGET_PER_TICK;
+  runAcquisition(ctx);
   runBuildingAttacks(ctx);
   runProjectiles(ctx);
   ctx.state.tick += 1;
@@ -156,6 +161,7 @@ describe('WP22 fire splash', () => {
       flightTicks: 2,
       damage: 10,
     });
+    rebuildSpatialIndex(ctx); // step 4 of the tick: splash queries the real index
     runProjectiles(ctx);
     runProjectiles(ctx);
     const hp: Record<string, number> = {};
@@ -202,6 +208,7 @@ describe('WP22 fire splash', () => {
       kind: 'fire', owner: 1, sourceId: 7777, sourceType: 'siphonarios', targetId: prim.id,
       from: { x: 15, y: 20 }, to: { x: 20.5, y: 20.5 }, flightTicks: 2, damage: 10,
     });
+    rebuildSpatialIndex(ctx);
     runProjectiles(ctx);
     ctx.state.entities = ctx.state.entities.filter((e) => e.id !== prim.id);
     runProjectiles(ctx);
