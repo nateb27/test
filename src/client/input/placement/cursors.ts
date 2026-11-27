@@ -118,6 +118,9 @@ export function createCursorController(deps: CursorDeps): CursorController {
       css.set(next, v);
     }
     deps.canvas.style.cursor = v;
+    // Mirrored for DOM inspection; `cursor()` (and so the debug hook) reads `kind`, the one source of truth.
+    if (next === 'default') delete deps.canvas.dataset.cursor;
+    else deps.canvas.dataset.cursor = next;
   };
 
   const refresh = (): void => apply(compute());
@@ -142,6 +145,7 @@ export function createCursorController(deps: CursorDeps): CursorController {
       deps.canvas.removeEventListener('mouseleave', onLeave);
       offSelection?.();
       deps.canvas.style.cursor = '';
+      delete deps.canvas.dataset.cursor;
     },
   };
 }

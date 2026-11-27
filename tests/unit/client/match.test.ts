@@ -100,7 +100,7 @@ describe('Match controllers', () => {
   });
 });
 
-describe('Match end screen and alerts', () => {
+describe('Match end screen', () => {
   const stepReturning = (sim: Sim, events: SimEvent[]): void => {
     vi.spyOn(sim, 'step').mockReturnValueOnce(events);
   };
@@ -124,18 +124,14 @@ describe('Match end screen and alerts', () => {
     match.destroy();
   });
 
-  it('reports the local UnderAttack events as live alerts for 3 s of game time, at most 4', () => {
+  it('suspends game input while the end screen is shown', () => {
     const { match, sim } = makeMatch([]);
-    const hit = (x: number, playerId = 1): SimEvent => ({
-      type: 'UnderAttack', playerId, entityId: 5, entityKind: 'unit', townCenter: false, x, y: 2, attackerPlayerId: 2,
-    });
-    stepReturning(sim, [hit(1), hit(2), hit(3), hit(4), hit(5), hit(9, 2)]);
+    stepReturning(sim, [{ type: 'MatchEnded', winner: 2, tick: 1 }]);
     match.tick();
-    expect(match.alerts().map((a) => a.x)).toEqual([2, 3, 4, 5]);
-    for (let i = 0; i < 59; i++) match.tick();
-    expect(match.alerts().length).toBe(4);
-    match.tick();
-    expect(match.alerts()).toEqual([]);
+    expect(match.endScreen?.result).toBe('defeat');
+    expect(match.input.suspended).toBe(true);
+    match.closeEndScreen();
+    expect(match.input.suspended).toBe(false);
     match.destroy();
   });
 });

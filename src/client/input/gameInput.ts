@@ -14,6 +14,7 @@ import type { DataRegistry } from '../../data/schema';
 import type { CommandInput, EntityId, PlayerId, ReadonlyEntity, Sim, Vec2 } from '../../sim/types';
 import type { WorldRendererApi } from '../render/renderer';
 import { resolveContextCommands } from './contextual';
+import { resolveMaxHp } from './placement/targeting';
 import { HOTKEYS, resolveHotkey, type HotkeyAction, type HotkeyBinding } from './hotkeys';
 import {
   boxSelection,
@@ -81,6 +82,8 @@ export class GameInput {
   readonly selection = new SelectionStore();
   /** Current drag box in canvas pixels, or null. Read by the drag-box overlay (`render/overlays`). */
   dragBox: { x0: number; y0: number; x1: number; y1: number } | null = null;
+  /** True while a screen covers the match (the end screen): pointer and keyboard input on the game is ignored. */
+  suspended = false;
 
   private readonly sim: Sim;
   private readonly renderer: WorldRendererApi;
@@ -177,7 +180,7 @@ export class GameInput {
       shift,
       owner: this.playerId,
       registry: this.registry,
-      maxHp: (e) => this.sim.query.resolvedStat(e.owner, e.typeId, 'hp'),
+      maxHp: (e) => resolveMaxHp(this.sim.query, this.registry, e.owner, e.typeId),
     });
     for (const c of cmds) this.commands.issue(c);
     return cmds;
@@ -313,6 +316,7 @@ export class GameInput {
   }
 
   private onMouseDown(e: MouseEvent): void {
+    if (this.suspended) return;
     const p = this.toCanvas(e);
     const mods: Modifiers = { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey, alt: e.altKey };
     if (e.button === 0) {
@@ -369,6 +373,7 @@ export class GameInput {
   }
 
   private onKeyDown(e: KeyboardEvent): void {
+    if (this.suspended) return;
     const t = e.target as HTMLElement | null;
     if (t !== null && typeof t.tagName === 'string' && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
     const action = resolveHotkey(this.hotkeys, e);

@@ -137,7 +137,7 @@ function createDebugHook(host: AppHost): GameDebugHook {
       return match.renderer.pickEntity(x - rect.left, y - rect.top);
     },
     inputMode() {
-      return host.match?.modes.active?.kind ?? null;
+      return host.match?.modes.modeKind() ?? null;
     },
     ghost() {
       const g = host.match?.modes.ghost() ?? null;
@@ -233,27 +233,15 @@ function createDebugHook(host: AppHost): GameDebugHook {
       return host.match?.endScreen ?? null;
     },
     alerts() {
-      return host.match?.alerts() ?? [];
+      // One source: the minimap's live pings, fed by the HUD's alert handler (one ping per own UnderAttack).
+      return host.match?.minimap?.alerts() ?? [];
     },
     effects() {
       return host.requireMatch().renderer.effectStats();
     },
     cursor() {
-      return host.match === null ? 'default' : canvasCursor(host.match);
+      // One source: the mode controller's cursor controller (it also mirrors the kind on `canvas.dataset.cursor`).
+      return host.match?.modes.cursor() ?? 'default';
     },
   };
-}
-
-const CURSORS = ['default', 'attack', 'attackMove', 'repair'] as const;
-type CursorName = (typeof CURSORS)[number];
-
-/**
- * The cursor the world canvas shows: attack-move and repair follow the active input mode; the sword over an enemy is
- * published by the input layer as `data-cursor` on the canvas (next to the CSS cursor it sets). `default` otherwise.
- */
-function canvasCursor(match: Match): CursorName {
-  const mode: string | null = match.modes.active?.kind ?? null;
-  if (mode === 'attackMove' || mode === 'repair') return mode;
-  const v = match.renderer.canvas.dataset.cursor;
-  return CURSORS.find((c) => c === v) ?? 'default';
 }

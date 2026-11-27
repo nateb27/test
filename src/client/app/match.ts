@@ -6,7 +6,7 @@
 import type { Controller } from '../../bot';
 import { hashState } from '../../sim/hash';
 import type { ControllerSave } from '../../sim';
-import { TICK_RATE, type EntityId, type Sim, type SimEvent } from '../../sim/types';
+import { type EntityId, type Sim, type SimEvent } from '../../sim/types';
 import { registry } from '../../data';
 import type { AssetManifest } from '../art/manifest';
 import { GameInput } from '../input';
@@ -29,10 +29,6 @@ export const LOCAL_PLAYER_ID = 1;
 export type SimEventListener = (events: readonly SimEvent[]) => void;
 export type ModeListener = (mode: ActiveMode | null) => void;
 export type EndScreenListener = (vm: EndScreenVM | null) => void;
-
-/** A minimap ping lives 1.5 s, twice (PLAN-M2 7.2): `Match.alerts()` reports an alert for this many ticks. */
-export const ALERT_LIVE_TICKS = 3 * TICK_RATE;
-const MAX_LIVE_ALERTS = 4;
 
 export class Match {
   readonly loop = new FixedTickLoop();
@@ -66,7 +62,6 @@ export class Match {
   endScreen: EndScreenVM | null = null;
   private readonly endWatcher = new EndWatcher(LOCAL_PLAYER_ID);
   private readonly endListeners = new Set<EndScreenListener>();
-  private readonly alertLog: { x: number; y: number; tick: number }[] = [];
   private readonly cleanup: (() => void)[] = [];
   private readonly listeners = new Set<SimEventListener>();
   private readonly modeListeners = new Set<ModeListener>();
@@ -135,14 +130,9 @@ export class Match {
   closeEndScreen(): void {
     if (this.endScreen === null) return;
     this.endScreen = null;
+    this.input.suspended = false;
     this.loop.paused = false;
     for (const l of this.endListeners) l(null);
-  }
-
-  /** Live minimap alerts for the local player: the latest few `UnderAttack` events of the last 3 s of game time. */
-  alerts(): { x: number; y: number; tick: number }[] {
-    const now = this.sim.state.tick;
-    return this.alertLog.filter((a) => now - a.tick < ALERT_LIVE_TICKS).slice(-MAX_LIVE_ALERTS).map((a) => ({ ...a }));
   }
 
   /** Selected entity ids (client state, ascending). */
@@ -196,19 +186,16 @@ export class Match {
     }
   }
 
-  /** Local alerts for `alerts()`, and the end screen when the match is decided. */
+  /**
+   * The end screen when the match is decided (the one mechanism: `HudViewModel.endScreen` stays null). Alerts are not
+   * kept here: the HUD's notification centre handles every own `UnderAttack` once (toast, minimap ping, `Space`).
+   */
   private noteEvents(events: readonly SimEvent[]): void {
-    const tick = this.sim.state.tick;
-    for (const e of events) {
-      if (e.type === 'UnderAttack' && e.playerId === LOCAL_PLAYER_ID) {
-        this.alertLog.push({ x: e.x, y: e.y, tick });
-        if (this.alertLog.length > 16) this.alertLog.shift();
-      }
-    }
     const vm = this.endWatcher.observe(events, this.sim.state);
     if (vm !== null) {
       this.endScreen = vm;
       this.loop.paused = true;
+      this.input.suspended = true; // no hotkey (Space, Esc, Pause) acts on the game behind the end screen
       for (const l of this.endListeners) l(vm);
     }
   }
@@ -253,6 +240,7 @@ export class Match {
     this.endListeners.clear();
     for (const c of this.cleanup) c();
     this.cleanup.length = 0;
+    this.modes.destroy();
     this.overlays.destroy();
     this.input.destroy();
     this.renderer.destroy();

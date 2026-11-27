@@ -96,7 +96,7 @@ export const selection = (page: Page): Promise<number[]> => page.evaluate(() => 
 
 export const overlayStats = (page: Page): Promise<Record<string, number>> => page.evaluate(() => window.__game!.overlayStats());
 
-export const inputMode = (page: Page): Promise<'placement' | 'rally' | null> => page.evaluate(() => window.__game!.inputMode());
+export const inputMode = (page: Page): Promise<'placement' | 'rally' | 'attackMove' | 'repair' | null> => page.evaluate(() => window.__game!.inputMode());
 
 export const resources = (page: Page): Promise<{ food: number; wood: number; gold: number; stone: number }> =>
   page.evaluate(() => ({ ...window.__game!.state!.players[1]!.resources }));

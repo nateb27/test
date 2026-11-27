@@ -43,8 +43,8 @@ export interface GameDebugHook {
   /** Move the frozen client clock forward by `ms`. Throws outside a match or while the clock is running. */
   advanceClock(ms: number): void;
   setSpeed(speed: GameSpeed): void;
-  /** Active input mode (set by a Build or Set Rally button), or null. */
-  inputMode(): 'placement' | 'rally' | null;
+  /** Active input mode (Build, Set Rally, Attack-move or Repair button), or null. */
+  inputMode(): 'placement' | 'rally' | 'attackMove' | 'repair' | null;
   /** The placement ghost under the cursor, or null outside placement mode. */
   ghost(): {
     tx: number;
@@ -83,7 +83,7 @@ export interface GameDebugHook {
   startBattle(seed?: number, perSide?: number): void;
   /** M2: the end screen view-model, or null while none is shown. */
   endScreen(): EndScreenVM | null;
-  /** M2: live minimap alert pings. */
+  /** M2: live minimap alert pings (empty while the minimap is not mounted). */
   alerts(): { x: number; y: number; tick: number }[];
   /** M2: counts from the renderer's effect layer. Throws outside a match. */
   effects(): EffectStats;

@@ -1,7 +1,6 @@
 /**
- * Placement and rally input modes (WP10), plus the controller the HUD callbacks
- * connect to: `modes.startPlacement(buildingType)` for `onStartPlacement` and
- * `modes.startRally()` for `onStartRally`.
+ * Placement, rally, attack-move and repair input modes (WP10, WP28), plus the controller the HUD callbacks
+ * connect to: `startPlacement(buildingType)`, `startRally()`, `startAttackMove()` and `startRepair()`.
  */
 
 import type { DataRegistry } from '../../../data/schema';
@@ -13,6 +12,7 @@ import { createCursorController, type CursorKind } from './cursors';
 import { createPlacementMode, type PlacementMode } from './placementMode';
 import { createRallyMode, type RallyMode } from './rallyMode';
 import { createRepairMode, type RepairMode } from './repairMode';
+import { resolveMaxHp } from './targeting';
 import type { PlacementGhost } from './types';
 
 export { createPlacementMode } from './placementMode';
@@ -34,6 +34,7 @@ export {
   isEnemyOf,
   repairers,
   resolveAttackMoveCommands,
+  resolveMaxHp,
 } from './targeting';
 export { describePlacementProblem } from './reason';
 export { footprintCentre, snapFootprint } from './snap';
@@ -90,8 +91,8 @@ export interface ModeController {
   /** Leave any active mode. */
   cancel(): void;
   /**
-   * The active placement or rally mode, else null. Target modes (attack-move, repair) are in `target`: this member
-   * keeps its M1 type because the debug hook's `inputMode()` is typed by it.
+   * The active placement or rally mode, else null (M1 type, kept for its callers). Target modes (attack-move, repair)
+   * are in `target`; `modeKind()` names whichever is active (what the debug hook's `inputMode()` reports).
    */
   readonly active: PlacementMode | RallyMode | null;
   /** The active attack-move or repair mode, else null. */
@@ -105,13 +106,7 @@ export interface ModeController {
 export function createModeController(deps: ModeControllerDeps): ModeController {
   let active: ActiveMode | null = null;
   const entityById = (id: EntityId): ReadonlyEntity | undefined => deps.sim.query.entityById(id);
-  const maxHp = (e: ReadonlyEntity): number => {
-    try {
-      return deps.sim.query.resolvedStat(e.owner, e.typeId, 'hp');
-    } catch {
-      return 0;
-    }
-  };
+  const maxHp = (e: ReadonlyEntity): number => resolveMaxHp(deps.sim.query, deps.registry, e.owner, e.typeId);
 
   const selectionStore = (deps.input as { selection: { subscribe?: (l: () => void) => () => void } }).selection;
   const cursors = createCursorController({
@@ -204,7 +199,7 @@ export function createModeController(deps: ModeControllerDeps): ModeController {
     },
     cursor: () => cursors.current(),
     destroy: () => {
-      removeDebug();
+      active = null; // silently: the match is being torn down, nobody listens any more
       cursors.destroy();
     },
     cancel() {
@@ -228,35 +223,5 @@ export function createModeController(deps: ModeControllerDeps): ModeController {
       return active !== null && active.kind === 'placement' ? active.ghost : null;
     },
   };
-  const removeDebug = exposeForDebug(controller);
   return controller;
-}
-
-/** What `window.__game.wp28` offers in dev and e2e builds (the e2e specs enter the target modes through it). */
-export interface ModeDebugApi {
-  startMode(kind: 'attackMove' | 'repair'): void;
-  cursor(): CursorKind;
-  modeKind(): ActiveMode['kind'] | null;
-}
-
-/**
- * Dev and e2e builds only: put the mode controller on the `__game` hook as `wp28`, until the command card buttons
- * (WP29) and the hook (WP30) can start these modes. Returns the remover.
- */
-function exposeForDebug(c: ModeController): () => void {
-  if (!(import.meta.env.DEV || import.meta.env.MODE === 'e2e') || typeof window === 'undefined') return () => {};
-  const game = (window as unknown as { __game?: object }).__game;
-  if (game === undefined) return () => {};
-  const api: ModeDebugApi = {
-    startMode(kind) {
-      if (kind === 'attackMove') c.startAttackMove();
-      else c.startRepair();
-    },
-    cursor: () => c.cursor(),
-    modeKind: () => c.modeKind(),
-  };
-  Object.defineProperty(game, 'wp28', { value: api, configurable: true, enumerable: false });
-  return () => {
-    Reflect.deleteProperty(game, 'wp28');
-  };
 }

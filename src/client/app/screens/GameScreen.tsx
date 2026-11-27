@@ -101,6 +101,11 @@ export function GameScreen({
         now: m.clock.now,
         onStartPlacement: (b) => hooks?.onStartPlacement?.(b, ctx()),
         onStartRally: () => hooks?.onStartRally?.(ctx()),
+        // Attack-move and repair target modes (card A / R and their hotkeys go through the same card slots).
+        onStartAttackMove: () => m.modes.startAttackMove(),
+        onStartRepair: () => m.modes.startRepair(),
+        // Called once per own UnderAttack (toast throttling aside): the minimap pings it (what `__game.alerts()` reads).
+        onAlert: (x, y) => m.minimap?.ping(x, y),
       });
       controller.start();
       // Dev and e2e builds only: after `__game.step` the HUD and the minimap's unit layer rebuild at once, so a test

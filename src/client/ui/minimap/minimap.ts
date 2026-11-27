@@ -12,7 +12,7 @@
  */
 
 import type { DataRegistry } from '../../../data/schema';
-import type { PlayerId, ReadonlyGameState, SimEvent, Vec2 } from '../../../sim/types';
+import type { PlayerId, ReadonlyGameState, Vec2 } from '../../../sim/types';
 import { perf } from '../../debug/perf';
 import { footprintOf } from '../../render/entities';
 import {
@@ -38,11 +38,6 @@ export interface MinimapDeps {
     worldToCanvas(x: number, y: number): { x: number; y: number };
   };
   input: { issueContextOrder(p: { x: number; y: number }, shift: boolean): unknown };
-  /**
-   * Subscribe to the sim's events (`Match.onEvents`). Own `UnderAttack` events then ping without further wiring;
-   * a caller that also calls `ping` for the same alert causes no second ring.
-   */
-  events?(listener: (events: readonly SimEvent[]) => void): () => void;
 }
 
 export interface Minimap {
@@ -50,7 +45,10 @@ export interface Minimap {
   readonly view: MinimapView;
   /** Redraw everything now (the 5 Hz timer calls the units part). */
   redraw(): void;
-  /** Red expanding ring at a world position, timed on the match clock (`state.tick`): 1.5 s, twice, at most 4 live. */
+  /**
+   * Red expanding ring at a world position, timed on the match clock (`state.tick`): 1.5 s, twice, at most 4 live.
+   * The app calls it from the HUD's alert handler (`HudControllerOptions.onAlert`), once per own `UnderAttack`.
+   */
   ping(x: number, y: number, color?: number): void;
   /** Live pings (what the debug hook `alerts()` reports). */
   alerts(): { x: number; y: number; tick: number }[];
@@ -398,12 +396,6 @@ export function mountMinimap(deps: MinimapDeps): Minimap {
     }
   });
   ro?.observe(wrap);
-  const offEvents = deps.events?.((events) => {
-    for (const e of events) {
-      if (e.type === 'UnderAttack' && e.playerId === deps.playerId) api.ping(e.x, e.y, PING_COLOR);
-    }
-  });
-
   const api: Minimap = {
     element: wrap,
     get view() {
@@ -431,7 +423,6 @@ export function mountMinimap(deps: MinimapDeps): Minimap {
     },
     destroy() {
       destroyed = true;
-      offEvents?.();
       if (timer !== null) window.clearInterval(timer);
       if (raf !== null) cancelAnimationFrame(raf);
       ro?.disconnect();
