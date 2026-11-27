@@ -143,12 +143,18 @@ export function runArmy(d: AiDecision, defenceActive: boolean): void {
     const workshop = d.world.buildings.some((b) => b.typeId === 'siegeWorkshop' && b.constructed);
     const rams = pool.filter((u) => u.typeId === 'batteringRam').length;
     const breachDeadline = mem.nextWaveForcedTick + BREACH_WAIT_SECONDS * TICK_RATE;
-    const waitBreach = workshop && p.siege.rams > 0 && rams < p.siege.rams && d.tick < breachDeadline;
+    // A wave twice its threshold does not wait: numbers raze soft targets and clear the way for the next rams.
+    const waitBreach = workshop && p.siege.rams > 0 && rams < p.siege.rams && d.tick < breachDeadline && fighters < 2 * threshold;
+    // Above easy, after the first wave: an enemy with almost no army is attacked at once (games must end).
+    let enemyArmy = 0;
+    for (const e of d.world.enemyUnits) if (e.fighting) enemyArmy += e.power;
+    const defenceless = p.target !== 'nearest' && mem.waveNumber > 0 && !waitBreach && enemyArmy * 4 < sumPower(pool);
     const ready =
       (allIn && fighters > 0) ||
       (!waitBreach && d.tick >= mem.nextWaveEarliestTick && fighters >= threshold) ||
       (!waitBreach && d.tick + p.decisionInterval > mem.nextWaveForcedTick && fighters >= half) ||
-      (d.tick >= breachDeadline && fighters >= half);
+      (d.tick >= breachDeadline && fighters >= half) ||
+      (defenceless && fighters >= 3);
     if (!ready || d.world.enemies.length === 0) return;
     const ids = pool.map((u) => u.id).sort((a, b) => a - b);
     mem.wave = {
@@ -174,7 +180,13 @@ export function runArmy(d: AiDecision, defenceActive: boolean): void {
     endWave(d);
     return;
   }
-  const reinforce = allIn || (p.wave.reinforceFromWave !== null && mem.waveNumber >= p.wave.reinforceFromWave);
+  let enemyPower = 0;
+  for (const e of d.world.enemyUnits) if (e.fighting) enemyPower += e.power;
+  // Reinforce: all-in, the table's continuous reinforcement, or (above easy) an enemy with almost no army left.
+  const reinforce =
+    allIn ||
+    (p.wave.reinforceFromWave !== null && mem.waveNumber >= p.wave.reinforceFromWave) ||
+    (p.target !== 'nearest' && enemyPower * 4 < sumPower(units));
   if (reinforce && !defenceActive) {
     // Reinforcements leave the rally point in groups, never one by one (all-in: at once).
     const fresh = pool.filter((u) => !inWave.has(u.id));
@@ -366,7 +378,13 @@ function chooseTarget(d: AiDecision, units: readonly UnitInfo[], c: { x: number;
   const soft = breach ? w.enemyBuildings : w.enemyBuildings.filter((b) => isSoft(d, b));
   if (d.profile.target === 'nearest') return nearestBuilding(d, c, soft) ?? nearestBuilding(d, c);
   const towers = towersOf(d);
-  const candidates = breach ? soft : soft.filter((b) => !covered(towers, 0, 0, b));
+  // Arrow cover matters only while the wave is not overwhelming: past 1.2x (all towers + the whole enemy army) it
+  // walks in anyway.
+  let defence = 0;
+  for (const t of towers) defence += t.power;
+  for (const e of w.enemyUnits) if (e.fighting) defence += e.power;
+  const overwhelming = sumPower(units) > ARMY_AWARE_RATIO * defence;
+  const candidates = breach || overwhelming ? soft : soft.filter((b) => !covered(towers, 0, 0, b));
   const rams = units.some((u) => u.typeId === 'batteringRam');
   let best: BuildingInfo | null = null;
   let bestP = -1;
