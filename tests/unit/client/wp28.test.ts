@@ -41,6 +41,13 @@ describe('health bar rules', () => {
     expect(healthBarShown(10, 0, true)).toBe(false);
   });
 
+  it('a foundation shows no bar for its low construction hp, only when it is hit or selected', () => {
+    // 120 of 600 granted by construction so far: not damage.
+    expect(healthBarShown(120, 600, false, 120)).toBe(false);
+    expect(healthBarShown(119, 600, false, 120)).toBe(true);
+    expect(healthBarShown(120, 600, true, 120)).toBe(true);
+  });
+
   it('own bars are green from 50%, yellow from 25%, else red; enemies are always red', () => {
     expect(healthBarColor(100, 100, true)).toBe(HP_GREEN);
     expect(healthBarColor(50, 100, true)).toBe(HP_GREEN);

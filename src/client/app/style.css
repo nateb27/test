@@ -280,12 +280,16 @@ body,
 .seg {
   display: grid;
   /* Easy / Standard / Hard on one row, "No opponent (sandbox)" across the full width below. */
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
 }
 
-.seg button {
-  padding: 6px 8px;
+/* Three labels share a 270-300 px row: no side padding to spare, never wider than their cell ("Standard" overflowed). */
+.screen.menu.setup .seg button {
+  padding: 6px 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .seg button:last-child {

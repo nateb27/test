@@ -22,6 +22,7 @@ import {
   clickSelection,
   entityCentre,
   findTownCenter,
+  isWorker,
   nextIdleMilitary,
   nextIdleVillager,
   sameTypeSelection,
@@ -357,7 +358,7 @@ export class GameInput {
     this.cancelPress();
     if (press.dragging) {
       const boxed = this.renderer.entitiesInCanvasRect(press.x, press.y, p.x, p.y, ['unit']);
-      this.selection.set(boxSelection(this.selection.ids, boxed, press.shift, this.playerId, this.lookup));
+      this.selection.set(boxSelection(this.selection.ids, boxed, press.shift, this.playerId, this.lookup, (u) => isWorker(u, this.registry)));
       this.lastClick = null;
       return;
     }

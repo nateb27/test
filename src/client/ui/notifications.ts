@@ -47,6 +47,8 @@ export class NotificationCenter {
   private bannerQueue: Omit<BannerVM, 'id'>[] = [];
   private current: BannerVM | null = null;
   private currentExpires = 0;
+  /** The toast that shows the idle villagers, while it is up. */
+  private idleToastId: number | null = null;
 
   constructor(options: NotificationOptions) {
     this.registry = options.registry;
@@ -182,8 +184,44 @@ export class NotificationCenter {
           break;
       }
     }
-    if (idle === 1) this.push('info', 'A villager is idle');
-    else if (idle > 1) this.push('info', `${idle} villagers are idle`);
+    if (idle > 0) this.pushIdle(Math.max(idle, this.idleVillagers(state)));
+  }
+
+  /**
+   * The idle-villager toast: one slot that always shows how many villagers stand idle now. Before, each batch of
+   * `VillagerIdle` events made its own toast and the merging counted batches, so "A villager is idle x11" and
+   * "2 villagers are idle x2" stood side by side and neither said how many were idle.
+   */
+  private pushIdle(n: number): void {
+    const text = n === 1 ? 'A villager is idle' : `${n} villagers are idle`;
+    const old = this.idleToastId;
+    if (old !== null && this.toastList.some((x) => x.id === old)) {
+      const t = this.now();
+      this.toastList = this.toastList.map((x) => (x.id === old ? { id: old, kind: 'info', text, expiresAt: t + this.toastMs } : x));
+      return;
+    }
+    this.push('info', text);
+    this.idleToastId = this.toastList[this.toastList.length - 1]?.id ?? null;
+  }
+
+  /** Own villagers with nothing to do in `state` (no order, queue, path or pending path). */
+  private idleVillagers(state: ReadonlyGameState): number {
+    let n = 0;
+    for (const e of state.entities) {
+      if (e.kind !== 'unit' || e.owner !== this.playerId || e.hp <= 0) continue;
+      const def = this.registry.def(e.typeId);
+      if (def === undefined || def.kind !== 'unit' || def.gather === undefined) continue;
+      if (e.currentOrder === null && e.orderQueue.length === 0 && e.path === null && e.pendingPathRequestId === null) n++;
+    }
+    return n;
+  }
+
+  /** Drop every toast and banner, shown or queued (the end screen replaces them). */
+  clear(): void {
+    this.toastList = [];
+    this.bannerQueue = [];
+    this.current = null;
+    this.idleToastId = null;
   }
 
   /** Drop expired toasts and advance banners. Returns true when anything changed. */

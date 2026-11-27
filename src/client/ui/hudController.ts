@@ -14,15 +14,18 @@
 
 import { registry as defaultRegistry } from '../../data';
 import type { DataRegistry } from '../../data/schema';
-import type {
-  BuildingId,
-  CommandInput,
-  EntityId,
-  PlayerId,
-  ReadonlyEntity,
-  ReadonlyGameState,
-  SimEvent,
-  SimQuery,
+import {
+  RESOURCE_TYPES,
+  TICK_RATE,
+  type BuildingId,
+  type CommandInput,
+  type EntityId,
+  type PlayerId,
+  type ProducibleId,
+  type ReadonlyEntity,
+  type ReadonlyGameState,
+  type SimEvent,
+  type SimQuery,
 } from '../../sim/types';
 import type { GameSpeed } from '../app/loop';
 import type { UiAction } from '../input/gameInput';
@@ -31,7 +34,7 @@ import { perf } from '../debug/perf';
 import { buildHudViewModel, type HudClientState } from './buildViewModel';
 import type { HudQueries } from './commandCard';
 import { NotificationCenter } from './notifications';
-import { CANCEL_PAUSED_TEXT, DEMOLISH_PROMPT_TEXT, RESIGN_PAUSED_TEXT, describeUnavailable } from './text';
+import { CANCEL_PAUSED_TEXT, DEMOLISH_PROMPT_TEXT, RESIGN_PAUSED_TEXT, describeUnavailable, repairStalledText } from './text';
 import { HUD_REFRESH_HZ, type CardButtonVM, type CardPage, type HudViewModel } from './viewModel';
 
 /** The slice of `GameInput` the HUD uses. */
@@ -56,6 +59,10 @@ export interface HudMatch {
   readonly loop: { paused: boolean; speed: GameSpeed };
   readonly input: HudInput;
   onEvents(listener: (events: readonly SimEvent[]) => void): () => void;
+  /** WP30's end screen while it is shown, else null (absent: the HUD never sees one). */
+  readonly endScreen?: object | null;
+  /** Told when the end screen opens (its view-model) or closes (null). */
+  onEndScreen?(listener: (vm: object | null) => void): () => void;
 }
 
 export interface HudControllerOptions {
@@ -131,6 +138,10 @@ export class HudController {
   private pausedByMenu = false;
   private placing: BuildingId | null = null;
   private resignConfirmOpen = false;
+  /** Own buildings whose repair was stalled for want of resources at the last check (one toast per stall). */
+  private stalledRepairs = new Set<EntityId>();
+  /** Buildings being repaired: their hp at the last check and the tick it last changed. */
+  private repairProgress = new Map<EntityId, { hp: number; tick: number }>();
   /** Queue cancels issued at `tick` and not yet applied (a command applies on the next tick). */
   private pendingCancels: { buildingId: EntityId; index: number; tick: number }[] = [];
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -184,10 +195,24 @@ export class HudController {
         else if (action === 'confirmDemolish') this.toast('info', DEMOLISH_PROMPT_TEXT);
       }),
       this.match.onEvents((events) => {
-        this.notifications.ingest(events, this.match.sim.state);
+        // Behind the end screen nothing is announced: it says who won, and the defeat banner, the conquest objective
+        // and a burst of "destroyed" toasts would only queue up and show after "View map".
+        if ((this.match.endScreen ?? null) !== null) this.notifications.clear();
+        else this.notifications.ingest(events, this.match.sim.state);
         this.refresh();
       }),
     );
+    // The match ended while the in-match menu was open (or with the Resign question up): the end screen replaces
+    // the menu. The end screen holds the pause, so closing the menu here must not resume the game.
+    const offEnd = this.match.onEndScreen?.((vm) => {
+      if (vm === null) return;
+      this.menuOpen = false;
+      this.resignConfirmOpen = false;
+      this.pausedByMenu = false;
+      this.notifications.clear();
+      this.refresh();
+    });
+    if (offEnd !== undefined) this.cleanup.push(offEnd);
     this.timer = setInterval(() => this.sync(), 1000 / HUD_REFRESH_HZ);
     this.refresh();
   }
@@ -202,8 +227,42 @@ export class HudController {
 
   /** What the refresh timer does, on demand: expire toasts, advance banners, rebuild the view-model. */
   sync(): void {
+    this.checkRepairStalls();
     this.notifications.tick();
     this.refresh();
+  }
+
+  /**
+   * Repair that stands still for want of resources (PLAN-M2 4.12: an unaffordable repair tick changes nothing and
+   * the villagers keep hammering) raises one error toast per building and stall, "Not enough wood to repair". The
+   * sim emits nothing for a stall, so the HUD looks: an own building with repairers below its maximum hp that has
+   * gained no hp for twice the slowest repair step (at least `repairMinHpPerSecond`, so a working repair always
+   * gains in that time), while its cost holds a resource the player has none of. Repair is bought a fraction at a
+   * time, so with none of a resource it still runs until the next whole unit is due; the toast waits for that.
+   */
+  private checkRepairStalls(): void {
+    const state = this.match.sim.state;
+    const player = state.players[this.playerId];
+    if (player === undefined) return;
+    const stallTicks = 2 * Math.ceil(TICK_RATE / Math.max(0.1, this.registry.combat.repairMinHpPerSecond));
+    const progress = new Map<EntityId, { hp: number; tick: number }>();
+    const stalled = new Set<EntityId>();
+    for (const e of state.entities) {
+      if (e.kind !== 'building' || e.owner !== this.playerId || e.repairerIds.length === 0 || e.hp <= 0) continue;
+      if (e.hp >= this.match.sim.query.resolvedStat(this.playerId, e.typeId, 'hp')) continue;
+      const last = this.repairProgress.get(e.id);
+      // Only a rise is progress: hp lost to attackers while the repair stands still does not reset the clock.
+      const since = last !== undefined && e.hp <= last.hp ? last.tick : state.tick;
+      progress.set(e.id, { hp: e.hp, tick: since });
+      if (state.tick - since < stallTicks) continue;
+      const cost = this.match.sim.query.availability(this.playerId, e.typeId as ProducibleId).cost;
+      const missing = RESOURCE_TYPES.filter((r) => cost[r] > 0 && player.resources[r] < 1);
+      if (missing.length === 0) continue;
+      stalled.add(e.id);
+      if (!this.stalledRepairs.has(e.id)) this.notifications.push('error', repairStalledText(missing));
+    }
+    this.repairProgress = progress;
+    this.stalledRepairs = stalled;
   }
 
   /** Rebuild the view-model now and notify subscribers. */

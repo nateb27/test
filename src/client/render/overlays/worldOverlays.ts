@@ -215,7 +215,7 @@ export class WorldOverlays {
       const max = this.maxHp.get(e.owner, e.typeId, players[e.owner]?.researched.length ?? 0);
       // Just above the visible top of the art (sprite textures have empty rows above it; without a measurement
       // the footprint gives an estimate). The offsets are in world pixels so they scale with the building.
-      const hasHp = healthBarShown(e.hp, max, selected);
+      const hasHp = healthBarShown(e.hp, max, selected, e.constructed ? max : e.builtHp);
       const bar = barFor(e, playerId);
       const ys = buildingBarCentres(c.y, d.top, size, e.constructed, inv, hasHp);
       if (hasHp && ys.health !== null) {

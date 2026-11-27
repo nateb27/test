@@ -471,15 +471,31 @@
   margin-bottom: 6px;
 }
 
+/*
+ * Portraits are 40 px (46 px with padding and border; 28 / 34 px in a dense grid). The grid shows whole rows only (two,
+ * or three dense ones) and scrolls by rows, so a large selection never shows a portrait cut in half.
+ */
 .multi-grid {
   display: flex;
   flex-wrap: wrap;
+  align-content: flex-start;
   gap: 4px;
-  max-height: 128px;
-  overflow: hidden;
+  max-height: calc(2 * 46px + 4px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  scroll-snap-type: y mandatory;
+  scrollbar-width: thin;
+  scrollbar-color: var(--hud-gold-dim) transparent;
+}
+
+.multi-grid.dense {
+  max-height: calc(3 * 34px + 2 * 4px);
 }
 
 .multi-item {
+  flex: none;
+  box-sizing: border-box;
+  scroll-snap-align: start;
   padding: 2px;
   background: rgba(0, 0, 0, 0.3);
   border: 1px solid var(--hud-gold-dim);

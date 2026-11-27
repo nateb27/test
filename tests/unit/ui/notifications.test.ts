@@ -36,6 +36,11 @@ function setup() {
   };
 }
 
+/** Give every villager of the fixture something to do (the idle toast counts the idle ones in the state). */
+function busyVillagers(state: ReturnType<typeof createFixture>['state']): void {
+  for (const e of state.entities) if (e.kind === 'unit' && e.typeId === 'villager') e.currentOrder = { type: 'move', target: { x: 1, y: 1 } } as never;
+}
+
 function rejected(reason: RejectReason, extra: Partial<CommandRejectedEvent> = {}): SimEvent {
   return { type: 'CommandRejected', playerId: 1, seq: 1, commandType: 'train', reason, ...extra };
 }
@@ -125,14 +130,42 @@ describe('other notifications', () => {
 
   it('merges idle villager events into one toast', () => {
     const { center, fx } = setup();
+    busyVillagers(fx.state);
     center.ingest([{ type: 'VillagerIdle', playerId: 1, unitId: 3 }], fx.state);
     expect(center.toasts[0]!.text).toBe('A villager is idle');
     const second = setup();
+    busyVillagers(second.fx.state);
     second.center.ingest(
       [3, 4, 5].map((unitId): SimEvent => ({ type: 'VillagerIdle', playerId: 1, unitId })),
       second.fx.state,
     );
     expect(second.center.toasts.map((t) => t.text)).toEqual(['3 villagers are idle']);
+  });
+
+  it('keeps one idle toast that shows how many villagers are idle now, whatever the batches were', () => {
+    const { center, fx, advance } = setup();
+    // Two of the fixture's villagers stand idle.
+    const idleIds: number[] = [];
+    for (const e of fx.state.entities) {
+      if (e.kind !== 'unit' || e.owner !== 1 || e.typeId !== 'villager') continue;
+      if (idleIds.length < 2) {
+        e.currentOrder = null;
+        e.orderQueue = [];
+        e.path = null;
+        e.pendingPathRequestId = null;
+        idleIds.push(e.id);
+      } else e.currentOrder = { type: 'move', target: { x: 1, y: 1 } } as never;
+    }
+    center.ingest([{ type: 'VillagerIdle', playerId: 1, unitId: idleIds[0]! }], fx.state);
+    expect(center.toasts.map((t) => t.text)).toEqual(['2 villagers are idle']);
+    advance(1000);
+    center.ingest([{ type: 'VillagerIdle', playerId: 1, unitId: idleIds[1]! }], fx.state);
+    center.ingest([{ type: 'BuildingCompleted', playerId: 1, buildingId: 9, buildingType: 'mill' }], fx.state);
+    center.ingest([{ type: 'VillagerIdle', playerId: 1, unitId: idleIds[1]! }], fx.state);
+    expect(center.toasts.map((t) => t.text)).toEqual(['2 villagers are idle', 'Mill completed']);
+    // The update restarted its lifetime: still up after the first one would have expired.
+    advance(3500);
+    expect(center.toasts.map((t) => t.text)).toEqual(['2 villagers are idle', 'Mill completed']);
   });
 
   it('an identical live toast is refreshed, not duplicated', () => {

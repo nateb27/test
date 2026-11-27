@@ -69,7 +69,9 @@ test('fast art: every unit has an attack (blow on frame 1) and a death that play
     expect(r.minW, r.id).toBeGreaterThan(3);
   }
   expect(rows.find((r) => r.id === 'rubble.3')!.textures).toBe(2);
-  expect(rows.find((r) => r.id === 'fx.smoke')!.textures).toBe(6);
+  // WP34: the pixel-art smoke loops over 8 frames (art/fx.ts SMOKE_FRAMES), as do the fires.
+  expect(rows.find((r) => r.id === 'fx.smoke')!.textures).toBe(8);
+  expect(rows.find((r) => r.id === 'fx.fireLarge')!.textures).toBe(8);
   expect(errors).toEqual([]);
 });
 

@@ -321,3 +321,105 @@ describe('WP13 UX rules', () => {
     }
   });
 });
+
+describe('repair without resources (WP34)', () => {
+  it('toasts once per stall when a building being repaired costs a resource the player has none of', () => {
+    const s = match.fx.state;
+    const tc = s.entities.find((e) => e.id === match.fx.townCenter)!;
+    if (tc.kind !== 'building') throw new Error('fixture');
+    tc.hp = 100;
+    tc.repairerIds = [match.fx.villagers[0]!];
+    const res = s.players[1]!.resources;
+    res.food = 1000;
+    res.gold = 1000;
+    res.wood = 0;
+    res.stone = 0;
+    const texts = (): string[] => hud.vm.toasts.map((t) => t.text);
+    // The repair may still be running on credit (bought a fraction at a time): no toast until hp stands still.
+    hud.sync();
+    s.tick += 10;
+    tc.hp += 1;
+    hud.sync();
+    expect(texts().filter((t) => t.endsWith('to repair'))).toHaveLength(0);
+    // Hit by an attacker meanwhile: losing hp is not progress, the stall clock runs on.
+    s.tick += 20;
+    tc.hp -= 5;
+    hud.sync();
+    s.tick += 20;
+    hud.sync();
+    expect(texts().filter((t) => t.endsWith('to repair'))).toHaveLength(1);
+    expect(texts().find((t) => t.endsWith('to repair'))).toMatch(/^Not enough (wood|stone|wood and stone) to repair$/);
+    // Still stalled: no second toast.
+    hud.sync();
+    expect(texts().filter((t) => t.endsWith('to repair'))).toHaveLength(1);
+    // Resources arrive: the stall ends; running dry again toasts again.
+    res.wood = 500;
+    res.stone = 500;
+    hud.sync();
+    vi.advanceTimersByTime(5000);
+    hud.sync();
+    expect(texts().filter((t) => t.endsWith('to repair'))).toHaveLength(0);
+    res.wood = 0;
+    res.stone = 0;
+    s.tick += 40;
+    hud.sync();
+    expect(texts().filter((t) => t.endsWith('to repair'))).toHaveLength(1);
+  });
+});
+
+describe('the end screen (WP34)', () => {
+  /** A fake match with WP30's end-screen hooks; `end(vm)` opens or closes it the way `Match` does (loop paused). */
+  function withEndScreen(): { m: FakeMatch & { endScreen: object | null }; h: HudController; end(vm: object | null): void } {
+    const listeners = new Set<(vm: object | null) => void>();
+    const m = Object.assign(fakeMatch({ age: 2 }), {
+      endScreen: null as object | null,
+      onEndScreen: (l: (vm: object | null) => void) => {
+        listeners.add(l);
+        return () => listeners.delete(l);
+      },
+    });
+    const h = new HudController({ match: m, playerId: 1 });
+    h.start();
+    return {
+      m,
+      h,
+      end: (vm) => {
+        m.endScreen = vm;
+        if (vm !== null) m.loop.paused = true;
+        for (const l of listeners) l(vm);
+      },
+    };
+  }
+
+  it('replaces an open menu and its Resign question, and keeps the game paused', () => {
+    const { m, h, end } = withEndScreen();
+    h.setMenuOpen(true);
+    h.requestResign();
+    expect(h.vm.menuOpen).toBe(true);
+    end({ result: 'victory' });
+    expect(h.vm.menuOpen).toBe(false);
+    expect(h.vm.resignConfirmOpen).toBe(false);
+    expect(m.loop.paused).toBe(true);
+    h.stop();
+    // Stopping the HUD (leaving the match) does not resume a game the menu no longer holds.
+    expect(m.loop.paused).toBe(true);
+  });
+
+  it('drops toasts and banners, and announces nothing behind it', () => {
+    const { m, h, end } = withEndScreen();
+    m.emit([{ type: 'BuildingCompleted', playerId: 1, buildingId: 9, buildingType: 'mill' }]);
+    expect(h.vm.toasts).toHaveLength(1);
+    end({ result: 'victory' });
+    m.emit([
+      { type: 'PlayerDefeated', playerId: 2, reason: 'conquered' },
+      { type: 'BuildingDestroyed', playerId: 1, buildingId: 9, buildingType: 'mill', tx: 1, ty: 1, size: 2, killerId: null } as never,
+    ]);
+    expect(h.vm.toasts).toEqual([]);
+    expect(h.vm.banner).toBeNull();
+    // After "View map" the HUD announces again.
+    end(null);
+    m.emit([{ type: 'BuildingCompleted', playerId: 1, buildingId: 9, buildingType: 'mill' }]);
+    expect(h.vm.toasts).toHaveLength(1);
+    h.stop();
+  });
+});

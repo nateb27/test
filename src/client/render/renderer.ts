@@ -184,7 +184,7 @@ export async function createWorldRenderer(options: RendererOptions): Promise<Wor
       entities.update(state, alpha, rect, ((state.tick + alpha) * 1000) / TICK_RATE);
       const t2 = perf.start();
       perf.end('render.entities', t1);
-      effects.update(state, alpha, rect);
+      effects.update(state, alpha, rect, camera.zoom);
       perf.end('render.effects', t2);
     },
     worldToCanvas: (x, y) => camera.worldToCanvas(x, y),
