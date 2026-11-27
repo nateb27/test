@@ -1,19 +1,19 @@
 /**
- * WP25: the counter matrix (PLAN-M2 5.3) and the siege rows as scripted duels on the real sim.
+ * WP25/WP32: the counter matrix (PLAN-M2 5.3) and the siege rows as scripted duels on the real sim.
  *
  * Two groups of equal cost face each other 10 tiles apart on an empty 48x48 map and are given `attackMove` at each
  * other. Cell semantics: "W" = the row side wins with at least 30% of its cost surviving; "w" = the row side wins
  * (the plan says "narrowly"; `docs/BALANCE.md` lists the survivors the paper model expects); "L" = the row side loses.
  * Each duel runs twice and the final state hash must match.
  *
- * The duels need WP21 to WP24 (combat, projectiles, death, repair/movement). They are skipped until
- * `COMBAT_INTEGRATED` in `duelHarness.ts` is true (or `DUELS=1` is set). The harness smoke tests always run.
+ * Combat is integrated, so every cell runs (WP32 switched the duels on). Each cell is also run at three army sizes and with
+ * the two sides created in the opposite order; results and survivors are in `docs/BALANCE.md`.
  */
 
 import { describe, expect, it } from 'vitest';
+import { runCellSwapped } from './feelHarness';
 import { registry } from '../../src/data';
 import {
-  COMBAT_INTEGRATED,
   DEFAULT_BUDGET,
   START_DISTANCE,
   cellLetter,
@@ -125,13 +125,24 @@ describe('duel harness (always on)', () => {
   });
 });
 
-describe.skipIf(!COMBAT_INTEGRATED)('counter matrix on the real sim (PLAN-M2 5.3)', () => {
+describe('counter matrix on the real sim (PLAN-M2 5.3)', () => {
   it.each(CELLS)('%s vs %s: %s', (row, col, want) => {
     const first = runCell(row, col);
     const second = runCell(row, col);
     expect(second.hash, 'deterministic').toBe(first.hash);
     expect(first.rejected.filter((r) => r === 'invalidCommand'), 'no invalid commands').toEqual([]);
     expect(holds(want, first), `${row} vs ${col}: ${cellLetter(first)} (row keeps ${first.survivingA.toFixed(2)}, column keeps ${first.survivingB.toFixed(2)} after ${first.seconds}s)`).toBe(true);
+  });
+
+  // Survivors move by 10 to 20 points between sizes (the square law) but no cell changes sign, whichever side is created
+  // first (ids decide ties, 4.1 rule 4) and whatever the budget.
+  it.each(CELLS.filter(([, col]) => col !== 'batteringRam' && col !== 'trebuchet'))('%s vs %s (%s) holds at three army sizes and with the sides swapped', (row, col, want) => {
+    for (const budget of [600, 1200, 2400]) {
+      const first = runCell(row, col, budget);
+      const swapped = runCellSwapped(row, col, budget);
+      expect(holds(want, first), `${row} vs ${col} at ${budget}: ${cellLetter(first)} ${first.survivingA.toFixed(2)}/${first.survivingB.toFixed(2)}`).toBe(true);
+      expect(holds(want, swapped), `${row} vs ${col} at ${budget}, swapped: ${cellLetter(swapped)} ${swapped.survivingA.toFixed(2)}/${swapped.survivingB.toFixed(2)}`).toBe(true);
+    }
   });
 
   it('a duel mirrors: the same two groups with the sides swapped give the opposite result', () => {
@@ -144,19 +155,16 @@ describe.skipIf(!COMBAT_INTEGRATED)('counter matrix on the real sim (PLAN-M2 5.3
   });
 
   it('equal-cost duels with an upgrade tilt the result towards its owner', () => {
-    const plain = runCell('swordsman', 'spearman', 1200);
-    const upgraded = runCell('swordsman', 'spearman', 1200, { researched: { 1: ['spathionForging', 'paddedKavadion'] } });
-    expect(upgraded.survivingA).toBeGreaterThan(plain.survivingA);
+    // Swordsmen against Cataphracts: a loss without upgrades (71% of the Cataphracts survive), a win with level I of the line.
+    const plain = runCell('swordsman', 'cataphract', 1200);
+    const upgraded = runCell('swordsman', 'cataphract', 1200, { researched: { 1: ['spathionForging', 'paddedKavadion'] } });
+    expect(plain.winner).toBe('b');
+    expect(upgraded.survivingA - upgraded.survivingB).toBeGreaterThan(plain.survivingA - plain.survivingB);
+    expect(upgraded.survivingB).toBeLessThan(plain.survivingB);
   });
 });
 
-describe.skipIf(!COMBAT_INTEGRATED)('siege rows on the real sim (PLAN-M2 5.3)', () => {
-  // See docs/BALANCE.md "Findings": with Barracks melee armour 2 the row below cannot hold (10 Swordsmen take about as
-  // long as 2 rams). It holds once production buildings have melee armour 7; the check follows the data, so the
-  // test flips by itself (it.fails while the defect stands, a plain test after the fix).
-  const barracksFixed = registry.building('barracks').combat.meleeArmor >= 7;
-  const rowThree = barracksFixed ? it : it.fails;
-
+describe('siege rows on the real sim (PLAN-M2 5.3)', () => {
   it('2 Battering Rams destroy a Barracks in under 60 s', () => {
     const rams = runBuildingKill([{ unit: 'batteringRam', count: 2 }], 'barracks');
     expect(rams.seconds).not.toBeNull();
@@ -164,7 +172,7 @@ describe.skipIf(!COMBAT_INTEGRATED)('siege rows on the real sim (PLAN-M2 5.3)', 
     expect(runBuildingKill([{ unit: 'batteringRam', count: 2 }], 'barracks').hash).toBe(rams.hash);
   });
 
-  rowThree('10 Swordsmen need more than 3 times as long as 2 Battering Rams', () => {
+  it('10 Swordsmen need more than 3 times as long as 2 Battering Rams', () => {
     const rams = runBuildingKill([{ unit: 'batteringRam', count: 2 }], 'barracks');
     const swords = runBuildingKill([{ unit: 'swordsman', count: 10 }], 'barracks', { maxSeconds: 600 });
     expect(rams.seconds).not.toBeNull();
