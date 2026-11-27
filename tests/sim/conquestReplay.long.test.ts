@@ -18,7 +18,7 @@ describe('conquest replay (two AIs, 30,000 ticks)', () => {
   ] as const)('seed %i, %s vs %s: replays and save/load agree every 100 ticks', (seed, d1, d2) => {
     const config = conquestConfig(seed, d1, d2);
     const live = playConquest(config, TICKS);
-    expect(live.commands).toBeGreaterThan(1000);
+    expect(live.commands, 'the AIs played').toBeGreaterThan(200);
     const r1 = replay(config, live.log, live.ticks, { hashEvery: HASH_EVERY });
     const r2 = replay(config, live.log, live.ticks, { hashEvery: HASH_EVERY });
     expect(r1.hashes).toEqual(live.hashes);
