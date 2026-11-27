@@ -8,7 +8,8 @@
  * Scenes: start, ages (a developed town in each age), work (forest, gold, stone with villagers), army (every unit),
  * construction, zoom (0.5x / 1x / 2x); for the pre-rendered unit and tree sheets: lineup (all ten units in blue and
  * red, on open grass and by the Town Center, 1x, 1.5x and 2x), jobs (villagers on every job and carrying every resource), forest
- * (woodcutters at a forest edge), anims (attack / death / corpse previews of every unit), scale (units by buildings). Time only moves through `__game.step`; cheats and `__art.issue` stage the
+ * (woodcutters at a forest edge), anims (attack / death / corpse previews of every unit), scale (units by buildings); battle (WP27 effects: a two-player fight
+ * with arrows in flight, corpses, burning buildings and rubble at 0.5x / 1x / 2x). Time only moves through `__game.step`; cheats and `__art.issue` stage the
  * town (instant build and research, spawned units).
  */
 
@@ -340,7 +341,8 @@ try {
       await page.evaluate(([list, sts]) => list.forEach((id, k) => window.__art.preview(id, sts[k % 3])), [ids, states]);
       await page.evaluate(() => window.__game.step(1));
       await lookAt(at.x + 7.5, at.y - 5.5, 1);
-      await page.evaluate(() => window.__game.advanceClock(250));
+      // Previews run on game time like every animation: step past the 7-frame death so it shows the body down.
+      await page.evaluate(() => window.__game.step(16));
       await shot('anims');
     }
     if (want('scale')) {
@@ -349,6 +351,110 @@ try {
       await lookAt(tc.x - 1, tc.y - 2, 2);
       await shot('scale-2x');
     }
+  }
+  if (want('battle')) {
+    // WP27 effects in a real fight (two players, the opponent's AI off): arrows and stones in flight, melee hits, death
+    // animations and corpses, burning buildings and rubble, at 0.5x, 1x and 2x.
+    await start('&opponent=standard&ai=off');
+    await page.waitForFunction(() => window.__art?.report()?.complete === true, null, { timeout: 300_000 });
+    const placed = await placeTown(['house', 'house', 'barracks', 'house', 'mill']);
+    console.log('placed', placed.join(','));
+    const field = await page.evaluate(() => {
+      const s = window.__game.state;
+      const tc = s.entities.find((e) => e.kind === 'building' && e.typeId === 'townCenter' && e.owner === 1);
+      const c = { x: tc.tile.tx + 2, y: tc.tile.ty + 2 };
+      const blocked = (x, y, r) => s.entities.some((e) => e.kind !== 'unit' && Math.hypot(e.tile.tx + 0.5 - x, e.tile.ty + 0.5 - y) < r);
+      for (let dist = 12; dist < 45; dist++)
+        for (let a = 0; a < 48; a++) {
+          const x = c.x + Math.cos((a / 48) * Math.PI * 2) * dist;
+          const y = c.y + Math.sin((a / 48) * Math.PI * 2) * dist;
+          if (x < 16 || y < 16 || x > s.map.width - 16 || y > s.map.height - 16) continue;
+          let ok = true;
+          for (let i = -4; i <= 4 && ok; i++) for (let j = -4; j <= 4 && ok; j++) ok = !blocked(x + i, y + j, 1.6);
+          if (ok) return { x, y };
+        }
+      return { x: c.x + 12, y: c.y };
+    });
+    // Blue in the north-west half of the field, red in the south-east, about 7 tiles apart.
+    const army = await page.evaluate((f) => {
+      const g = window.__game;
+      const before = new Set(g.state.entities.map((e) => e.id));
+      const blue = [
+        ['spearman', -1.5, -3], ['spearman', -0.3, -3.4], ['swordsman', 0.9, -3.8], ['swordsman', -2.6, -2.5],
+        ['archer', -2.2, -4.6], ['archer', -1, -5], ['archer', 0.2, -5.4], ['horseman', 2, -4.4], ['siphonarios', -3.4, -3.6],
+        ['trebuchet', -3, -7], ['batteringRam', 1.6, -6.4],
+      ];
+      const red = [
+        ['spearman', -1.5, 3], ['swordsman', -0.3, 3.4], ['swordsman', 0.9, 3.8], ['spearman', -2.6, 2.5],
+        ['archer', -2.2, 4.6], ['archer', -1, 5], ['archer', 0.2, 5.4], ['cataphract', 2, 4.4], ['horseman', -3.4, 3.6], ['lancer', 2.8, 3.2],
+      ];
+      for (const [t, dx, dy] of blue) g.cheat.spawnUnit(t, f.x + dx * 0.7 + dy * 0.7, f.y - dx * 0.7 + dy * 0.7, 1);
+      for (const [t, dx, dy] of red) g.cheat.spawnUnit(t, f.x + dx * 0.7 + dy * 0.7, f.y - dx * 0.7 + dy * 0.7, 2);
+      g.step(1);
+      const ids = g.state.entities.filter((e) => !before.has(e.id) && e.kind === 'unit');
+      return { blue: ids.filter((e) => e.owner === 1).map((e) => e.id), red: ids.filter((e) => e.owner === 2).map((e) => e.id) };
+    }, field);
+    await page.evaluate(([f, ids]) => {
+      const g = window.__game;
+      window.__art.issue({ type: 'attackMove', unitIds: ids, x: f.x + 3, y: f.y + 3, queue: false });
+      g.step(1);
+    }, [field, army.blue]);
+    // Damage the town: a House at 50% (one fire), the Barracks at 25% (large fires), another House destroyed (rubble).
+    await page.evaluate(() => {
+      const g = window.__game;
+      const mine = g.state.entities.filter((e) => e.kind === 'building' && e.owner === 1);
+      const houses = mine.filter((e) => e.typeId === 'house');
+      const barracks = mine.find((e) => e.typeId === 'barracks');
+      if (houses[0]) g.cheat.setHp(houses[0].id, Math.round(houses[0].hp * 0.5));
+      if (barracks) g.cheat.setHp(barracks.id, Math.round(barracks.hp * 0.25));
+      if (houses[1]) g.cheat.setHp(houses[1].id, 0);
+      g.step(1);
+    });
+    // Into the clash: step until arrows fly and the first units have fallen.
+    await page.evaluate(() => {
+      const g = window.__game;
+      for (let i = 0; i < 400; i++) {
+        g.step(1, false);
+        if (g.effects().corpses >= 3 && g.state.projectiles.length >= 2) break;
+      }
+      g.step(1);
+    });
+    console.log('battle effects', JSON.stringify(await page.evaluate(() => window.__game.effects())));
+    for (const z of [1, 0.5, 2]) {
+      await lookAt(field.x, field.y, z);
+      if (z === 1) {
+        // Box-select our army so the HUD shows its portraits and health bars show over the selection.
+        const box = await page.evaluate((ids) => {
+          const g = window.__game;
+          const pts = g.state.entities.filter((e) => ids.includes(e.id)).map((e) => g.worldToScreen(e.pos.x, e.pos.y));
+          const xs = pts.map((p) => p.x);
+          const ys = pts.map((p) => p.y);
+          return { x0: Math.min(...xs) - 20, y0: Math.min(...ys) - 40, x1: Math.max(...xs) + 20, y1: Math.min(Math.max(...ys) + 10, window.innerHeight - 200) };
+        }, army.blue);
+        await page.evaluate(() => window.__game.advanceClock(1000));
+        await page.mouse.move(box.x0, box.y0);
+        await page.mouse.down();
+        await page.mouse.move((box.x0 + box.x1) / 2, (box.y0 + box.y1) / 2, { steps: 4 });
+        await page.mouse.move(box.x1, box.y1, { steps: 4 });
+        await page.mouse.up();
+        await page.mouse.move(640, 70);
+        await page.evaluate(() => window.__game.step(0));
+      }
+      await shot(`battle-${z}x`);
+    }
+    // The town: burning buildings and the rubble.
+    const town = await tcTile();
+    await lookAt(town.x + 2, town.y + 2, 1);
+    await shot('battle-town');
+    // Later: the field after the fight (corpses), then the rubble close up.
+    await page.evaluate(() => {
+      const g = window.__game;
+      for (let i = 0; i < 30; i++) g.step(10, false);
+      g.step(1);
+    });
+    console.log('aftermath effects', JSON.stringify(await page.evaluate(() => window.__game.effects())));
+    await lookAt(field.x, field.y, 1.5);
+    await shot('battle-aftermath');
   }
   if (want('cache')) {
     // Wait for the background pass (it writes the cache), then load again: the art should come from IndexedDB.

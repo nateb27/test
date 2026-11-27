@@ -96,6 +96,7 @@ export class GameInput {
   private readonly cleanup: (() => void)[] = [];
   private readonly cardListeners = new Set<(slot: number) => void>();
   private readonly uiListeners = new Set<(action: UiAction) => void>();
+  private readonly frameListeners = new Set<() => void>();
   private mode: InputMode | null = null;
   private press: { x: number; y: number; shift: boolean; dragging: boolean } | null = null;
   private lastClick: ClickRecord | null = null;
@@ -161,9 +162,19 @@ export class GameInput {
     this.lastAlert = { x, y };
   }
 
-  /** Per-frame, before rendering: drop selected entities that no longer exist. */
+  /** Per-frame, before rendering: drop selected entities that no longer exist, then tell the frame listeners. */
   update(): void {
     this.selection.prune((id) => this.sim.query.entityById(id) !== undefined);
+    for (const l of this.frameListeners) l();
+  }
+
+  /**
+   * Run `listener` once per frame (after the selection is pruned): for state that depends on the world under a
+   * resting pointer, such as the canvas cursor when the hovered enemy dies. Returns an unsubscribe function.
+   */
+  onFrame(listener: () => void): () => void {
+    this.frameListeners.add(listener);
+    return () => this.frameListeners.delete(listener);
   }
 
   /** Right click at a canvas point with the current selection. Returns the commands issued. */
@@ -286,6 +297,7 @@ export class GameInput {
     this.cleanup.length = 0;
     this.cardListeners.clear();
     this.uiListeners.clear();
+    this.frameListeners.clear();
   }
 
   // ------------------------------------------------------------ internals

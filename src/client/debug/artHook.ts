@@ -4,7 +4,7 @@
  * scenes (issue any command as the local player). Never installed in production builds.
  */
 
-import { allSpriteIds } from '../art/catalog';
+import { allEffectSpriteIds, allSpriteIds } from '../art/catalog';
 import type { GameArt } from '../art/select';
 import type { ArtLoadReport } from '../art/rendered/manifest';
 import type { SheetLoadReport } from '../art/sheet/manifest';
@@ -21,6 +21,12 @@ export interface ArtAuditRow {
   minH: number;
   /** Fewest opaque (model) pixels in any of them; -1 when the art cannot tell. */
   minOpaque: number;
+  /** States the asset lists (units: idle, walk, ..., attack, death, corpse). */
+  states: string[];
+  /** Units: frame of `attack` (facing 0) on which the blow lands; null without an attack animation. */
+  hitFrame: number | null;
+  /** Units: whether `death` plays once (`loop: false`); null without a death animation. */
+  deathOnce: boolean | null;
 }
 
 export interface RecolourDiff {
@@ -102,7 +108,7 @@ export function installArtHook(host: AppHost): void {
       const m = art();
       if (m === null) return [];
       const rows: ArtAuditRow[] = [];
-      for (const id of allSpriteIds()) {
+      for (const id of [...allSpriteIds(), ...allEffectSpriteIds()]) {
         const asset = m.teamSprite(id, 0x6a2c91, 0xd4af37);
         const seen = new Set<unknown>();
         let minW = Infinity;
@@ -121,7 +127,18 @@ export function installArtHook(host: AppHost): void {
         if (id.startsWith('unit.')) for (const s of [...UNIT_STATES, ...asset.states] as SpriteState[]) for (let f = 0; f < 8; f++) look(s, f as Facing, 1, 0);
         else if (id.startsWith('building.')) for (const s of STAGES) for (let a = 1; a <= 4; a++) look(s, 0, a, 0);
         else for (let seed = 0; seed < 64; seed++) look('default', 0, 1, seed);
-        rows.push({ id, textures: seen.size, minW, minH, minOpaque: Number.isFinite(minOpaque) ? minOpaque : -1 });
+        const unit = id.startsWith('unit.');
+        const has = (st: string): boolean => (asset.states as readonly string[]).includes(st);
+        rows.push({
+          id,
+          textures: seen.size,
+          minW,
+          minH,
+          minOpaque: Number.isFinite(minOpaque) ? minOpaque : -1,
+          states: [...asset.states],
+          hitFrame: unit && has('attack') ? (asset.animation('attack', 0).hitFrame ?? null) : null,
+          deathOnce: unit && has('death') ? asset.animation('death', 0).loop === false : null,
+        });
       }
       return rows;
     },

@@ -26,6 +26,14 @@ export function worldToScreen(x: number, y: number): ScreenPoint {
   return { x: (x - y) * HALF_W, y: (x + y) * HALF_H };
 }
 
+/** Screen pixels per tile of height above the ground (the rendered art's projection: `HALF_W * sqrt(1.5)`). */
+export const HEIGHT_PX = HALF_W * Math.sqrt(1.5);
+
+/** World (tiles) at height `z` tiles above the ground -> screen (world pixels at 1x). Projectiles in flight. */
+export function worldToScreenZ(x: number, y: number, z: number): ScreenPoint {
+  return { x: (x - y) * HALF_W, y: (x + y) * HALF_H - z * HEIGHT_PX };
+}
+
 /** Screen (world pixels at 1x) -> world (tiles). Exact inverse of worldToScreen. */
 export function screenToWorld(sx: number, sy: number): Vec2 {
   const a = sx / HALF_W; // x - y

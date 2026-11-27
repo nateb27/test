@@ -59,7 +59,12 @@ export function selectedBuilders(
 }
 
 export interface ModeControllerDeps {
-  input: { setMode(mode: InputMode | null): void; readonly selection: { readonly ids: readonly EntityId[] } };
+  input: {
+    setMode(mode: InputMode | null): void;
+    readonly selection: { readonly ids: readonly EntityId[] };
+    /** Per-frame callback (GameInput.onFrame): the cursor is recomputed every frame, not only on pointer moves. */
+    onFrame?(listener: () => void): () => void;
+  };
   sim: Sim;
   renderer: WorldRendererApi;
   commands: CommandSink;
@@ -119,6 +124,10 @@ export function createModeController(deps: ModeControllerDeps): ModeController {
     modeKind: () => active?.kind ?? null,
     ...(typeof selectionStore.subscribe === 'function' ? { onSelection: (l: () => void) => selectionStore.subscribe!(l) } : {}),
   });
+
+  // The world under a resting pointer changes too (the hovered enemy dies, the camera scrolls, the selection is pruned
+  // or replaced by a hotkey): recompute every frame. It only writes the canvas style when the kind changes.
+  const offFrame = deps.input.onFrame?.(() => cursors.refresh());
 
   const enter = <T extends ActiveMode>(mode: T): T => {
     active = mode;
@@ -200,6 +209,7 @@ export function createModeController(deps: ModeControllerDeps): ModeController {
     cursor: () => cursors.current(),
     destroy: () => {
       active = null; // silently: the match is being torn down, nobody listens any more
+      offFrame?.();
       cursors.destroy();
     },
     cancel() {

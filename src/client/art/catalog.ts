@@ -46,6 +46,19 @@ export const TECH_IDS = [
   'ironPicks',
   'timberedShafts',
   'guildCharters',
+  // The 12 military upgrades (PLAN-M2 5.4, WP27 icons).
+  'spathionForging',
+  'strategikonDrill',
+  'paddedKavadion',
+  'lamellarKlibanion',
+  'hornSinewBows',
+  'solenarionGuides',
+  'bambakionCoats',
+  'mailLorikion',
+  'kontarionDrill',
+  'taktikaWedge',
+  'feltHorseBards',
+  'ironHorseBards',
 ] as const;
 
 export const RESOURCE_IDS = ['food', 'wood', 'gold', 'stone'] as const;
@@ -125,6 +138,7 @@ export function parseSpriteId(id: string): ParsedSprite | null {
 
 /** `'known'`: the generator draws it. `'fallback'`: the visible "?" placeholder is used. */
 export function classifySprite(id: string): 'known' | 'fallback' {
+  if (isEffectSprite(id)) return 'known';
   const p = parseSpriteId(id);
   return p !== null && p.key !== null ? 'known' : 'fallback';
 }
@@ -187,6 +201,44 @@ export function allSpriteIds(): string[] {
     ...BUILDING_IDS.map((k) => `building.${k}`),
     ...NODE_IDS.map((k) => `node.${k}`),
   ];
+}
+
+/**
+ * Effect sprites of PLAN-M2 3.8 (WP27): projectiles, one-shot hit effects, looping building damage overlays and the
+ * rubble of destroyed buildings by footprint. They are not entity sprites (`parseSpriteId` does not know them); the
+ * procedural art draws all of them and the rendered art claims the rubble.
+ */
+export const EFFECT_SPRITE_IDS = [
+  'projectile.arrow',
+  'projectile.stone',
+  'projectile.fire',
+  'fx.hit',
+  'fx.dust',
+  'fx.splash',
+  'fx.fireSmall',
+  'fx.fireLarge',
+  'fx.smoke',
+  'rubble.2',
+  'rubble.3',
+  'rubble.4',
+] as const;
+
+export type EffectSpriteId = (typeof EFFECT_SPRITE_IDS)[number];
+
+const EFFECT_SET: ReadonlySet<string> = new Set(EFFECT_SPRITE_IDS);
+
+export function isEffectSprite(id: string): id is EffectSpriteId {
+  return EFFECT_SET.has(id);
+}
+
+/** Rubble sprite for a destroyed building's footprint (sizes outside 2..4 use the nearest). */
+export function rubbleSpriteId(size: number): EffectSpriteId {
+  return size <= 2 ? 'rubble.2' : size >= 4 ? 'rubble.4' : 'rubble.3';
+}
+
+/** Every effect sprite id, in display order. */
+export function allEffectSpriteIds(): string[] {
+  return [...EFFECT_SPRITE_IDS];
 }
 
 /** Every icon id the generator draws, in display order. */

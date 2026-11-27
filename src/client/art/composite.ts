@@ -48,6 +48,12 @@ export function createCompositeManifest(providers: readonly ManifestProvider[], 
       }
       return fallback.terrain?.() ?? null;
     },
+    onUpdate(listener: () => void): () => void {
+      const offs = [...providers.map((p) => p.manifest), fallback].map((m) => m.onUpdate?.(listener) ?? ((): void => {}));
+      return () => {
+        for (const off of offs) off();
+      };
+    },
     destroy(): void {
       for (const p of providers) p.manifest.destroy();
       fallback.destroy();

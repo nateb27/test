@@ -26,12 +26,31 @@ test('rendered art: the match loads without console errors and every sprite reso
   await shot(page, 'art-01-rendered-start');
   await waitForAllArt(page);
   const rows = await page.evaluate(() => window.__art!.audit());
-  expect(rows.length).toBe(25);
-  for (const r of rows) {
+  // 25 entity sprites and the 12 effect sprites of PLAN-M2 3.8 (WP27).
+  expect(rows.length).toBe(37);
+  const isEffect = (id: string): boolean => /^(projectile|fx|rubble)\./.test(id);
+  for (const r of rows.filter((x) => !isEffect(x.id))) {
     expect(r.textures, r.id).toBeGreaterThan(0);
     expect(r.minW, r.id).toBeGreaterThan(4);
     expect(r.minH, r.id).toBeGreaterThan(4);
     expect(r.minOpaque, r.id).toBeGreaterThan(20);
+  }
+  // Effects: every id resolves to real textures (projectiles are small; rubble is voxel-rendered, two variants).
+  for (const r of rows.filter((x) => isEffect(x.id))) {
+    expect(r.textures, r.id).toBeGreaterThan(0);
+    expect(r.minW, r.id).toBeGreaterThan(3);
+    expect(r.minH, r.id).toBeGreaterThan(3);
+  }
+  for (const size of [2, 3, 4]) {
+    const r = rows.find((x) => x.id === `rubble.${size}`)!;
+    expect(r.textures, r.id).toBe(2);
+    expect(r.minOpaque, r.id).toBeGreaterThan(200);
+  }
+  // Every unit has an attack (with its hit frame) and a death that plays once, in all 8 facings.
+  for (const r of rows.filter((x) => x.id.startsWith('unit.'))) {
+    expect(r.states, r.id).toEqual(expect.arrayContaining(['attack', 'death', 'corpse']));
+    expect(r.hitFrame, r.id).toBeGreaterThan(0);
+    expect(r.deathOnce, r.id).toBe(true);
   }
   // Units: 8 facings x 4 states; trees come in several variants.
   expect(rows.find((r) => r.id === 'unit.villager')!.textures).toBeGreaterThanOrEqual(56);

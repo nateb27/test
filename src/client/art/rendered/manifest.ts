@@ -29,7 +29,8 @@ import { DEFAULT_PRIMARY, DEFAULT_TEAM } from '../palette';
 import type { TeamAssetManifest } from '../procedural';
 import { buildAtlas, type Atlas, type AtlasEntry } from './atlas';
 import { cacheKey, loadCached, saveCached } from './cache';
-import { allJobs, type Job, BERRY_VARIANTS, buildingSpriteName, DEPOSIT_VARIANTS, unitSpriteName, unitStateSource, UNIT_STATES, buildingFrame, isEssential, type NamedSprite } from './jobs';
+import { notifyArtUpdate } from '../updates';
+import { allJobs, type Job, BERRY_VARIANTS, RUBBLE_VARIANTS, rubbleSpriteName, buildingSpriteName, DEPOSIT_VARIANTS, unitSpriteName, unitStateSource, UNIT_STATES, buildingFrame, isEssential, type NamedSprite } from './jobs';
 import { lookFor } from './models/looks';
 import { TREE_VARIANTS } from './models/nature';
 import { PALETTE_RGB } from './paletteData';
@@ -103,6 +104,8 @@ const ICON_THEMES = { building: { top: '#6f6a4c', bottom: '#2f2c1f' }, node: { t
 const FRAME_MS: Readonly<Record<UnitAnimState, number>> = { idle: 700, walk: 220, work: 300, carry: 240 };
 const STAGES: readonly BuildingStage[] = ['foundation', 'scaffold', 'complete'];
 
+const isRubble = (id: string): boolean => id === 'rubble.2' || id === 'rubble.3' || id === 'rubble.4';
+
 function seedHash(n: number): number {
   let h = Math.imul(n | 0, 0x9e3779b1);
   h ^= h >>> 15;
@@ -124,6 +127,7 @@ export function createRenderedManifest(options: RenderedManifestOptions = {}): R
   const surfaces = new Map<string, Surface | null>();
   const owned: Texture[] = [];
   const spriteAlias = new Map<string, string>();
+  const updateListeners = new Set<() => void>();
 
   const reg = options.registry;
   if (reg !== undefined) {
@@ -254,8 +258,47 @@ export function createRenderedManifest(options: RenderedManifestOptions = {}): R
   }
 
   function isKnown(id: string): boolean {
+    if (isRubble(id)) return true;
     const p = parseSpriteId(spriteAlias.get(id) ?? id);
     return p !== null && p.key !== null;
+  }
+
+  /** The rubble of destroyed buildings (WP27): voxel-rendered in the background pass; the procedural rubble until then. */
+  function rubbleAsset(id: string): SpriteAsset {
+    const fp = Number(id.slice('rubble.'.length));
+    let real: SpriteAsset | null = null;
+    const current = (): SpriteAsset | null => {
+      if (real === null && byName.has(rubbleSpriteName(fp, 0))) {
+        const anims: SpriteAnimation[] = [];
+        for (let v = 0; v < RUBBLE_VARIANTS; v++) {
+          const name = rubbleSpriteName(fp, v);
+          anims.push(single(tex(name, DEFAULT_PRIMARY), byName.get(name)?.top ?? 0));
+        }
+        const probe = byName.get(rubbleSpriteName(fp, 0))!;
+        real = {
+          id,
+          anchor: { x: probe.ax / probe.fw, y: probe.ay / probe.fh },
+          states: ['default'],
+          variants: RUBBLE_VARIANTS,
+          animation: (_s, _f, ctx) => anims[ctx?.seed === undefined ? 0 : seedHash(ctx.seed) % RUBBLE_VARIANTS]!,
+        };
+      }
+      return real ?? options.fallback?.sprite(id) ?? null;
+    };
+    const blank: SpriteAnimation = { frames: [Texture.EMPTY], frameMs: 0, mirrorX: false };
+    return {
+      id,
+      get anchor() {
+        return current()?.anchor ?? { x: 0.5, y: 0.5 };
+      },
+      get states() {
+        return current()?.states ?? ['default'];
+      },
+      get variants() {
+        return current()?.variants;
+      },
+      animation: (state, facing, ctx) => current()?.animation(state, facing, ctx) ?? blank,
+    };
   }
 
   /** Known and rendered (some sprites arrive after load() from the background pass). */
@@ -286,6 +329,14 @@ export function createRenderedManifest(options: RenderedManifestOptions = {}): R
    * rendered sprites as soon as they arrive (the anchor follows, it is read again when the texture changes).
    */
   function teamSprite(id: SpriteId, primary: number, secondary: number): SpriteAsset {
+    if (isRubble(id)) {
+      let a = assets.get(id);
+      if (a === undefined) {
+        a = rubbleAsset(id);
+        assets.set(id, a);
+      }
+      return a;
+    }
     const resolved = spriteAlias.get(id) ?? id;
     const p = parseSpriteId(resolved);
     if (p === null || p.key === null) throw new Error(`rendered art has no sprite ${id}`);
@@ -470,6 +521,9 @@ export function createRenderedManifest(options: RenderedManifestOptions = {}): R
         r.pages = atlas.pages.length;
         r.mainThreadJobs += two.report.mainThreadJobs;
         options.onReport?.(r);
+        // Icons drawn while their sprite was still rendering were not cached; readers re-read them now.
+        for (const l of [...updateListeners]) l();
+        notifyArtUpdate();
         if (options.noCache !== true) void saveCached({ key, atlas: { pages: atlas.pages, entries: atlas.entries.map((e) => ({ ...e })) }, terrain: terrainTex });
       });
     },
@@ -485,7 +539,12 @@ export function createRenderedManifest(options: RenderedManifestOptions = {}): R
       return e.url;
     },
     terrain: () => terrainArt,
+    onUpdate(listener) {
+      updateListeners.add(listener);
+      return () => updateListeners.delete(listener);
+    },
     destroy(): void {
+      updateListeners.clear();
       for (const t of owned) t.destroy(false);
       for (const list of pageTextures.values()) for (const t of list) t.destroy(true);
       owned.length = 0;

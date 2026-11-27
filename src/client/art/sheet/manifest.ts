@@ -49,6 +49,31 @@ interface Loaded {
   pages: IndexedPng[];
 }
 
+/**
+ * Frame of each sheet's `attack` on which the blow lands or the missile leaves, read off the Blender rigs
+ * (`scripts/art/pipeline/*_anims.py`, frame i at t = i/8): the spear and lance lunge, sword and mace strike, javelin
+ * throw, bow loose and ram swing peak at t 0.58-0.68 (frame 5), the axe at t 0.55 (frame 4), the trebuchet's throw is
+ * frame 4 and the siphon's stream reaches full flow on frame 3. A sheet's own `hit` wins.
+ */
+const SHEET_HIT_FRAME: Readonly<Record<string, number>> = {
+  villager: 4,
+  spearman: 5,
+  swordsman: 5,
+  archer: 5,
+  siphonarios: 3,
+  horseman: 5,
+  lancer: 5,
+  cataphract: 5,
+  batteringRam: 5,
+  trebuchet: 4,
+};
+
+/** The hit frame of a sheet's `attack` (clamped into its frames). */
+export function sheetHitFrame(name: string, state: SheetState): number {
+  const f = state.hit ?? SHEET_HIT_FRAME[name] ?? Math.floor(state.frames / 2);
+  return Math.max(0, Math.min(state.frames - 1, f));
+}
+
 function seedHash(n: number): number {
   let h = Math.imul(n | 0, 0x9e3779b1);
   h ^= h >>> 15;
@@ -161,6 +186,7 @@ export function createSheetManifest(options: SheetManifestOptions = {}): SheetMa
       bodies,
       loop: state.loop,
       ...(state.cycle !== undefined ? { cycle: state.cycle } : {}),
+      ...(st === 'attack' ? { hitFrame: sheetHitFrame(name, state) } : {}),
     };
   }
 
@@ -227,12 +253,26 @@ export function createSheetManifest(options: SheetManifestOptions = {}): SheetMa
     for (let r = 0; r < h; r++) data.set(all.subarray(((y + r) * png.width + x) * 4, ((y + r) * png.width + x + w) * 4), r * w * 4);
     // Keep only opaque pixels (drop the soft outline) for a clean icon.
     for (let i = 3; i < data.length; i += 4) if (data[i]! < 255) data[i] = 0;
+    // Foot units are tall and narrow: the portrait is their head and upper body (the top 60% of the figure), so it
+    // fills the frame. Riders and siege engines keep the whole figure.
+    let top = h;
+    let bottom = -1;
+    for (let r = 0; r < h; r++)
+      for (let c = 0; c < w; c++)
+        if (data[(r * w + c) * 4 + 3]! > 0) {
+          if (r < top) top = r;
+          bottom = r;
+          break;
+        }
+    const bust = iconFacing(name) === 1 && bottom > top;
+    const ch = bust ? Math.max(1, Math.round((bottom - top + 1) * 0.6)) : h;
+    const oy = bust ? top : 0;
     const canvas = document.createElement('canvas');
     canvas.width = w;
-    canvas.height = h;
+    canvas.height = ch;
     const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
-    ctx.putImageData(new ImageData(data, w, h), 0, 0);
-    return { canvas, ctx, w: w / SS, h: h / SS };
+    ctx.putImageData(new ImageData(data.slice(oy * w * 4, (oy + ch) * w * 4), w, ch), 0, 0);
+    return { canvas, ctx, w: w / SS, h: ch / SS };
   }
 
   function iconEntry(id: IconId): { surface: Surface; texture: Texture; url: string | null } {
@@ -244,7 +284,8 @@ export function createSheetManifest(options: SheetManifestOptions = {}): SheetMa
       building: () => null,
       node: () => null,
     };
-    const surface = drawIcon(spec, DEFAULT_TEAM, sources);
+    // Sheet portraits may be scaled up to fill the frame, with crisp pixels.
+    const surface = drawIcon(spec, DEFAULT_TEAM, sources, { unitMaxScale: 4, crisp: true });
     const texture = new Texture({ source: new CanvasSource({ resource: surface.canvas, resolution: SS }) });
     owned.push(texture);
     const e = { surface, texture, url: null as string | null };

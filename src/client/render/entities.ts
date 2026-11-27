@@ -5,7 +5,7 @@
  * fall back to the art catalogue when a definition is missing.
  */
 
-import { Container, Sprite, type Texture } from 'pixi.js';
+import { CanvasSource, Container, Rectangle, Sprite, Texture } from 'pixi.js';
 import type { DataRegistry } from '../../data/schema';
 import { isUnitStateKind, resolveUnitState as resolveStateIn, type AssetManifest, type BuildingStage, type SpriteAnimation, type SpriteAsset, type SpriteState, type UnitAnimState } from '../art/manifest';
 import type { TeamAssetManifest } from '../art/procedural';
@@ -23,6 +23,7 @@ import {
 } from '../../sim/types';
 import { perf } from '../debug/perf';
 import type { WorldPxRect } from './camera';
+import { attackFrame, attackPhase, ATTACK_ANIM_TAIL_TICKS, flashAlpha, windupTicksOf } from './effects/logic';
 import { compareDepth, depthKey, footprintCenter } from './iso';
 
 type RUnit = Extract<ReadonlyEntity, { kind: 'unit' }>;
@@ -47,6 +48,7 @@ export function unitAnimState(u: DeepReadonly<RUnit>): UnitAnimState {
   if (o !== null) {
     if (o.type === 'gather' && o.phase === 'harvesting') return 'work';
     if ((o.type === 'build' || o.type === 'assist') && o.phase === 'building') return 'work';
+    if (o.type === 'repair' && o.phase === 'repairing') return 'work';
   }
   return 'idle';
 }
@@ -65,7 +67,7 @@ export function unitAnimDetail(u: DeepReadonly<RUnit>, targetType?: (id: EntityI
   if (base === 'work') {
     const o = u.currentOrder;
     if (o === null) return base;
-    if (o.type === 'build' || o.type === 'assist') return 'build';
+    if (o.type === 'build' || o.type === 'assist' || o.type === 'repair') return 'build';
     if (o.type === 'gather') {
       if (o.resource === 'wood') return 'chop';
       if (o.resource === 'gold' || o.resource === 'stone') return 'mine';
@@ -250,6 +252,8 @@ interface Entry {
   mirror: boolean;
   /** Ground shadow sprite (art with a separate shadow layer), on `EntityLayer.shadows`. */
   shadow: Sprite | null;
+  /** White silhouette drawn over a unit for the 2 ticks after it was hit. */
+  flash: Sprite | null;
   /** Units: distance walked (tiles) and the last drawn position, for distance-driven walk cycles. */
   dist: number;
   lastX: number;
@@ -273,7 +277,7 @@ function newEntry(registry: DataRegistry | null, e: ReadonlyEntity): Entry {
     top: null,
     owner: e.owner,
   };
-  return { e, drawn, sx, sy, z: 0, sprite: null, asset: null, gen: 0, tex: null, mirror: false, shadow: null, dist: 0, lastX: a.x, lastY: a.y };
+  return { e, drawn, sx, sy, z: 0, sprite: null, asset: null, gen: 0, tex: null, mirror: false, shadow: null, flash: null, dist: 0, lastX: a.x, lastY: a.y };
 }
 
 /** `compareDepth` on entries. */
@@ -309,6 +313,10 @@ export class EntityLayer {
   private visibleUnits: Entry[] = [];
   /** Players of the state being drawn (owner ages pick building looks). */
   private players: ReadonlyGameState['players'] = [];
+  /** Tick and alpha of the frame being drawn (attack animations and hit flashes follow the sim's ticks). */
+  private tick = 0;
+  private alpha = 0;
+  private readonly windups = new Map<string, number>();
 
   constructor(
     private readonly manifest: AssetManifest,
@@ -407,6 +415,8 @@ export class EntityLayer {
     const a = Math.min(1, Math.max(0, alpha));
     const team = teamLookup(state, this.registry);
     this.players = state.players;
+    this.tick = state.tick;
+    this.alpha = a;
     this.entityIndex = state.entities;
 
     this.syncStatics(state);
@@ -490,9 +500,11 @@ export class EntityLayer {
       if (entry.gen === gen) continue;
       if (entry.sprite !== null) entry.sprite.visible = false;
       if (entry.shadow !== null) entry.shadow.visible = false;
+      if (entry.flash !== null) entry.flash.visible = false;
       if (!entityExists(state, id)) {
         entry.sprite?.destroy();
         entry.shadow?.destroy();
+        entry.flash?.destroy();
         this.previews.delete(id);
         this.units.delete(id);
       }
@@ -509,15 +521,34 @@ export class EntityLayer {
     const e = entry.e;
     let animState: SpriteState = 'default';
     let preview: Preview | undefined;
+    /** Attack in progress (wind-up or tail) on art without an attack animation: lunge along the facing, px. */
+    let lunge = 0;
+    let attacking = false;
     if (e.kind === 'unit') {
       preview = this.previews.get(e.id);
       animState = resolveUnitState(asset, preview?.state ?? unitAnimDetail(e, (id) => this.typeOf(id)));
+      if (preview === undefined) {
+        // PLAN-M2 7.2: `attack` while winding up and for ATTACK_ANIM_TAIL_TICKS after the release, over any other state.
+        const wt = this.windupTicks(e.typeId);
+        const phase = attackPhase(e.combat, this.tick, this.alpha, wt);
+        if (phase !== null) {
+          if (resolveUnitState(asset, 'attack') === 'attack') {
+            animState = 'attack';
+            attacking = true;
+          } else lunge = 3 * Math.sin(Math.PI * Math.min(1, phase.elapsed / (wt + ATTACK_ANIM_TAIL_TICKS)));
+        }
+      }
     } else if (e.kind === 'building') animState = buildingStage(e);
     let facing: Facing = e.kind === 'unit' ? e.facing : 0;
     if (e.kind === 'unit' && isUnitStateKind(animState, 'work') && preview === undefined) facing = this.workFacing(e) ?? facing;
     const anim: SpriteAnimation = asset.animation(animState, facing, { age: this.players[e.owner]?.age ?? 1, seed: e.id });
     if (preview !== undefined && preview.start === null) preview.start = nowMs;
-    const frameIdx = animFrame(anim, nowMs + e.id * 137, e.kind === 'unit' ? entry.dist + e.id * 0.37 : null, preview !== undefined ? nowMs - (preview.start ?? nowMs) : null);
+    let frameIdx: number;
+    if (attacking && e.kind === 'unit') {
+      // Frames 0..hitFrame over the wind-up (the blow frame on the release tick), the rest over the tail.
+      const n = anim.frames.length;
+      frameIdx = attackFrame(e.combat, this.tick, this.alpha, this.windupTicks(e.typeId), n, anim.hitFrame ?? Math.floor(n / 2)) ?? 0;
+    } else frameIdx = animFrame(anim, nowMs + e.id * 137, e.kind === 'unit' ? entry.dist + e.id * 0.37 : null, preview !== undefined ? nowMs - (preview.start ?? nowMs) : null);
     const tex = anim.frames[frameIdx]!;
     this.showShadow(entry, anim, frameIdx, asset);
     const d = entry.drawn;
@@ -531,7 +562,10 @@ export class EntityLayer {
       const mirror = e.kind === 'node' ? asset.variants === undefined && (e.id & 1) === 1 : anim.mirrorX;
       entry.mirror = mirror;
       spr.scale.x = mirror ? -1 : 1;
-      spr.position.set(entry.sx, entry.sy);
+      if (lunge !== 0 && e.kind === 'unit') {
+        const f = FACING_SCREEN[e.facing & 7]!;
+        spr.position.set(entry.sx + f[0] * lunge, entry.sy + f[1] * lunge);
+      } else spr.position.set(entry.sx, entry.sy);
       const w = tex.width;
       const h = tex.height;
       const b = d.bounds;
@@ -568,6 +602,50 @@ export class EntityLayer {
     }
     spr.zIndex = entry.z;
     spr.visible = true;
+    if (isUnit) this.showFlash(entry, e.kind === 'unit' ? flashAlpha(e.lastDamagedTick, this.tick, this.alpha) : 0);
+  }
+
+  /** The white hit flash over a unit (PLAN-M2 7.2): its frame's silhouette at `alpha` (0 hides it). */
+  private showFlash(entry: Entry, alpha: number): void {
+    const spr = entry.sprite;
+    const white = alpha > 0 && spr !== null && entry.tex !== null ? whiteOf(entry.tex) : null;
+    if (white === null || spr === null) {
+      if (entry.flash !== null) entry.flash.visible = false;
+      return;
+    }
+    if (entry.flash === null) {
+      entry.flash = new Sprite();
+      this.container.addChild(entry.flash);
+    }
+    const f = entry.flash;
+    if (f.texture !== white) f.texture = white;
+    f.anchor.copyFrom(spr.anchor);
+    f.position.copyFrom(spr.position);
+    f.scale.copyFrom(spr.scale);
+    f.alpha = alpha;
+    f.zIndex = entry.z + 1 / 4096;
+    f.visible = true;
+  }
+
+  /** The sim's wind-up in ticks for a unit type (from the data; upgrades never change it). */
+  private windupTicks(typeId: string): number {
+    let w = this.windups.get(typeId);
+    if (w === undefined) {
+      const def = this.registry?.def(typeId);
+      w = def !== undefined && def.kind === 'unit' ? windupTicksOf(def.combat.windup) : 10;
+      this.windups.set(typeId, w);
+    }
+    return w;
+  }
+
+  /** Visible buildings and nodes of the last frame in draw order: entity, anchor (world px), art top (or null), layer. */
+  forEachVisibleStatic(cb: (e: ReadonlyEntity, sx: number, sy: number, top: number | null, z: number) => void): void {
+    for (const entry of this.visibleStatics) cb(entry.e, entry.sx, entry.sy, entry.drawn.top, entry.z);
+  }
+
+  /** Footprint side of a building or node (registry, then the art catalogue). */
+  footprint(e: ReadonlyEntity): number {
+    return this.staticById.get(e.id)?.drawn.size ?? footprintOf(this.registry, e);
   }
 
   /** An entity by id (binary search: `entities` is sorted by id). */
@@ -618,6 +696,7 @@ export class EntityLayer {
   }
 
   destroy(): void {
+    for (const entry of this.units.values()) entry.flash?.destroy();
     this.previews.clear();
     this.statics = [];
     this.staticById.clear();
@@ -628,6 +707,60 @@ export class EntityLayer {
     this.visibleUnits = [];
     this.staticSource = null;
   }
+}
+
+/** Screen direction (world px per unit) of each facing, for the attack lunge of art without an attack animation. */
+const FACING_SCREEN: readonly [number, number][] = [
+  [0.894, 0.447],
+  [0, 1],
+  [-0.894, 0.447],
+  [-1, 0],
+  [-0.894, -0.447],
+  [0, -1],
+  [0.894, -0.447],
+  [1, 0],
+];
+
+const whites = new WeakMap<Texture, Texture | null>();
+
+/**
+ * A white silhouette of a texture's frame (alpha kept), for the hit flash; null when the texture's pixels cannot be
+ * read (no DOM, a source that is not a canvas or image). Cached per texture: one small canvas per frame that flashed.
+ */
+export function whiteOf(tex: Texture): Texture | null {
+  const hit = whites.get(tex);
+  if (hit !== undefined) return hit;
+  let out: Texture | null = null;
+  try {
+    const src = tex.source as unknown as { resource?: CanvasImageSource | null; resolution?: number };
+    const res = src.resource;
+    if (typeof document !== 'undefined' && res !== undefined && res !== null && tex !== Texture.EMPTY) {
+      const k = src.resolution ?? 1;
+      const fw = tex.frame.width;
+      const fh = tex.frame.height;
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(fw * k));
+      canvas.height = Math.max(1, Math.round(fh * k));
+      const ctx = canvas.getContext('2d');
+      if (ctx !== null) {
+        ctx.drawImage(res, Math.round(tex.frame.x * k), Math.round(tex.frame.y * k), canvas.width, canvas.height, 0, 0, canvas.width, canvas.height);
+        ctx.globalCompositeOperation = 'source-in';
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        out = new Texture({
+          source: new CanvasSource({ resource: canvas, resolution: k }),
+          frame: new Rectangle(0, 0, fw, fh),
+          orig: tex.orig.clone(),
+          ...(tex.trim !== undefined && tex.trim !== null ? { trim: tex.trim.clone() } : {}),
+          label: `${tex.label ?? 'texture'}|flash`,
+        });
+      }
+    }
+  } catch {
+    out = null;
+  }
+  whites.set(tex, out);
+  return out;
 }
 
 function entityExists(state: ReadonlyGameState, id: EntityId): boolean {

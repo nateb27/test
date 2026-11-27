@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { DataRegistry } from '../../../data/schema';
+import { artVersion, onArtUpdate } from '../../art/updates';
 import type { Sim } from '../../../sim/types';
 import type { SaveStorage } from '../../platform';
 import type { HudController } from '../hudController';
@@ -11,6 +12,16 @@ import { Banner, Toasts } from './Notifications';
 import { SelectionPanel } from './SelectionPanel';
 import { TopBar } from './TopBar';
 import '../hud.css';
+
+/** The art version (`art/updates.ts`): changes when sprites or icons arrive after loading. */
+export function useArtVersion(): number {
+  const [v, setV] = useState(artVersion());
+  useEffect(() => {
+    setV(artVersion());
+    return onArtUpdate(setV);
+  }, []);
+  return v;
+}
 
 /** Subscribe a component to the controller's view-model. */
 export function useViewModel(controller: Pick<HudController, 'vm' | 'subscribe'>): HudViewModel {
@@ -40,6 +51,10 @@ export interface HudProps {
  */
 export function Hud({ controller, iconUrl, storage, sim, registry, onRestart, onQuit, onLoaded }: HudProps) {
   const vm = useViewModel(controller);
+  // A new resolver identity when art arrives late (the rendered art's background pass): every icon re-reads its URL,
+  // so a portrait drawn before its sprite existed (a blank frame) is replaced by the real one.
+  const art = useArtVersion();
+  const resolveIcon = useMemo<IconResolver>(() => (id) => iconUrl(id), [iconUrl, art]);
   // The controller keeps the parts of the view-model that did not change as the same objects, so these
   // elements are rebuilt (and Preact skips diffing them) only when their own part changed.
   const topBar = useMemo(() => <TopBar vm={vm.topBar} actions={controller} />, [vm.topBar, controller]);
@@ -48,7 +63,7 @@ export function Hud({ controller, iconUrl, storage, sim, registry, onRestart, on
   const selection = useMemo(() => <SelectionPanel vm={vm.selection} actions={controller} />, [vm.selection, controller]);
   const card = useMemo(() => <CommandCard vm={vm.commandCard} actions={controller} registry={registry} />, [vm.commandCard, controller, registry]);
   return (
-    <IconContext.Provider value={iconUrl}>
+    <IconContext.Provider value={resolveIcon}>
       <div class="hud ui-root" data-testid="hud">
         {topBar}
         {toasts}

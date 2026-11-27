@@ -20,6 +20,8 @@ export interface SheetState {
   readonly loop: boolean;
   /** Locomotion: ground distance in tiles covered by one loop (frames advance with distance travelled). */
   readonly cycle?: number;
+  /** `attack`: frame on which the blow lands or the shot leaves (`SpriteAnimation.hitFrame`); default per sheet. */
+  readonly hit?: number;
   /** facings * frames entries, facing-major (index = facing * frames + frame). */
   readonly f: readonly SheetFrame[];
 }

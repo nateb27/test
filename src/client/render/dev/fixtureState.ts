@@ -11,6 +11,8 @@ import type {
   Facing,
   GameState,
   PlayerState,
+  Projectile,
+  ProjectileKind,
   ResourceNodeEntity,
   UnitEntity,
 } from '../../../sim/types';
@@ -123,6 +125,11 @@ export function makeBuilding(id: number, owner: number, typeId: string, tx: numb
     repairAccumulator: 0,
     repairCostAccumulator: { food: 0, wood: 0, gold: 0, stone: 0 },
   };
+}
+
+/** A projectile in flight (WP27 fixtures): `ticksLeft` of `flightTicks` remaining, from player 1's entity 1 at entity 2. */
+export function makeProjectile(id: number, kind: ProjectileKind, from: { x: number; y: number }, to: { x: number; y: number }, flightTicks: number, ticksLeft: number): Projectile {
+  return { id, kind, owner: 1, sourceId: 1, sourceType: kind === 'stone' ? 'trebuchet' : kind === 'fire' ? 'siphonarios' : 'archer', targetId: 2, from: { ...from }, to: { ...to }, flightTicks, ticksLeft, damage: 5 };
 }
 
 export function makeNode(id: number, typeId: string, tx: number, ty: number, amount = 100): ResourceNodeEntity {

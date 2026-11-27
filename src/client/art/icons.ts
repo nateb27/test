@@ -18,6 +18,48 @@ const TECH_GLYPH: Readonly<Record<string, GlyphName>> = {
   guildCharters: 'scroll',
 };
 
+/**
+ * The military upgrades (PLAN-M2 5.4): the line's glyph (infantry swords, archers' bow, cavalry horse), a badge for
+ * what improves (a blade for attack, a shield for armour) and the level (I, II).
+ */
+const MILITARY_TECH: Readonly<Record<string, { glyph: GlyphName; kind: 'attack' | 'armor'; level: 1 | 2 }>> = {
+  spathionForging: { glyph: 'swords', kind: 'attack', level: 1 },
+  strategikonDrill: { glyph: 'swords', kind: 'attack', level: 2 },
+  paddedKavadion: { glyph: 'swords', kind: 'armor', level: 1 },
+  lamellarKlibanion: { glyph: 'swords', kind: 'armor', level: 2 },
+  hornSinewBows: { glyph: 'bow', kind: 'attack', level: 1 },
+  solenarionGuides: { glyph: 'bow', kind: 'attack', level: 2 },
+  bambakionCoats: { glyph: 'bow', kind: 'armor', level: 1 },
+  mailLorikion: { glyph: 'bow', kind: 'armor', level: 2 },
+  kontarionDrill: { glyph: 'horse', kind: 'attack', level: 1 },
+  taktikaWedge: { glyph: 'horse', kind: 'attack', level: 2 },
+  feltHorseBards: { glyph: 'horse', kind: 'armor', level: 1 },
+  ironHorseBards: { glyph: 'horse', kind: 'armor', level: 2 },
+};
+
+/** The badge of a military upgrade, bottom right: a raised blade (attack) or a shield (armour), and its level. */
+function militaryBadge(ctx: Ctx, kind: 'attack' | 'armor', level: number, team: TeamColors): void {
+  const cx = 46;
+  const cy = 44;
+  if (kind === 'armor') {
+    poly(ctx, [{ x: cx - 9, y: cy - 10 }, { x: cx + 9, y: cy - 10 }, { x: cx + 9, y: cy }, { x: cx, y: cy + 10 }, { x: cx - 9, y: cy }], team.primary, OUTLINE, 2);
+    line(ctx, { x: cx, y: cy - 8 }, { x: cx, y: cy + 7 }, team.secondary, 2);
+  } else {
+    poly(ctx, [{ x: cx, y: cy - 13 }, { x: cx + 4, y: cy - 6 }, { x: cx + 4, y: cy + 4 }, { x: cx - 4, y: cy + 4 }, { x: cx - 4, y: cy - 6 }], C.steel, OUTLINE, 1.8);
+    line(ctx, { x: cx - 8, y: cy + 5 }, { x: cx + 8, y: cy + 5 }, team.secondary, 3);
+    line(ctx, { x: cx, y: cy + 6 }, { x: cx, y: cy + 11 }, C.wood, 3);
+  }
+  ctx.fillStyle = team.primaryDark;
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 3;
+  ctx.font = 'bold 15px serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  const t = ROMAN[level - 1]!;
+  ctx.strokeText(t, 16, 57);
+  ctx.fillText(t, 16, 57);
+}
+
 const RESOURCE_GLYPH: Readonly<Record<string, GlyphName>> = {
   food: 'apple',
   wood: 'log',
@@ -36,14 +78,17 @@ function frame(ctx: Ctx, theme: Theme): void {
   rrect(ctx, 3.5, 3.5, ICON_SIZE - 7, ICON_SIZE - 7, 7, null, theme.border, 2);
 }
 
-/** Draw a sprite surface (cropped to its content) centred in the icon. */
-function blit(ctx: Ctx, src: Surface, pad = 7): void {
+/** Draw a sprite surface (cropped to its content) centred in the icon, scaled up by at most `maxScale`. */
+function blit(ctx: Ctx, src: Surface, pad = 7, maxScale = 1.6, crisp = false): void {
   const b = contentBounds(src);
   const room = ICON_SIZE - pad * 2;
-  const k = Math.min(room / b.w, room / b.h, 1.6);
+  const k = Math.min(room / b.w, room / b.h, maxScale);
   const w = b.w * k;
   const h = b.h * k;
+  const smooth = ctx.imageSmoothingEnabled;
+  if (crisp) ctx.imageSmoothingEnabled = false;
   ctx.drawImage(src.canvas, b.x * SS, b.y * SS, b.w * SS, b.h * SS, (ICON_SIZE - w) / 2, (ICON_SIZE - h) / 2 + 1, w, h);
+  ctx.imageSmoothingEnabled = smooth;
 }
 
 const ROMAN = ['I', 'II', 'III', 'IV'];
@@ -58,6 +103,10 @@ export interface IconSources {
 export interface IconThemes {
   building?: { top: string; bottom: string };
   node?: { top: string; bottom: string };
+  /** Largest scale-up of a unit portrait (default 1.6; pre-rendered portraits are small and may fill the frame). */
+  unitMaxScale?: number;
+  /** Scale portraits with nearest-neighbour sampling (pixel art). */
+  crisp?: boolean;
 }
 
 /** Draw an icon for a resolved spec; `null` spec draws the fallback "?" tile. */
@@ -77,7 +126,7 @@ export function drawIcon(spec: IconSpec | null, team: TeamColors, src: IconSourc
     case 'unit': {
       frame(ctx, { top: team.primaryLight, bottom: team.primaryDark, border: team.secondary });
       const u = src.unit(spec.key);
-      if (u !== null) blit(ctx, u, 6);
+      if (u !== null) blit(ctx, u, 6, themes.unitMaxScale ?? 1.6, themes.crisp === true);
       break;
     }
     case 'building': {
@@ -93,6 +142,13 @@ export function drawIcon(spec: IconSpec | null, team: TeamColors, src: IconSourc
       break;
     }
     case 'tech': {
+      const mil = MILITARY_TECH[spec.key];
+      if (mil !== undefined) {
+        frame(ctx, { top: '#e9dcc0', bottom: '#a8865a', border: team.primary });
+        drawGlyph(ctx, mil.glyph, 27, 27, 17, { ink: team.primaryDark, accent: team.secondary });
+        militaryBadge(ctx, mil.kind, mil.level, team);
+        break;
+      }
       frame(ctx, { top: '#f3e6bd', bottom: '#c9a96a', border: team.primary });
       const glyph = TECH_GLYPH[spec.key] ?? 'scroll';
       drawGlyph(ctx, glyph, 32, 30, 20, { ink: team.primaryDark, accent: team.secondary });
