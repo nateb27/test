@@ -321,10 +321,11 @@ test('scenario 8: an enemy horseman next to the Town Center is shot down by its 
   const [horse] = await spawn(page, [['horseman', spot.x, spot.y]], ENEMY);
   // The Town Center shoots (its own projectiles appear) and the horseman dies; nobody gives an order.
   await stepUntil(page, `g.state.projectiles.some((p) => p.sourceId === ${tc.id})`, 100, 1);
-  const ticks = await stepUntil(page, gone(horse!), 600, 10);
-  // Plan 8.2 says within 15 s (300 ticks); with the current data (2 arrows of 5 pierce every 2 s against pierce armour
-  // 2 and 70 hp) it takes about 450. That is a balance question for the balance pass, not a client one.
-  test.info().annotations.push({ type: 'waiting', description: `horseman died after ${ticks} ticks; the 300-tick target waits for the balance pass` });
+  // Plan 8.2 says within 15 s (300 ticks). With 2 arrows of 7 pierce every 2 s (WP33) against pierce armour 2 and 70 hp
+  // a lone idle horseman dies in about 250 ticks on the sim (tests/sim/feel.test.ts asserts <= 320); 400 leaves room for
+  // the horseman chasing a villager out of reach for a while.
+  const ticks = await stepUntil(page, gone(horse!), 400, 10);
+  test.info().annotations.push({ type: 'info', description: `horseman died after ${ticks} ticks` });
   expect(errors).toEqual([]);
 });
 

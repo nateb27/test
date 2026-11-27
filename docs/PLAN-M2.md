@@ -849,7 +849,7 @@ Cleanup frees the footprint and handles orders, rally points and slots as in M1.
 
 ### 4.10 Town Center arrows
 
-- Only completed buildings with `combat.attack` fire. In M2 that is the Town Center: 5 pierce, range 7 (reach 7.75), cooldown 2.0 s (40 ticks), 2 arrows per volley at the same target, no wind-up.
+- Only completed buildings with `combat.attack` fire. In M2 that is the Town Center: 7 pierce (WP33; was 5), range 7 (reach 7.75), cooldown 2.0 s (40 ticks), 2 arrows per volley at the same target, no wind-up.
 - Step 8b per building in ascending id order: `cooldown -= 1` if > 0. If 0 and the target is valid and in reach, fire the arrows and set `cooldown = cooldownTicks`.
 - Scans follow the unit scheduling and budget. Targets are tier 1 (fighting units), then tier 2 (other enemy units), then `d²`, then id. A building cannot target buildings.
 - The building keeps its target while it is in reach.
@@ -950,7 +950,7 @@ Rationale:
 
 | Building | HP (M1 provisional) | MA | PA | Attack |
 |---|---|---|---|---|
-| Town Center | 2400 (600) | 3 | 8 | 5 pierce, range 7, cooldown 2.0 s, 2 arrows |
+| Town Center | 2400 (600) | 3 | 8 | 7 pierce (WP33; was 5), range 7, cooldown 2.0 s, 2 arrows |
 | House | 550 (150) | 1 | 6 | — |
 | Mill, Lumber Camp, Mining Camp | 600 (200) | 1 | 6 | — |
 | Farm | 300 (100) | 0 | 8 | — |
