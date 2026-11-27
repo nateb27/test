@@ -92,7 +92,7 @@ export const units: UnitDef[] = [
     speed: 1.0,
     combat: {
       ...melee,
-      hp: 32, attack: 5, attackType: 'pierce', meleeArmor: 0, pierceArmor: 0, range: 5, windup: 0.6, cooldown: 2.0, sight: 7,
+      hp: 32, attack: 5, attackType: 'pierce', meleeArmor: 0, pierceArmor: 0, range: 5, windup: 0.6, cooldown: 1.6, sight: 7,
       classes: ['archer'], bonus: { infantry: 4 }, projectile: 'arrow',
     },
     icon: 'icon.unit.archer',
@@ -189,7 +189,7 @@ export const units: UnitDef[] = [
     replaces: 'lancer',
     combat: {
       ...melee,
-      hp: 120, attack: 11, meleeArmor: 3, pierceArmor: 3, windup: 0.5, cooldown: 2.0, sight: 7,
+      hp: 120, attack: 13, meleeArmor: 3, pierceArmor: 3, windup: 0.5, cooldown: 2.0, sight: 7,
       classes: ['cavalry'], bonus: { archer: 5, siege: 10 }, bonusResist: 50,
     },
     icon: 'icon.unit.cataphract',
