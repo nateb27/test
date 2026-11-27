@@ -1,13 +1,13 @@
 /**
  * WP21 combat core (PLAN-M2 4.2, 4.3, 4.5, 4.6, 4.8; tests of 8.1): timing, simultaneity, acquisition, chasing,
  * stances, the combat commands, and determinism of a scripted melee and ranged skirmish. Hand-built states on an
- * empty map, stepped through the real tick order. Projectiles are checked as spawned only (flight is WP22's) and
- * nothing is removed at hp 0 until WP23's death step lands, so deaths are asserted as hp reaching 0.
+ * empty map, stepped through the real tick order. Since Phase 2 integration the real projectile flight (WP22) and
+ * death step (WP23) run too: a unit at 0 hp is removed in step 11 of the same tick (`hpOf` reads a removed unit as 0).
  */
 
 import { describe, expect, it } from 'vitest';
 import { registry } from '../../src/data/index';
-import { createNode } from '../../src/sim/entities';
+import { createNode, findEntity } from '../../src/sim/entities';
 import { hashState } from '../../src/sim/hash';
 import { deserialize, serialize } from '../../src/sim/serialize';
 import { applyDamage, computeDamage, unitCombat } from '../../src/sim/systems/combat/damage';
@@ -35,8 +35,13 @@ import {
 
 const SLACK = registry.combat.meleeReleaseSlack;
 
+/**
+ * hp of a unit, 0 once it has been removed. Since WP23's death step (PLAN-M2 2.2 step 11) a unit that reaches 0 hp
+ * is removed in the same tick, so "gone" and "hp 0 at the end of the tick" are the same moment.
+ */
 function hpOf(b: Battle, id: number): number {
-  return get(b, id).hp;
+  const e = findEntity(b.state, id);
+  return e === undefined ? 0 : get(b, id).hp;
 }
 
 function dist(ax: number, ay: number, bx: number, by: number): number {
