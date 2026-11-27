@@ -45,8 +45,8 @@ export interface DifficultyProfile {
   villagerTarget: number;
   /** First Barracks once this many villagers exist, or at `seconds` (whichever comes first; null = never by time). */
   firstBarracks: { villagers: number; seconds: number | null };
-  /** Extra military buildings once the age is reached: [age, building, count wanted in total]. */
-  militaryBuildings: readonly { age: number; type: string; count: number }[];
+  /** Extra military buildings once the age is reached (and, optionally, this many villagers exist): count wanted in total. */
+  militaryBuildings: readonly { age: number; type: string; count: number; villagers?: number }[];
   /** Share of income banked for the army once the first Barracks stands (6.3, 6.4). */
   armyShare: number;
   wave: WaveSchedule;
@@ -67,6 +67,35 @@ export interface DifficultyProfile {
   rebuild: RebuildPolicy;
   /** Seconds of game time after which every unit attacks continuously (null: never). */
   allIn: number | null;
+  /** From this age on, villagers are queued before any military spending (null: the economy layer alone decides). */
+  villagersFirstFromAge: number | null;
+  /** The military spends stock above this per resource on top of the army bank (6.4 says 400). */
+  surplusAbove: number;
+  /**
+   * Boom, then age (hard): from this many villagers in the current age (Township and later), with the next advance
+   * allowed, villager production pauses and the military may not touch the advance's cost until it is clicked
+   * (null: never).
+   */
+  ageUpVillagers: Readonly<Record<number, number>> | null;
+  /** While a threat is answered, the military may spend the whole stockpile (hard). */
+  allOutDefence: boolean;
+  /**
+   * Commit only when stronger (hard): a wave launches (and a forced launch happens) only while the massed army's
+   * power is at least this multiple of the enemy's whole fighting power (null: launch by the schedule alone).
+   */
+  commitRatio: number | null;
+  /** The first wave is a raid (hard): it hunts exposed villagers and pulls out when the enemy army shows up. */
+  raidFirstWave: boolean;
+  /**
+   * Pull a wave out when the enemy fighting power around it (plus Town Center arrows in reach) exceeds this multiple
+   * of the wave's power (null: only the start-power rule `retreatBelow`). Raids use RAID_RETREAT instead.
+   */
+  localRetreat: number | null;
+  /**
+   * Never float (hard): while every military producer is busy and the stock after the army reserve holds at least
+   * this much food plus wood, add another Barracks or Stable, up to `maxProducers` military producers (null: never).
+   */
+  floatProducers: { stock: number; maxProducers: number } | null;
   /** The economy plan handed to `decide`. */
   plan: BotPlan;
 }
@@ -146,8 +175,8 @@ export const UPGRADE_LINE: Readonly<Record<string, 'infantry' | 'archer' | 'cava
 
 const RESOURCE_SHARES_HARD: Record<number, Record<ResourceType, number>> = {
   1: { food: 0.8, wood: 0.2, gold: 0, stone: 0 },
-  2: { food: 0.55, wood: 0.35, gold: 0.1, stone: 0 },
-  3: { food: 0.5, wood: 0.27, gold: 0.18, stone: 0.05 },
+  2: { food: 0.55, wood: 0.28, gold: 0.17, stone: 0 },
+  3: { food: 0.47, wood: 0.28, gold: 0.2, stone: 0.05 },
   4: { food: 0.45, wood: 0.25, gold: 0.22, stone: 0.08 },
 };
 
@@ -165,7 +194,7 @@ export const DIFFICULTY: Readonly<Record<AiDifficulty, DifficultyProfile>> = {
     villagerTarget: 28,
     firstBarracks: { villagers: 16, seconds: 6.5 * 60 },
     militaryBuildings: [{ age: 2, type: 'archeryRange', count: 1 }],
-    armyShare: 0.2,
+    armyShare: 0.3,
     wave: { earliest: 15 * 60, jitter: 60, forcedAfter: 3 * 60, sizes: [4, 6, 8], growth: 1, cap: 10, reinforceFromWave: null, interval: 4 * 60 },
     counterWeight: 0,
     fixed: { spear: 0.6, archer: 0.4 },
@@ -180,6 +209,14 @@ export const DIFFICULTY: Readonly<Record<AiDifficulty, DifficultyProfile>> = {
     repair: false,
     rebuild: 'housesAndCenter',
     allIn: null,
+    villagersFirstFromAge: null,
+    surplusAbove: SURPLUS_ABOVE,
+    ageUpVillagers: null,
+    allOutDefence: false,
+    commitRatio: null,
+    raidFirstWave: false,
+    localRetreat: null,
+    floatProducers: null,
     plan: {
       ...PLAN,
       villagerTarget: 28,
@@ -213,6 +250,14 @@ export const DIFFICULTY: Readonly<Record<AiDifficulty, DifficultyProfile>> = {
     repair: true,
     rebuild: 'desired',
     allIn: 45 * 60,
+    villagersFirstFromAge: null,
+    surplusAbove: SURPLUS_ABOVE,
+    ageUpVillagers: null,
+    allOutDefence: false,
+    commitRatio: null,
+    raidFirstWave: false,
+    localRetreat: null,
+    floatProducers: null,
     plan: {
       ...PLAN,
       villagerTarget: 50,
@@ -227,14 +272,16 @@ export const DIFFICULTY: Readonly<Record<AiDifficulty, DifficultyProfile>> = {
     villagerTarget: 70,
     firstBarracks: { villagers: 10, seconds: null },
     militaryBuildings: [
-      { age: 2, type: 'archeryRange', count: 1 },
       { age: 2, type: 'stable', count: 1 },
-      { age: 2, type: 'barracks', count: 2 },
+      { age: 2, type: 'archeryRange', count: 1, villagers: 28 },
+      { age: 3, type: 'barracks', count: 2, villagers: 40 },
+      { age: 3, type: 'stable', count: 2, villagers: 50 },
+      { age: 3, type: 'archeryRange', count: 2, villagers: 60 },
     ],
-    armyShare: 0.45,
-    wave: { earliest: 7 * 60, jitter: 20, forcedAfter: 70, sizes: [8, 16], growth: 6, cap: 36, reinforceFromWave: null, interval: 90 },
+    armyShare: 0.3,
+    wave: { earliest: 7 * 60, jitter: 20, forcedAfter: 70, sizes: [4, 12, 16], growth: 6, cap: 36, reinforceFromWave: null, interval: 90 },
     counterWeight: 1,
-    fixed: { sword: 0.35, archer: 0.3, horse: 0.2, spear: 0.15 },
+    fixed: { horse: 0.35, archer: 0.3, sword: 0.2, spear: 0.15 },
     upgrades: 'all',
     upgradesFromAge: 2,
     siege: { rams: 2, trebuchets: 1, siphonarioi: 3 },
@@ -246,6 +293,14 @@ export const DIFFICULTY: Readonly<Record<AiDifficulty, DifficultyProfile>> = {
     repair: true,
     rebuild: 'all',
     allIn: 40 * 60,
+    villagersFirstFromAge: 2,
+    surplusAbove: 150,
+    ageUpVillagers: { 2: 36, 3: 58 },
+    allOutDefence: true,
+    commitRatio: 1.3,
+    raidFirstWave: true,
+    localRetreat: 1.2,
+    floatProducers: { stock: 700, maxProducers: 10 },
     plan: {
       ...PLAN,
       villagerTarget: 70,

@@ -6,6 +6,7 @@
 
 import { expect } from 'vitest';
 import { AiPlayer, EconomyBot, type AiOptions, type Controller } from '../../src/bot';
+import { registry } from '../../src/data';
 import {
   TICK_RATE,
   createGame,
@@ -46,6 +47,27 @@ export interface MatchOptions {
   trackStuck?: boolean;
   /** Measure the wall-clock time of each decision (default false). */
   timeDecisions?: boolean;
+  /** Sample a per-seat timeline every this many ticks (default none; tuning diagnostics). */
+  timelineEvery?: number | null;
+}
+
+/** One timeline sample of one seat (tuning diagnostics, `timelineEvery`). */
+export interface TimelineRow {
+  tick: number;
+  age: number;
+  villagers: number;
+  army: number;
+  /** Total resource cost of the living army. */
+  armyValue: number;
+  /** Stockpile (all four resources). */
+  floated: number;
+  /** Stockpile per resource. */
+  stock: [number, number, number, number];
+  kills: number;
+  losses: number;
+  buildingsLost: number;
+  waves: number;
+  phase: string;
 }
 
 export interface SeatReport {
@@ -62,6 +84,9 @@ export interface SeatReport {
   /** AI only: operation counts and (if measured) decision times in ms. */
   ops: { decisions: number; total: number; max: number } | null;
   decisionMs: number[];
+  timeline: TimelineRow[];
+  /** Ticks of each wave launch (diagnostics; from AI memory). */
+  waveTicks: number[];
   outcome: string;
   /** Military units alive at the end. */
   army: number;
@@ -108,6 +133,8 @@ export function playMatch(opts: MatchOptions): MatchReport {
     stuck: [],
     ops: null,
     decisionMs: [],
+    timeline: [],
+    waveTicks: [],
     outcome: 'playing',
     army: 0,
     villagers: 0,
@@ -138,6 +165,10 @@ export function playMatch(opts: MatchOptions): MatchReport {
     const tick = sim.state.tick;
     if (opts.hashEvery && tick % opts.hashEvery === 0) hashes.push(hashState(sim.state));
     if (trackStuck) trackUnits(sim, seats, lastPos, reported);
+    controllers.forEach((c, i) => {
+      if (c instanceof AiPlayer && c.memory.waveNumber > seats[i]!.waveTicks.length) seats[i]!.waveTicks.push(tick);
+    });
+    if (opts.timelineEvery && tick % opts.timelineEvery === 0) sampleTimeline(sim, seats, controllers);
     if (opts.saveEvery && tick % opts.saveEvery === 0) {
       controllers.forEach((c, i) => {
         if (c instanceof AiPlayer) {
@@ -187,6 +218,54 @@ export function playMatch(opts: MatchOptions): MatchReport {
   return { seed: opts.seed, sim, controllers, seats, endTick: sim.state.tick, winner: sim.state.match.winner, hashes, log };
 }
 
+function sampleTimeline(sim: Sim, seats: SeatReport[], controllers: (Controller | null)[]): void {
+  const rows = seats.map((s, i): TimelineRow => {
+    const p = sim.state.players[i + 1]!;
+    const c = controllers[i];
+    const mem = c instanceof AiPlayer ? c.memory : null;
+    return {
+      tick: sim.state.tick,
+      age: p.age,
+      villagers: 0,
+      army: 0,
+      armyValue: 0,
+      floated: p.resources.food + p.resources.wood + p.resources.gold + p.resources.stone,
+      stock: [p.resources.food, p.resources.wood, p.resources.gold, p.resources.stone],
+      kills: p.stats.unitsKilled,
+      losses: p.stats.unitsLost,
+      buildingsLost: p.stats.buildingsLost,
+      waves: mem?.waveNumber ?? 0,
+      phase: mem === null ? '-' : mem.defence.active ? 'defending' : mem.phase,
+    };
+  });
+  for (const e of sim.state.entities) {
+    if (e.kind !== 'unit' || e.owner < 1) continue;
+    const row = rows[e.owner - 1];
+    if (row === undefined) continue;
+    if (e.typeId === 'villager') row.villagers++;
+    else {
+      row.army++;
+      const cost = registry.unit(e.typeId).cost;
+      row.armyValue += (cost.food ?? 0) + (cost.wood ?? 0) + (cost.gold ?? 0) + (cost.stone ?? 0);
+    }
+  }
+  rows.forEach((r, i) => seats[i]!.timeline.push(r));
+}
+
+/** A one-line-per-sample timeline of a match for tuning (both seats side by side). */
+export function formatTimeline(r: MatchReport): string {
+  const lines: string[] = [];
+  const n = r.seats[0]?.timeline.length ?? 0;
+  for (let k = 0; k < n; k++) {
+    const cells = r.seats.map((s) => {
+      const t = s.timeline[k]!;
+      return `A${t.age} v${t.villagers} a${t.army}/${t.armyValue} f${t.stock.join('/')} k${t.kills} l${t.losses} bl${t.buildingsLost} w${t.waves} ${t.phase}`;
+    });
+    lines.push(`${fmtTick(r.seats[0]!.timeline[k]!.tick)}  ${cells.join('  |  ')}`);
+  }
+  return lines.join('\n');
+}
+
 function trackUnits(
   sim: Sim,
   seats: SeatReport[],
@@ -211,9 +290,28 @@ function trackUnits(
 
 export function fmtTick(tick: number | null | undefined): string {
   if (tick === null || tick === undefined) return 'never';
-  const s = tick / TICK_RATE;
+  const s = Math.floor(tick / TICK_RATE);
   const m = Math.floor(s / 60);
-  return `${m}:${String(Math.round(s - m * 60)).padStart(2, '0')}`;
+  return `${m}:${String(s - m * 60).padStart(2, '0')}`;
+}
+
+/** Seeds of the long ladder and timing table (PLAN-M2 11 item 8: at least 5 seeds). */
+export const LADDER_SEEDS = [1, 2, 3, 4, 5];
+/** Vitest timeout of one long ladder test. */
+export const LONG = 3_600_000;
+
+/** One ladder match with a printed summary, command hygiene and the stuck rule checked for both seats. */
+export function ladderMatch(seats: [Seat, Seat], seed: number, limitMin: number): MatchReport {
+  const r = playMatch({ seed, seats, maxTicks: limitMin * MIN });
+  console.info(
+    `[ai] ${seats[0]} vs ${seats[1]} seed ${seed}: winner ${r.winner ?? 'none'} at ${fmtTick(r.endTick)} ` +
+      `(armies ${r.seats[0]!.army}/${r.seats[1]!.army}, villagers ${r.seats[0]!.villagers}/${r.seats[1]!.villagers})`,
+  );
+  for (const s of r.seats) {
+    expectHygiene(s);
+    expect(s.stuck, `player ${s.playerId} stuck units`).toEqual([]);
+  }
+  return r;
 }
 
 export const MIN = 60 * TICK_RATE;

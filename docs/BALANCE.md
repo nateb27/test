@@ -220,13 +220,66 @@ Measured on the real sim, the real effect of every upgrade is in "Feel numbers".
 
 - The M1 bot thresholds are unchanged and no economy number changed, so the Township timings in the first half of this file stand: the economy bot reaches Township at 6:09 to 6:25.
 - The hand-played target is **7:30**, 65 to 80 s behind the bot; that is the pace of a player who keeps the Town Center queue busy and clicks the age in once the 400 food is in hand.
-- AI timings are placeholders until WP26 measures them (`tests/sim/ai.test.ts`) and the Phase 3 tuning fills the right-hand columns:
+- AI timings, measured by `tests/sim/ai.long.test.ts` (each AI against an idle opponent, seeds 1-5; Township / first wave launch):
 
-| Difficulty | Township (target) | First wave (target) | Township (measured) | First wave (measured) |
+| Difficulty | Township (target) | First wave (target) | Township (measured, seeds 1-5) | First wave (measured, seeds 1-5) |
 |---|---|---|---|---|
-| Easy | 8:30 to 10:30 | not before 15:00 | TBD | TBD |
-| Standard | 6:30 to 7:45 | 10:00 to 12:00 | TBD | TBD |
-| Hard | 5:00 to 6:00 | 7:00 to 8:30 | TBD | TBD |
+| Easy | 8:30 to 10:30 | not before 15:00 | 9:05, 9:08, 9:14, 9:11, 9:17 | 15:56, 15:05, 15:02, 15:23, 15:23 |
+| Standard | 6:30 to 7:45 | 10:00 to 12:00 | 7:05, 7:04, 7:03, 7:04, 7:01 | 11:21, 10:59, 11:06, 10:47, 11:05 |
+| Hard | 5:00 to 6:00 | 7:00 to 8:30 | 5:36, 5:36, 5:26, 5:49, 5:45 | 8:15, 8:10, 8:09, 8:16, 8:16 |
+
+## Computer opponent (Phase 3 tuning)
+
+No difficulty gets a resource, vision, speed or stat bonus; the difficulties differ only in how they decide (`src/bot/ai/difficulty.ts`; behaviour in DESIGN.md "WP26").
+
+### Difficulty table as built
+
+| Habit | Easy | Standard | Hard |
+|---|---|---|---|
+| Decision interval | 60 ticks (3 s) | 20 ticks (1 s) | 10 ticks (0.5 s) |
+| Villagers | to 28 | to 50 | 14 in Founding, then always one in production (paid before the army) to 70; pauses at 36 (Township) and 58 (Citadel) until the next advance is clicked |
+| Military buildings | Barracks at 16 villagers or 6:30; Archery Range in Age 2 | Barracks at 14; Range and Stable in Age 2; Siege Workshop in Age 3 | Barracks at 10; Stable in Age 2; Range at 28 villagers; 2nd Barracks / Stable / Range at 40 / 50 / 60 in Age 3; Siege Workshop; more Barracks or Stables (up to 10 producers) whenever every one is busy and 700 food plus wood is spare |
+| Army money | 20% of income banked, plus stock above 400 | 35%, plus stock above 400 | 30%, plus stock above 150; the whole stock while defending |
+| Waves | 4, 6, 8, +1 to 10; first 15:00 + 0-60 s, forced +3:00 | 10, 14, +4 to 30; first 10:00 + 0-30 s, forced +90 s | first wave a raid (7:00 + 0-20 s, forced +70 s with 2+ units); then 12, 16, +6 to 36, launched only at 1.3x the enemy's whole fighting power (forced: 1.0x), every 90 s at the earliest |
+| Retreat | never | below 30% of start power | below 40% of start power, or when the local enemy power (12 tiles, plus Town Center arrows) exceeds 1.2x the wave; the raid at 0.7x |
+| Composition | fixed (spear 0.6, archer 0.4) | 50% fixed, 50% counter | counter (fixed horse 0.35, archer 0.3, sword 0.2, spear 0.15 while the enemy has no army) |
+| Siege | never | 2 Rams from Age 3 | 2 Rams from Age 3; Trebuchet and 3 Siphonarioi in Age 4 |
+| Upgrades | none | level I of its two most-built lines from Age 3 | all, as affordable, from Age 2 |
+| Defence | military only, after 10 s | 3 s; evacuates villagers | 1 s; 4 villagers fight raids of 1-2 units |
+| All-in | never | 45:00 | 40:00 |
+
+All difficulties: Horsemen when a Cataphract is unaffordable; the far gold deposits once the near ones are mined out.
+
+### Baseline on the new balance (before this tuning)
+
+Measured with the previous AI on the WP32 balance (building melee armour 7/8), before the sim hardening merge: Hard vs Standard 1 of 5 (Standard won seeds 1, 2, 3, 5 at 28-34 min); Standard vs Easy 5 of 5 (26-32 min); Hard vs Easy 5 of 5 but seed 3 at 42:56 (limit 35:00); Standard vs Standard seed 2 and Hard vs Hard seeds 1 and 2 without a winner at 75:00. The previous Hard advanced with 14 villagers, kept its Town Center idle a third of the time in the Township Age (food went to the army bank), reached 35 villagers at 19 minutes against Standard's 50 and the Citadel at 24-30 minutes, and its waves of 8 walked into Standard's army at the Town Center (first wave: 0 kills, 6 losses). On the hardened sim (Town Center arrows 7) the orchestrator's run of the old head failed three ladder tests (seed 3 Hard beats Easy; Hard beats Standard 2 of 3; Standard vs Standard seed 2).
+
+### Ladder (final, seeds 1-5, real sim with the hardening merged)
+
+Winner and match length; every match is also checked for command hygiene and stuck units.
+
+| Match | Seed 1 | Seed 2 | Seed 3 | Seed 4 | Seed 5 | Result |
+|---|---|---|---|---|---|---|
+| Hard vs Standard | Hard 37:53 | Hard 42:22 | Hard 41:03 | Hard 46:23 | Hard 38:52 | 5-0 |
+| Standard vs Easy | Standard 28:36 | Standard 28:39 | Standard 28:08 | Standard 27:51 | Standard 29:58 | 5-0 |
+| Hard vs Easy | Hard 32:00 | Hard 28:48 | Hard 30:57 | Hard 30:28 | Hard 29:51 | 5-0 |
+| Standard vs Standard | P2 30:27 | P2 36:32 | P1 57:45 | | | all end |
+| Hard vs Hard | P1 47:22 | P2 46:05 | P1 57:56 | | | all end |
+
+`npm run test:long` asserts: Hard beats Easy on every seed before 35:00, Standard beats Easy on at least 4 of 5 before 45:00, Hard beats Standard on at least 4 of 5 with a winner in every match before 75:00, and the mirrors (3 seeds each) end before 75:00.
+
+What decided Hard vs Standard (timelines from the harness, `timelineEvery`): Hard is 5-7 villagers behind at 12 minutes (the Founding cap), passes Standard's 50 after about 20 minutes and reaches 63-70; it reaches the Citadel at 16:35-22:28 (Standard 18:36-19:50); it trades about evenly while defending Standard's waves at about 11, 16 and 21 minutes because it never attacks while weaker, and it launches its committed waves (22-28 minutes) only once its army out-powers Standard's 1.3 to 1. Standard floats thousands of food and wood late (its four producers are its ceiling); Hard turns the same surplus into more Barracks and Stables. Before the far-gold rule both AIs ran out of gold around 30 minutes on seeds 2-4 (3,200 gold within 26 tiles), could make neither Rams nor Cataphracts, and mirrors stalled.
+
+### What a player should expect
+
+- **Easy**: Township around 9:10, a first wave of 4 Spearmen and Archers after 15:00, waves of 6 then 8 every 4 minutes, nearest building first, no retreat, no repair, slow reactions (10 s). It never attacks early; a new player has a quarter of an hour of peace.
+- **Standard**: Township at 7:00, a first wave of 10 at about 11:00, then 14, 18 every 3 minutes with Rams from the Citadel (about 19 minutes); it goes for production buildings, retreats at 30%, evacuates villagers from raids, repairs and rebuilds. It floats resources late and its army is capped by four production buildings: a player who defends its waves at home under the Town Center and builds more production than it does will out-produce it and win.
+- **Hard**: Township at 5:30, a probing raid at 8:10 that hunts exposed villagers and turns back rather than lose units, then it booms: a villager always in production to 70, Citadel by 16-22 minutes, up to 10 production buildings, all upgrades. It defends with everything it has and spends its whole stock under attack, never attacks while weaker than your whole army (1.3x), pulls back when a fight turns, and comes with Rams and escorts once it outnumbers you, around 25-35 minutes. It is beaten by early pressure that kills villagers before it booms, or by a bigger army at home; it does not feel like a rusher.
+
+### Open points
+
+- The raid rarely kills: against an opponent that keeps its army at home and evacuates its villagers (Standard does both) 2-5 units turn back at once. Buying Horsemen for it ahead of the villagers was tried and reverted (it lost a Hard vs Standard seed and still killed nothing). Hard's pressure is economic and late, not early.
+- Easy and Standard were left as they were apart from the two all-difficulty rules above (Horseman fallback, far gold); Standard's late floating is its intended weakness.
 
 ## Notes for other packages
 

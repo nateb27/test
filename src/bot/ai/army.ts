@@ -34,6 +34,13 @@ const RAID_TC_DISTANCE = 8;
 /** Hard focus fire: candidates within this radius of the wave centroid; attackers within FOCUS_JOIN of the target. */
 const FOCUS_RADIUS = 6;
 const FOCUS_JOIN = 8;
+/** Local power check (hard): enemy fighting units within this radius of the wave centroid. */
+const LOCAL_RADIUS = 12;
+/** A raid pulls out when the enemy power around it exceeds this multiple of its own, or below RAID_KEEP of its start power. */
+const RAID_RETREAT = 0.7;
+const RAID_KEEP = 0.5;
+/** A raid goes home after this long. */
+const RAID_SECONDS = 150;
 
 /** Schedule the first wave (once): earliest = table time + rng jitter, forced = earliest + forcedAfter. */
 export function scheduleFirstWave(d: AiDecision): void {
@@ -148,12 +155,24 @@ export function runArmy(d: AiDecision, defenceActive: boolean): void {
     // Above easy, after the first wave: an enemy with almost no army is attacked at once (games must end).
     let enemyArmy = 0;
     for (const e of d.world.enemyUnits) if (e.fighting) enemyArmy += e.power;
-    const defenceless = p.target !== 'nearest' && mem.waveNumber > 0 && !waitBreach && enemyArmy * 4 < sumPower(pool);
+    const poolPower = sumPower(pool);
+    const defenceless = p.target !== 'nearest' && mem.waveNumber > 0 && !waitBreach && enemyArmy * 4 < poolPower;
+    const raid = p.raidFirstWave && mem.waveNumber === 0;
+    // Hard commits only when stronger than the whole enemy army (the raid excepted: it avoids the army), or when the
+    // army has outgrown waiting (twice its threshold, or the population is nearly full).
+    const outgrown = d.popUsed >= 190 || (p.commitRatio === null && fighters >= 2 * threshold);
+    const strong = raid || p.commitRatio === null || poolPower >= p.commitRatio * enemyArmy || outgrown;
+    const forcedStrong = raid || p.commitRatio === null || poolPower >= enemyArmy || outgrown;
+    const forcedDue = d.tick + p.decisionInterval > mem.nextWaveForcedTick;
+    if (!raid && p.commitRatio !== null && forcedDue && !forcedStrong && !waitBreach) {
+      // Too weak to force a launch: keep massing and look again shortly.
+      mem.nextWaveForcedTick = d.tick + 20 * TICK_RATE;
+    }
     const ready =
       (allIn && fighters > 0) ||
-      (!waitBreach && d.tick >= mem.nextWaveEarliestTick && fighters >= threshold) ||
-      (!waitBreach && d.tick + p.decisionInterval > mem.nextWaveForcedTick && fighters >= half) ||
-      (d.tick >= breachDeadline && fighters >= half) ||
+      (!waitBreach && d.tick >= mem.nextWaveEarliestTick && fighters >= threshold && strong) ||
+      (!waitBreach && forcedDue && fighters >= (raid ? 2 : half) && forcedStrong) ||
+      (d.tick >= breachDeadline && fighters >= half && forcedStrong) ||
       (defenceless && fighters >= 3);
     if (!ready || d.world.enemies.length === 0) return;
     const ids = pool.map((u) => u.id).sort((a, b) => a - b);
@@ -165,6 +184,7 @@ export function runArmy(d: AiDecision, defenceActive: boolean): void {
       launchTick: d.tick,
       startPower: sumPower(pool),
       retreatTick: null,
+      raid,
     };
     mem.phase = 'attacking';
     mem.waveNumber++;
@@ -203,7 +223,65 @@ export function runArmy(d: AiDecision, defenceActive: boolean): void {
     retreat(d, units);
     return;
   }
+  if (!allIn && wave.raid) {
+    if (power < RAID_KEEP * wave.startPower || d.tick - wave.launchTick > RAID_SECONDS * TICK_RATE || localThreat(d, units) > RAID_RETREAT * power) {
+      retreat(d, units);
+      return;
+    }
+    if (orderRaid(d, units)) return;
+  } else if (!allIn && p.localRetreat !== null && localThreat(d, units) > p.localRetreat * power) {
+    retreat(d, units);
+    return;
+  }
   orderWave(d, units);
+}
+
+/** Enemy fighting power within LOCAL_RADIUS of the wave centroid, plus the arrows of any tower in reach of it. */
+function localThreat(d: AiDecision, units: readonly UnitInfo[]): number {
+  const c = centroid(units);
+  let threat = 0;
+  for (const e of d.world.enemyUnits) {
+    d.ops.n++;
+    if (!e.fighting) continue;
+    if ((e.x - c.x) * (e.x - c.x) + (e.y - c.y) * (e.y - c.y) <= LOCAL_RADIUS * LOCAL_RADIUS) threat += e.power;
+  }
+  for (const t of towersOf(d)) if (covered([t], c.x, c.y, null)) threat += t.power;
+  return threat;
+}
+
+/**
+ * Raid (hard's first wave): every unit gets an explicit `attack` on the exposed enemy villager nearest to it (out of
+ * every Town Center's reach), re-chosen when its target dies or becomes covered. Returns false when there is no
+ * exposed villager (the wave then picks a target like any other wave: soft buildings out of arrow reach).
+ */
+function orderRaid(d: AiDecision, units: readonly UnitInfo[]): boolean {
+  if (!d.combatOrders) return false;
+  const exposed = exposedVillagers(d);
+  if (exposed.length === 0) return false;
+  const exposedIds = new Set<EntityId>(exposed.map((v) => v.id));
+  const byTarget: Record<number, EntityId[]> = {};
+  for (const u of units) {
+    if (u.siege || !u.fighting) continue;
+    const o = u.order;
+    if (o !== null && o.type === 'attack' && exposedIds.has(o.targetId)) continue;
+    const t = nearestUnit(d, exposed, u);
+    if (t === null) continue;
+    (byTarget[t.id] ??= []).push(u.id);
+  }
+  for (const id of Object.keys(byTarget).map(Number).sort((a, b) => a - b)) {
+    d.emit({ type: 'attack', unitIds: byTarget[id]!.sort((a, b) => a - b), targetId: id, queue: false });
+  }
+  return true;
+}
+
+/** Enemy villagers out of every tower's reach (+1 tile) and RAID_TC_DISTANCE from every Town Center. Ascending id. */
+function exposedVillagers(d: AiDecision): UnitInfo[] {
+  const w = d.world;
+  const towers = towersOf(d);
+  const centres = w.enemyBuildings.filter((b) => b.typeId === d.data.start.centerBuilding);
+  return w.enemyUnits.filter(
+    (u) => u.villager && !covered(towers, u.x, u.y, null) && centres.every((t) => distSqTo(u.x, u.y, t) > RAID_TC_DISTANCE * RAID_TC_DISTANCE),
+  );
 }
 
 /** Units that can raze armoured buildings: siege (`targets: 'buildings'`) and the Siphonarios. */
@@ -347,11 +425,7 @@ function covered(towers: readonly { b: BuildingInfo; reach: number }[], x: numbe
 /** Enemy villagers out of every tower's reach and 8+ tiles from Town Centers: the largest cluster's central villager. */
 function raidTarget(d: AiDecision): UnitInfo | null {
   const w = d.world;
-  const towers = towersOf(d);
-  const centres = w.enemyBuildings.filter((b) => b.typeId === d.data.start.centerBuilding);
-  const exposed = w.enemyUnits.filter(
-    (u) => u.villager && !covered(towers, u.x, u.y, null) && centres.every((t) => distSqTo(u.x, u.y, t) > RAID_TC_DISTANCE * RAID_TC_DISTANCE),
-  );
+  const exposed = exposedVillagers(d);
   const groups = clusters(exposed, 6, w.mapWidth, w.mapHeight, d.ops);
   let raid: UnitInfo[] | null = null;
   for (const g of groups) if (raid === null || g.length > raid.length) raid = g;
@@ -501,36 +575,4 @@ function focusFire(d: AiDecision, units: readonly UnitInfo[], c: { x: number; y:
     ids.push(u.id);
   }
   if (ids.length > 0) d.emit({ type: 'attack', unitIds: ids.sort((a, b) => a - b), targetId: t.id, queue: false });
-}
-
-/** At most this many stalled units are nudged per decision. */
-const UNSTICK_PER_DECISION = 12;
-
-/**
- * Defensive workaround: a unit chasing a building with no path and no pending request, close to the footprint but
- * outside its reach, would wait forever (it happens when the unit stands diagonally next to a footprint corner).
- * Such units get a `move` to a point just outside the footprint's nearest edge; once idle there they acquire the
- * building again from inside reach.
- */
-export function unstick(d: AiDecision): void {
-  let n = 0;
-  for (const u of d.world.army) {
-    if (n >= UNSTICK_PER_DECISION) return;
-    d.ops.n++;
-    if (!u.stalled || u.order === null || u.order.type !== 'attack') continue;
-    const t = d.world.byId.get(u.order.targetId);
-    if (t === undefined || !('size' in t)) continue;
-    const c = d.data.unit(u.typeId).combat;
-    const reach = c.range + d.data.combat.reach;
-    const dd = distSqTo(u.x, u.y, t);
-    if (dd <= reach * reach || dd > (reach + 2) * (reach + 2)) continue;
-    const px = Math.min(t.tx + t.size, Math.max(t.tx, u.x));
-    const py = Math.min(t.ty + t.size, Math.max(t.ty, u.y));
-    const len = Math.sqrt(dd);
-    const k = Math.min(reach * 0.5, 0.3) / len;
-    const x = Math.min(d.world.mapWidth - 0.01, Math.max(0.01, px + (u.x - px) * k));
-    const y = Math.min(d.world.mapHeight - 0.01, Math.max(0.01, py + (u.y - py) * k));
-    d.emit({ type: 'move', unitIds: [u.id], x, y, queue: false });
-    n++;
-  }
 }

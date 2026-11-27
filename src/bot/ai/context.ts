@@ -17,7 +17,7 @@ import {
 } from '../../sim';
 import { blockedFromView, findSpot, type Blocked } from '../placement';
 import type { BotView, VillagerView } from '../view';
-import { BANK_CAP, RALLY_DISTANCE, SURPLUS_ABOVE, type DifficultyProfile } from './difficulty';
+import { BANK_CAP, RALLY_DISTANCE, type DifficultyProfile } from './difficulty';
 import type { AiMemory } from './memory';
 import type { PowerTable } from './power';
 import type { AiWorld, Ops } from './world';
@@ -48,6 +48,10 @@ export class AiDecision {
   readonly reserve: ResourceAmounts = { food: 0, wood: 0, gold: 0, stone: 0 };
   /** Held back from the economy for a military building the AI is saving for (this decision only). */
   readonly saving: ResourceAmounts = { food: 0, wood: 0, gold: 0, stone: 0 };
+  /** Booming to the next age (`ageUpVillagers`): the advance's cost, which the military may not touch. */
+  ageCost: ResourceAmounts | null = null;
+  /** A threat is being answered this decision and the difficulty spends everything on the army then. */
+  allOutDefence = false;
   private blockedGrid: Blocked | null = null;
 
   constructor(
@@ -97,24 +101,34 @@ export class AiDecision {
     for (const r of RESOURCE_TYPES) {
       const delta = Math.max(0, gathered[r] - mem.gatheredSeen[r]);
       mem.gatheredSeen[r] = gathered[r];
-      if (active) {
+      // Boom, then age: the advance's resources are not banked while it is saved for.
+      if (active && (this.ageCost === null || this.ageCost[r] === 0)) {
         const scaled = delta * pct + mem.bankRemainder[r];
         const whole = Math.floor(scaled / 100);
         mem.bankRemainder[r] = scaled - whole * 100;
         mem.bank[r] = Math.min(BANK_CAP, mem.bank[r] + whole);
       }
       mem.bank[r] = Math.min(mem.bank[r], this.stock[r]);
+      if (this.ageCost !== null && this.ageCost[r] > 0) mem.bank[r] = Math.min(mem.bank[r], Math.max(0, this.stock[r] - this.ageCost[r]));
       this.reserve[r] = mem.bank[r];
     }
   }
 
-  /** What the military may spend now: the reserve plus any surplus above `SURPLUS_ABOVE` (6.4). */
+  /** What the military may spend now: the reserve plus any surplus above `surplusAbove` (and the advance being saved for). */
   militaryBudget(): ResourceAmounts {
     const out = { food: 0, wood: 0, gold: 0, stone: 0 };
+    if (this.allOutDefence) return { ...this.stock };
     for (const r of RESOURCE_TYPES) {
       const res = this.reserveAvailable(r);
-      out[r] = res + Math.max(0, this.stock[r] - res - SURPLUS_ABOVE);
+      out[r] = res + Math.max(0, this.stock[r] - res - this.profile.surplusAbove - (this.ageCost?.[r] ?? 0));
     }
+    return out;
+  }
+
+  /** The stockpile minus the army reserve (what the economy may spend). */
+  freeStock(): ResourceAmounts {
+    const out = { food: 0, wood: 0, gold: 0, stone: 0 };
+    for (const r of RESOURCE_TYPES) out[r] = this.stock[r] - this.reserveAvailable(r);
     return out;
   }
 
