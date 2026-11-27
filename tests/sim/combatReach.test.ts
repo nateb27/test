@@ -152,4 +152,42 @@ describe('a unit beside a footprint reaches it (defect: empty path next to a bui
     }
     expect(stale).toEqual([]);
   });
+
+  it('the crowded building plays out the same whatever the attackers creation order (ids permuted)', () => {
+    const run = (reverse: boolean): string[] => {
+      const state = emptyState();
+      const b = createBuilding(state, 'barracks', 2, 18, 18, true);
+      const types = ['spearman', 'swordsman', 'horseman', 'cataphract', 'villager', 'lancer'];
+      const slots: { type: string; x: number; y: number }[] = [];
+      for (let i = 0; i < 18; i++) {
+        const side = i % 4;
+        // Irregular offsets: no two attackers equidistant from anything, none coincident (ties go by id, by rule).
+        const along = 0.31 + ((i * 0.613) % 3.1);
+        const off = 0.55 + ((i * 0.137) % 0.45);
+        slots.push({
+          type: types[i % types.length]!,
+          x: side === 0 ? 18 - off : side === 1 ? 21 + off : 17.5 + along,
+          y: side === 2 ? 18 - off : side === 3 ? 21 + off : 17.5 + along,
+        });
+      }
+      const order = reverse ? [...slots.keys()].reverse() : [...slots.keys()];
+      const slotOf = new Map<number, number>();
+      for (const i of order) slotOf.set(createUnit(state, slots[i]!.type, 1, slots[i]!.x, slots[i]!.y).id, i);
+      const sim = simFromState(state, data);
+      sim.step([attackCmd([...slotOf.keys()].sort((p, q) => p - q), b.id)]);
+      const out: string[] = [];
+      for (let t = 0; t < 300; t++) {
+        sim.step([]);
+        if (sim.state.tick % 20 !== 0) continue;
+        const bb = findEntity(sim.state as GameState, b.id);
+        const rows = (sim.state.entities as GameState['entities'])
+          .filter((e): e is UnitEntity => e.kind === 'unit')
+          .map((u) => `${slotOf.get(u.id)} ${u.pos.x},${u.pos.y} ${u.combat.lastAttackTick}`)
+          .sort();
+        out.push(`${sim.state.tick} ${bb !== undefined && bb.kind === 'building' ? bb.hp : 0} ${rows.join('|')}`);
+      }
+      return out;
+    };
+    expect(run(true)).toEqual(run(false));
+  });
 });

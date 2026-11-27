@@ -1380,7 +1380,7 @@ The existing M1 specs keep passing, driven through the setup screen with the opp
 
 ### 8.4 Performance
 
-**Battle scenario.** `createBattleScenario(seed, perSide = 200)` in `src/sim/stress.ts` (WP33) builds a 2-player map with both bases plus 30 buildings each. Per side it adds 60 Spearmen, 40 Swordsmen, 40 Archers, 40 Horsemen, 10 Cataphracts and 10 Siphonarioi, in two lines 14 tiles apart at the map centre, given `attackMove` towards each other. `__game.startBattle()` loads it in the browser.
+**Battle scenario.** `createBattleScenario(seed, perSide = 200)` in `src/sim/stress.ts` (WP33) builds a 2-player map with both bases plus 30 buildings each. Per side it adds 60 Spearmen, 40 Swordsmen, 40 Archers, 40 Horsemen, 10 Cataphracts and 10 Siphonarioi (as built by WP33: 34 Horsemen, plus 4 Rams and 2 Trebuchets so siege is in the fight), in two lines 14 tiles apart at the map centre, given `attackMove` towards each other. `__game.startBattle()` loads it in the browser.
 
 | Budget | Measurement | Target |
 |---|---|---|
