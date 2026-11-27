@@ -20,6 +20,8 @@ export interface WaveMemory {
   startPower: number;
   /** Tick the retreat began (retreating phase only). */
   retreatTick: number | null;
+  /** A raid (hard's first wave): hunts exposed villagers and pulls out as soon as the enemy army shows up. */
+  raid: boolean;
 }
 
 export interface DefenceMemory {
@@ -134,6 +136,11 @@ function num(v: JsonValue | undefined, what: string): number {
   return v;
 }
 
+function bool(v: JsonValue | undefined, what: string): boolean {
+  if (typeof v !== 'boolean') corrupt(`a bad ${what}`);
+  return v;
+}
+
 function nullableInt(v: JsonValue | undefined, what: string): number | null {
   return v === null ? null : int(v, what);
 }
@@ -179,6 +186,7 @@ export function parseMemory(json: JsonValue): AiMemory {
       launchTick: int(w.launchTick, 'wave launch tick'),
       startPower: num(w.startPower, 'wave power'),
       retreatTick: nullableInt(w.retreatTick, 'wave retreat tick'),
+      raid: bool(w.raid, 'wave raid flag'),
     };
   }
   const d = obj(o.defence, 'defence');

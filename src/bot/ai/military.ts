@@ -23,8 +23,10 @@ export function buildMilitary(d: AiDecision): void {
   if (w.villagers.length >= p.firstBarracks.villagers || (p.firstBarracks.seconds !== null && time >= p.firstBarracks.seconds)) {
     wanted.push({ type: 'barracks', count: 1 });
   }
-  for (const m of p.militaryBuildings) if (w.age >= m.age) wanted.push({ type: m.type, count: m.count });
+  for (const m of p.militaryBuildings) if (w.age >= m.age && w.villagers.length >= (m.villagers ?? 0)) wanted.push({ type: m.type, count: m.count });
   if (w.age >= 3 && (p.siege.rams > 0 || p.siege.siphonarioi > 0)) wanted.push({ type: 'siegeWorkshop', count: 1 });
+  const extra = floatProducer(d);
+  if (extra !== null) wanted.push(extra);
   for (const want of wanted) {
     d.ops.n++;
     if (d.countOf(want.type) >= want.count) continue;
@@ -45,6 +47,29 @@ export function buildMilitary(d: AiDecision): void {
     d.construct(want.type, spot, builders, false);
     return;
   }
+}
+
+/**
+ * Never float (`floatProducers`, hard): every completed military producer busy and food plus wood beyond the army
+ * reserve at the threshold -> one more of the gold-free producer whose unit the stock affords best (Stable for
+ * horsemen when food leads, else Barracks for spearmen).
+ */
+function floatProducer(d: AiDecision): { type: BuildingId; count: number } | null {
+  const f = d.profile.floatProducers;
+  if (f === null || d.world.age < 2) return null;
+  let producers = 0;
+  let idle = 0;
+  for (const b of d.world.buildings) {
+    d.ops.n++;
+    if (!MILITARY_PRODUCERS.includes(b.typeId)) continue;
+    producers++;
+    if (!b.constructed || b.queueLength === 0) idle++;
+  }
+  if (idle > 0 || producers >= f.maxProducers) return null;
+  const free = d.freeStock();
+  if (free.food + free.wood < f.stock) return null;
+  const type: BuildingId = free.food >= 2 * free.wood ? 'stable' : 'barracks';
+  return { type, count: d.countOf(type) + 1 };
 }
 
 /** Point every military producer's rally at the rally point. */

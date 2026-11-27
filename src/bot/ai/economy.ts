@@ -29,7 +29,10 @@ export function runEconomy(d: AiDecision): void {
     if (d.claimed.has(v.id) || d.mem.defence.villagerIds.includes(v.id)) v.claimed = true;
   }
   d.ops.n += view.villagers.length * 20 + view.nodes.length * 4;
-  const cmds = decide(view, d.query, d.data, d.profile.plan, reserve);
+  // Boom, then age: hold the villager count while the advance is saved for.
+  const plan =
+    d.ageCost !== null ? { ...d.profile.plan, villagerCapByAge: { ...d.profile.plan.villagerCapByAge, [d.world.age]: d.world.villagers.length } } : d.profile.plan;
+  const cmds = decide(view, d.query, d.data, plan, reserve);
   for (const c of cmds) {
     d.emit(c);
     account(d, c);
@@ -45,4 +48,76 @@ function account(d: AiDecision, c: CommandInput): void {
   if (c.type === 'train') d.popUsed += d.data.unit(c.unitType).popCost;
   if (id === null) return;
   d.pay(d.cost(id), false);
+}
+
+/**
+ * Villagers first (hard, from the Township Age): the Town Center queue is fed before any military spending, from the
+ * whole stockpile, so the economy never stalls behind the army (a human "hard" build keeps the Town Center busy).
+ * In the Founding Age the economy layer's own rule (with its hold before the advance) decides.
+ */
+export function feedTownCenter(d: AiDecision): void {
+  const from = d.profile.villagersFirstFromAge;
+  if (from === null || d.world.age < from || d.ageCost !== null) return;
+  const centre = d.data.start.centerBuilding;
+  const cost = d.cost('villager');
+  let count = d.world.villagers.length;
+  const centres = d.world.buildings.filter((b) => b.typeId === centre && b.constructed);
+  for (const tc of centres) count += tc.queuedUnits.filter((u) => u === 'villager').length;
+  for (const tc of centres) {
+    d.ops.n++;
+    if (tc.queuedTechs.length > 0) continue;
+    const tcView = d.view.buildings.find((b) => b.id === tc.id);
+    // The first Town Center keeps one villager in production (the economy layer adds the second); extra Town Centers
+    // are not the economy layer's, so they keep two.
+    const depth = tc === d.world.tc ? 1 : 2;
+    let queued = tc.queueLength;
+    while (queued < depth && count < d.profile.villagerTarget && d.popUsed < d.popCap && d.canAfford(cost, d.freeStock())) {
+      d.ops.n++;
+      d.pay(cost, false);
+      d.popUsed++;
+      d.emit({ type: 'train', buildingId: tc.id, unitType: 'villager' });
+      queued++;
+      count++;
+      if (tcView !== undefined) tcView.queueLength++;
+    }
+  }
+}
+
+/**
+ * Extra Town Centers (hard's boom, `townCenters`): placed next to the nearest gold or stone node at least 10 tiles
+ * from home (a drop-off where the miners work, and a second villager queue), paid from the whole stockpile; while
+ * short of wood or stone, the cost is withheld from the economy (saved for). Never while defending.
+ */
+export function expand(d: AiDecision): void {
+  const w = d.world;
+  if (w.tc === null || !w.tc.constructed || d.mem.defence.active) return;
+  const centre = d.data.start.centerBuilding;
+  let want = 1;
+  for (const t of d.profile.townCenters) if (w.age >= t.age && w.villagers.length >= t.villagers) want = Math.max(want, t.count);
+  if (d.countOf(centre) >= want) return;
+  if (!d.available(centre)) return;
+  const cost = d.cost(centre);
+  if (!d.canAfford(cost)) {
+    // Only stone is saved for: withholding the wood too would stop the farms the boom needs.
+    d.saving.stone = Math.max(d.saving.stone, cost.stone);
+    return;
+  }
+  const home = d.home();
+  let best: { cx: number; cy: number } | null = null;
+  let bestD = Infinity;
+  for (const n of d.view.nodes) {
+    d.ops.n++;
+    if (n.resource !== 'gold' && n.resource !== 'stone') continue;
+    const dd = (n.cx - home.x) * (n.cx - home.x) + (n.cy - home.y) * (n.cy - home.y);
+    if (dd < 10 * 10 || dd > 26 * 26) continue;
+    if (dd < bestD) {
+      best = n;
+      bestD = dd;
+    }
+  }
+  const near = best !== null ? { x: best.cx, y: best.cy } : home;
+  const spot = best !== null ? d.baseSpot(centre, 0, near, 7) : d.baseSpot(centre, 10);
+  if (spot === null) return;
+  const size = d.data.building(centre).footprint;
+  d.construct(centre, spot, d.pickBuilders(spot.tx + size / 2, spot.ty + size / 2, 4), false);
 }

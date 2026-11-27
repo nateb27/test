@@ -17,14 +17,14 @@
  */
 
 import { registry, type DataRegistry } from '../../data';
-import { SaveError, type AiDifficulty, type Command, type ControllerSave, type PlayerId, type Sim } from '../../sim';
+import { SaveError, type AiDifficulty, type Command, type ControllerSave, type PlayerId, type ResourceAmounts, type Sim } from '../../sim';
 import type { Controller } from '../controller';
 import { readView } from '../view';
 import { runArmy, unstick } from './army';
 import { AiDecision, type AiOptions } from './context';
 import { runDefence } from './defence';
 import { DIFFICULTY } from './difficulty';
-import { economyDue, runEconomy } from './economy';
+import { economyDue, expand, feedTownCenter, runEconomy } from './economy';
 import { initialMemory, memoryToJson, parseMemory, type AiMemory } from './memory';
 import { buildMilitary, research, setRallies, trainArmy } from './military';
 import { PowerTable } from './power';
@@ -105,14 +105,18 @@ export class AiPlayer implements Controller {
     // Age food is the bottleneck and every coin goes to villagers and the advance (BALANCE.md).
     const advancing = world.tc !== null && world.tc.queuedTechs.length > 0;
     const armyStarted = (world.age >= 2 || advancing) && world.buildings.some((b) => b.typeId === 'barracks' && b.constructed);
+    d.ageCost = boomCost(d, advancing);
     d.creditBank(player.stats.resourcesGathered, armyStarted);
 
     noteBuildings(d);
     rebuildCenter(d);
     const defending = runDefence(d);
+    d.allOutDefence = defending && d.profile.allOutDefence;
     repair(d);
     rebuild(d);
     staffFoundations(d);
+    feedTownCenter(d);
+    expand(d);
     houses(d);
     buildMilitary(d);
     if (economyDue(d)) runEconomy(d);
@@ -134,4 +138,20 @@ export class AiPlayer implements Controller {
   save(): ControllerSave {
     return { playerId: this.playerId, kind: 'ai', difficulty: this.difficulty, memory: memoryToJson(this.mem) };
   }
+}
+
+/**
+ * Boom, then age (`ageUpVillagers`, hard): with enough villagers in the Township Age or later, and the next advance
+ * allowed (only its cost missing) and not yet clicked, returns the advance's cost: villager production pauses and
+ * the military leaves that much alone. Otherwise null.
+ */
+function boomCost(d: AiDecision, advancing: boolean): ResourceAmounts | null {
+  const at = d.profile.ageUpVillagers;
+  const age = d.world.age;
+  if (at === null || advancing || age < 2 || age >= (d.profile.plan.maxAge ?? 4)) return null;
+  const need = at[age];
+  if (need === undefined || d.world.villagers.length < need) return null;
+  const tech = d.data.age((age + 1) as 2 | 3 | 4).advanceTech;
+  if (tech === null || !d.available(tech)) return null;
+  return d.cost(tech);
 }
