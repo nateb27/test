@@ -84,6 +84,11 @@ export function shortfallText(shortfall: Readonly<ResourceAmounts> | undefined):
   return short.length === 0 ? 'Not enough resources' : `Not enough ${joinWords(short)}`;
 }
 
+/** Toast for a repair standing still for want of resources: "Not enough wood to repair". */
+export function repairStalledText(missing: readonly ResourceType[]): string {
+  return `Not enough ${joinWords([...missing])} to repair`;
+}
+
 /**
  * Plain text for every reject reason. A `Record` so adding a reason to the sim
  * contract fails to compile here until its toast text is written.
@@ -170,3 +175,15 @@ export const destroyedText = (name: string): string => `${name} destroyed`;
 
 /** Prompt of the Resign confirmation. */
 export const RESIGN_PROMPT_TEXT = 'Resign this match?';
+
+/**
+ * Hint shown above the bottom HUD while a target mode is active (placement has its own hint). Before, the cursor was
+ * the only sign of the mode.
+ */
+export const MODE_HINT_TEXT = {
+  attackMove: 'Attack-move: click the ground or an enemy. Shift keeps the mode, Esc or right click cancels',
+  repair: 'Repair: click a damaged building of yours. Shift keeps the mode, Esc or right click cancels',
+  rally: 'Set rally point: click the ground, a resource or a building. Esc or right click cancels',
+} as const;
+
+export type TargetModeKind = keyof typeof MODE_HINT_TEXT;

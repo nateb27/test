@@ -11,6 +11,7 @@ import type { DebugController } from '../../debug/controller';
 import type { DebugPanel } from '../../debug/DebugPanel';
 import type { AppHost } from '../host';
 import { LOCAL_PLAYER_ID, Match } from '../match';
+import type { TargetModeKind } from '../../ui/text';
 import type { EndScreenVM } from '../../ui/viewModel';
 import { playAgainConfig } from '../setup';
 import { EndScreen } from './EndScreen';
@@ -60,6 +61,7 @@ export function GameScreen({
   const [debug, setDebug] = useState<{ controller: DebugController; Panel: typeof DebugPanel } | null>(null);
   const [debugOpen, setDebugOpen] = useState(false);
   const [end, setEnd] = useState<{ match: Match; vm: EndScreenVM } | null>(null);
+  const [targetMode, setTargetMode] = useState<TargetModeKind | null>(null);
 
   useEffect(() => {
     const parent = parentRef.current;
@@ -70,6 +72,7 @@ export function GameScreen({
     let debugController: DebugController | null = null;
     let offUi: (() => void) | null = null;
     let offEnd: (() => void) | null = null;
+    let offMode: (() => void) | null = null;
     let disposed = false;
     void (async () => {
       const manifest = await host.loadManifest();
@@ -90,6 +93,8 @@ export function GameScreen({
       host.setMatch(match);
       const m = match;
       offEnd = m.onEndScreen((vm) => setEnd(vm === null ? null : { match: m, vm }));
+      // The target modes' hint (attack-move, repair, rally); placement has its own through the view-model.
+      offMode = m.onModeChange((mode) => setTargetMode(mode !== null && mode.kind !== 'placement' ? mode.kind : null));
       const ctx = (): GameHookContext => ({
         match: m,
         hud: controller as HudController,
@@ -142,7 +147,9 @@ export function GameScreen({
       setDebug(null);
       setDebugOpen(false);
       setEnd(null);
+      setTargetMode(null);
       offEnd?.();
+      offMode?.();
       offUi?.();
       debugController?.destroy();
       host.setMatch(null);
@@ -171,6 +178,7 @@ export function GameScreen({
           onRestart={restart}
           onQuit={() => navigate({ name: 'menu' })}
           onLoaded={(loaded) => navigate({ name: 'loading', source: { kind: 'sim', sim: loaded } })}
+          targetMode={targetMode}
         />
       )}
       {end !== null && <EndScreen vm={end.vm} onViewMap={() => end.match.closeEndScreen()} onPlayAgain={playAgain} onMainMenu={() => navigate({ name: 'menu' })} />}

@@ -45,6 +45,11 @@ export function clickSelection(
 /**
  * Drag box. Only own units are boxed (buildings and nodes never are). Shift
  * adds to the selection; without shift an empty box clears it.
+ *
+ * Soldiers first (WP34): when `isWorker` is given and the box holds at least one own unit that is not a worker,
+ * the workers in the box are left out. A box dragged over an army walking through the fields selects the army;
+ * before, it also took the villagers, and the shared command card of villagers and soldiers is Stop only, so the
+ * army could not attack-move. A box over villagers alone still selects them.
  */
 export function boxSelection(
   current: readonly EntityId[],
@@ -52,11 +57,16 @@ export function boxSelection(
   shift: boolean,
   owner: PlayerId,
   get: EntityLookup,
+  isWorker?: (e: ReadonlyEntity) => boolean,
 ): EntityId[] {
-  const units = boxed.filter((id) => {
+  let units = boxed.filter((id) => {
     const e = get(id);
     return e !== undefined && e.kind === 'unit' && e.owner === owner;
   });
+  if (isWorker !== undefined) {
+    const soldiers = units.filter((id) => !isWorker(get(id)!));
+    if (soldiers.length > 0) units = soldiers;
+  }
   if (units.length === 0) return shift ? [...current] : [];
   if (!shift || !allOwn(current, get, owner)) return sortedUnique(units);
   return sortedUnique([...current, ...units]);
@@ -107,6 +117,13 @@ export function entityCentre(e: ReadonlyEntity, registry: DataRegistry): Vec2 {
   const def = registry.def(e.typeId);
   const size = def !== undefined && (def.kind === 'building' || def.kind === 'node') ? def.footprint : 1;
   return { x: e.tile.tx + size / 2, y: e.tile.ty + size / 2 };
+}
+
+/** A worker: a unit whose def can gather (the villager). */
+export function isWorker(e: ReadonlyEntity, registry: DataRegistry): boolean {
+  if (e.kind !== 'unit') return false;
+  const def = registry.def(e.typeId);
+  return def !== undefined && def.kind === 'unit' && def.gather !== undefined;
 }
 
 /** A villager-type unit (can gather) with nothing to do. */

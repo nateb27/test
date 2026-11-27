@@ -175,9 +175,13 @@ export function healthBarSize(kind: 'unit' | 'building', footprint: number): Rea
   return (buildingBarSizes[footprint] ??= { w: 16 * footprint + 16, h: HP_BUILDING_H });
 }
 
-/** Whether an entity shows a health bar: selected (any owner) or damaged. Dead or unknown-max entities never do. */
-export function healthBarShown(hp: number, maxHp: number, selected: boolean): boolean {
-  return maxHp > 0 && hp > 0 && (selected || hp < maxHp);
+/**
+ * Whether an entity shows a health bar: selected (any owner) or damaged. Dead or unknown-max entities never do.
+ * `intactHp` is what the entity would have undamaged: for a foundation the hp its construction has granted so far
+ * (`builtHp`), so a building going up does not show a bar (its low construction hp is not damage) until it is hit.
+ */
+export function healthBarShown(hp: number, maxHp: number, selected: boolean, intactHp = maxHp): boolean {
+  return maxHp > 0 && hp > 0 && (selected || hp < Math.min(maxHp, intactHp));
 }
 
 /** Own entities: green at 50% and above, yellow from 25% up to 50%, red below 25%. Enemy entities are always red. */

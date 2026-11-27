@@ -7,8 +7,10 @@
  */
 
 import type { EffectSpriteId } from './catalog';
-import { circle, ellipse, line, makeSurface, mulberry, poly, type Ctx, type Pt, type Surface } from './draw';
+import { circle, ellipse, line, makeSurface, mulberry, poly, SS, type Pt, type Surface } from './draw';
+import { FIRE_LARGE, FIRE_SMALL, SMOKE, firePixels, smokePixels, type PaletteLookup, type PixelFrame } from './fire';
 import { C, OUTLINE } from './palette';
+import { sharedQuantizer } from './rendered/quantize';
 
 export interface EffectArt {
   /** Frames (each one a surface of the same size); one entry per variant for rubble. */
@@ -23,67 +25,60 @@ const FLAME_OUTER = '#d8461c';
 const FLAME_MID = C.fire;
 const FLAME_IN = C.fireLight;
 
-/** A flame tongue: a teardrop from a base point up to a tip, bent by `lean`. */
-function tongue(ctx: Ctx, x: number, base: number, w: number, h: number, lean: number, fill: string): void {
-  ctx.beginPath();
-  ctx.moveTo(x - w / 2, base);
-  ctx.bezierCurveTo(x - w / 2, base - h * 0.45, x + lean - w * 0.15, base - h * 0.7, x + lean, base - h);
-  ctx.bezierCurveTo(x + lean + w * 0.15, base - h * 0.7, x + w / 2, base - h * 0.45, x + w / 2, base);
-  ctx.closePath();
-  ctx.fillStyle = fill;
-  ctx.fill();
+/**
+ * The shared palette for the pixel fire and smoke (`fire.ts`); without a generated palette, a small warm-and-grey
+ * stand-in so the effect still draws.
+ */
+function firePalette(): PaletteLookup {
+  const q = sharedQuantizer();
+  if (q !== null) return q;
+  const pal = [14, 9, 6, 41, 39, 36, 74, 74, 63, 119, 116, 111, 69, 22, 12, 127, 65, 39, 162, 93, 66, 192, 138, 76, 236, 188, 72, 250, 246, 234];
+  return {
+    pal,
+    nearest(r, g, b) {
+      let best = 0;
+      let bd = Infinity;
+      for (let i = 0; i < pal.length / 3; i++) {
+        const d = (pal[i * 3]! - r) ** 2 + (pal[i * 3 + 1]! - g) ** 2 + (pal[i * 3 + 2]! - b) ** 2;
+        if (d < bd) {
+          bd = d;
+          best = i;
+        }
+      }
+      return best;
+    },
+  };
 }
 
-/** A looping fire of `w` x `h` (frame `f` of 4): three nested layers of flickering tongues over embers. */
-function drawFire(s: Surface, f: number, big: boolean): void {
-  const { ctx, w, h } = s;
-  const r = mulberry(1000 + f * 17 + (big ? 7 : 0));
-  const base = h - 2;
-  const n = big ? 4 : 3;
-  ctx.save();
-  ctx.globalAlpha = 0.55;
-  ellipse(ctx, w / 2, base, w * 0.42, 2.2, '#3a1606', null);
-  ctx.restore();
-  for (const [scale, fill] of [
-    [1, FLAME_OUTER],
-    [0.7, FLAME_MID],
-    [0.42, FLAME_IN],
-  ] as const) {
-    for (let i = 0; i < n; i++) {
-      const t = i / (n - 1);
-      const x = w * (0.22 + 0.56 * t) + (r() - 0.5) * 1.5;
-      const hh = (h - 4) * scale * (0.55 + 0.45 * Math.sin((t + 0.15) * Math.PI)) * (0.85 + 0.3 * r());
-      const ww = (w / n) * 1.5 * scale + 1;
-      tongue(ctx, x, base, ww, hh, (r() - 0.5) * w * 0.25, fill);
+/** A pixel frame on a canvas surface: each art pixel becomes an SS x SS block (crisp at every zoom, like the sheets). */
+function surfaceOf(px: PixelFrame): Surface {
+  const s = makeSurface(px.w, px.h);
+  const W = s.canvas.width;
+  const img = s.ctx.createImageData(W, s.canvas.height);
+  for (let y = 0; y < px.h; y++) {
+    for (let x = 0; x < px.w; x++) {
+      const j = (y * px.w + x) * 4;
+      if (px.data[j + 3] === 0) continue;
+      for (let dy = 0; dy < SS; dy++) {
+        for (let dx = 0; dx < SS; dx++) {
+          const i = ((y * SS + dy) * W + x * SS + dx) * 4;
+          img.data[i] = px.data[j]!;
+          img.data[i + 1] = px.data[j + 1]!;
+          img.data[i + 2] = px.data[j + 2]!;
+          img.data[i + 3] = px.data[j + 3]!;
+        }
+      }
     }
   }
-  // A couple of sparks above the flames.
-  for (let i = 0; i < (big ? 3 : 2); i++) circle(ctx, w * (0.25 + 0.5 * r()), base - (h - 4) * (0.75 + 0.3 * r()), 0.6, FLAME_IN, null);
+  s.ctx.putImageData(img, 0, 0);
+  return s;
 }
 
-/** One frame of a looping smoke column: puffs that rise and grow over the cycle (frame `f` of `n`). */
-function drawSmoke(s: Surface, f: number, n: number): void {
-  const { ctx, w, h } = s;
-  const puffs = 7;
-  // Puff k at phase p is where puff k + 1 was a cycle earlier (positions depend on p only), so the loop is seamless.
-  // Soft-edged puffs (radial gradients), dark near the fire, paler and thinner as they rise and spread.
-  for (let k = puffs - 1; k >= 0; k--) {
-    const p = (k + f / n) / puffs; // 0 at the bottom, 1 at the top
-    const y = h - 3 - p * (h - 12);
-    const x = w / 2 + Math.sin(p * 6) * w * 0.08 + p * w * 0.16;
-    const rad = 2.5 + p * (w * 0.32);
-    const a = 0.95 * (1 - 0.75 * p) * Math.min(1, p * 5 + 0.5);
-    const shade = Math.round(48 + p * 50);
-    const g = ctx.createRadialGradient(x, y, 0, x, y, rad);
-    g.addColorStop(0, `rgba(${shade},${shade - 4},${shade - 8},${a})`);
-    g.addColorStop(0.6, `rgba(${shade + 10},${shade + 6},${shade},${a * 0.8})`);
-    g.addColorStop(1, `rgba(${shade + 20},${shade + 16},${shade + 10},0)`);
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.arc(x, y, rad, 0, Math.PI * 2);
-    ctx.fill();
-  }
-}
+/** Frames of the looping building fire and smoke (`fire.ts`), and how long each shows. */
+export const FIRE_FRAMES = 8;
+export const FIRE_FRAME_MS = 90;
+export const SMOKE_FRAMES = 8;
+export const SMOKE_FRAME_MS = 150;
 
 /** One-shot dust cloud (frame `f` of `n`): brown-grey puffs that spread and fade. */
 function drawDust(s: Surface, f: number, n: number): void {
@@ -326,33 +321,25 @@ export function drawEffect(id: EffectSpriteId): EffectArt {
       };
     case 'fx.fireSmall':
     case 'fx.fireLarge': {
-      const big = id === 'fx.fireLarge';
+      // Pixel flames over a soot scorch, quantised to the shared palette (fire.ts). The anchor is the flames' foot.
+      const spec = id === 'fx.fireLarge' ? FIRE_LARGE : FIRE_SMALL;
+      const pal = firePalette();
       return {
-        frames: [
-          many(4, (f) => {
-            const s = big ? makeSurface(24, 38) : makeSurface(15, 24);
-            drawFire(s, f, big);
-            return s;
-          }),
-        ],
-        anchor: { x: 0.5, y: (big ? 36 : 22) / (big ? 38 : 24) },
-        frameMs: 100,
+        frames: [many(FIRE_FRAMES, (f) => surfaceOf(firePixels(spec, f, FIRE_FRAMES, pal)))],
+        anchor: { x: 0.5, y: (spec.h - spec.base) / spec.h },
+        frameMs: FIRE_FRAME_MS,
         loop: true,
       };
     }
-    case 'fx.smoke':
+    case 'fx.smoke': {
+      const pal = firePalette();
       return {
-        frames: [
-          many(6, (f) => {
-            const s = makeSurface(32, 72);
-            drawSmoke(s, f, 6);
-            return s;
-          }),
-        ],
-        anchor: { x: 0.5, y: 68 / 72 },
-        frameMs: 160,
+        frames: [many(SMOKE_FRAMES, (f) => surfaceOf(smokePixels(f, SMOKE_FRAMES, pal)))],
+        anchor: { x: 0.5, y: (SMOKE.h - 4) / SMOKE.h },
+        frameMs: SMOKE_FRAME_MS,
         loop: true,
       };
+    }
     case 'rubble.2':
     case 'rubble.3':
     case 'rubble.4': {

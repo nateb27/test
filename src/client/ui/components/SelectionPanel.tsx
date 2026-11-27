@@ -157,6 +157,9 @@ function Single({ vm, actions }: { vm: SingleSelectionVM; actions: Pick<HudActio
   );
 }
 
+/** Above this many selected entities the portraits shrink from 40 to 28 px (three rows fit where two did). */
+export const MULTI_DENSE_FROM = 16;
+
 export function SelectionPanel({ vm, actions }: { vm: SelectionVM; actions: Pick<HudActions, 'cancelQueueItem' | 'narrowSelection'> }) {
   return (
     <div class="selection panel" data-testid="selection-panel">
@@ -165,7 +168,8 @@ export function SelectionPanel({ vm, actions }: { vm: SelectionVM; actions: Pick
       {vm.kind === 'multi' && (
         <div class="multi" data-testid="selection-multi">
           <div class="multi-title">{vm.entries.length} selected</div>
-          <div class="multi-grid">
+          {/* Large selections use smaller portraits; the grid scrolls by whole rows, so no portrait is ever cut in half. */}
+          <div class={vm.entries.length > MULTI_DENSE_FROM ? 'multi-grid dense' : 'multi-grid'} data-testid="multi-grid">
             {vm.entries.map((e) => (
               <button
                 type="button"
@@ -175,7 +179,7 @@ export function SelectionPanel({ vm, actions }: { vm: SelectionVM; actions: Pick
                 title={`${e.name}: click to select only this`}
                 onClick={() => actions.narrowSelection(e.entityId)}
               >
-                <Icon id={e.icon} size={40} />
+                <Icon id={e.icon} size={vm.entries.length > MULTI_DENSE_FROM ? 28 : 40} />
               </button>
             ))}
           </div>

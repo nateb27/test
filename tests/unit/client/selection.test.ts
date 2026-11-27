@@ -7,6 +7,7 @@ import {
   ControlGroups,
   findTownCenter,
   isIdleVillager,
+  isWorker,
   nextIdleVillager,
   pruneIds,
   sameTypeSelection,
@@ -15,7 +16,7 @@ import {
   type EntityLookup,
 } from '../../../src/client/input/selection';
 import { makeBuilding, makeNode, makeUnit } from '../../../src/client/render/dev/fixtureState';
-import type { Entity } from '../../../src/sim/types';
+import type { Entity, ReadonlyEntity } from '../../../src/sim/types';
 
 const ME = 1;
 const ENEMY = 2;
@@ -66,6 +67,13 @@ describe('box selection', () => {
   });
   it('replaces a foreign selection even with shift', () => {
     expect(boxSelection([30], [10], true, ME, get)).toEqual([10]);
+  });
+  it('soldiers first: a box with soldiers leaves the villagers out; villagers alone are still boxed', () => {
+    const worker = (e: ReadonlyEntity): boolean => isWorker(e, registry);
+    expect(boxSelection([], [10, 11, 13, 14], false, ME, get, worker)).toEqual([13]);
+    expect(boxSelection([], [10, 11, 14], false, ME, get, worker)).toEqual([10, 11]);
+    // Shift keeps what was selected (villagers too) and adds only the boxed soldiers.
+    expect(boxSelection([12], [10, 13], true, ME, get, worker)).toEqual([12, 13]);
   });
 });
 

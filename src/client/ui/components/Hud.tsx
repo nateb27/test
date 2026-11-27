@@ -4,6 +4,7 @@ import { artVersion, onArtUpdate } from '../../art/updates';
 import type { Sim } from '../../../sim/types';
 import type { SaveStorage } from '../../platform';
 import type { HudController } from '../hudController';
+import { MODE_HINT_TEXT, type TargetModeKind } from '../text';
 import type { HudViewModel } from '../viewModel';
 import { CommandCard } from './CommandCard';
 import { GameMenu } from './GameMenu';
@@ -43,13 +44,15 @@ export interface HudProps {
   onRestart(): void;
   onQuit(): void;
   onLoaded(sim: Sim): void;
+  /** The active target mode (attack-move, repair, rally), shown as a hint like placement's; null or absent: none. */
+  targetMode?: TargetModeKind | null;
 }
 
 /**
  * The in-match HUD. The root never captures pointer events; only its panels do,
  * so the canvas stays clickable everywhere else.
  */
-export function Hud({ controller, iconUrl, storage, sim, registry, onRestart, onQuit, onLoaded }: HudProps) {
+export function Hud({ controller, iconUrl, storage, sim, registry, onRestart, onQuit, onLoaded, targetMode = null }: HudProps) {
   const vm = useViewModel(controller);
   // A new resolver identity when art arrives late (the rendered art's background pass): every icon re-reads its URL,
   // so a portrait drawn before its sprite existed (a blank frame) is replaced by the real one.
@@ -71,6 +74,11 @@ export function Hud({ controller, iconUrl, storage, sim, registry, onRestart, on
         {vm.placing !== null && (
           <div class="placing-hint" data-testid="placing-hint">
             Click to place, Shift to keep placing, Esc to cancel
+          </div>
+        )}
+        {vm.placing === null && targetMode !== null && (
+          <div class="placing-hint mode-hint" data-testid="mode-hint" data-mode={targetMode}>
+            {MODE_HINT_TEXT[targetMode]}
           </div>
         )}
         <div class="bottom">

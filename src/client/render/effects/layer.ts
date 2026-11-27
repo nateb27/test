@@ -286,8 +286,12 @@ export class EffectLayer {
     this.firesTick = -1;
   }
 
-  /** Update every effect for this frame. `visible` is the viewport in world pixels. */
-  update(state: ReadonlyGameState, alpha: number, visible: WorldPxRect): void {
+  /**
+   * Update every effect for this frame. `visible` is the viewport in world pixels; `zoom` the camera zoom, which
+   * keeps projectiles legible when zoomed out without blowing them up when zoomed in (`projectileScale`).
+   */
+  update(state: ReadonlyGameState, alpha: number, visible: WorldPxRect, zoom = 1): void {
+    const pScale = projectileScale(zoom);
     if (this.state !== null && (state !== this.state || state.tick < this.lastTick)) this.clear();
     this.state = state;
     if (this.pending.length > 0) {
@@ -340,14 +344,14 @@ export class EffectLayer {
         const len = Math.sqrt((hx - sx) * (hx - sx) + (hy - sy) * (hy - sy));
         s.position.set(sx, sy);
         s.rotation = Math.atan2(hy - sy, hx - sx);
-        s.scale.set(Math.max(0.25, len / Math.max(1, tex.width)), 1);
+        s.scale.set(Math.max(0.25, len / Math.max(1, tex.width)), pScale);
       } else {
         const anim = this.asset(pr.kind === 'arrow' ? 'projectile.arrow' : 'projectile.stone').animation('default', 0);
         setTexture(s, anim.frames[0]!, 0.5, 0.5);
         // Arrows and stones fly at chest height above their ground track.
         s.position.set(v.x, v.y - 10);
         s.rotation = pr.kind === 'arrow' ? v.angle : 0;
-        s.scale.set(1, 1);
+        s.scale.set(pScale, pScale);
       }
     }
     this.projectilePool.end();
@@ -398,7 +402,9 @@ export class EffectLayer {
         // Raise the point up the building's art; keep it inside the art's columns around the anchor.
         const lift = o.lift * height * 0.85;
         s.position.set(sx + (g.x - sx) * 0.75, g.y - lift);
-        const scale = o.kind === 'smoke' ? 0.9 + size * 0.2 : o.kind === 'fireLarge' ? 0.8 + size * 0.1 : 1;
+        // The fire is pixel art at the scene's resolution: drawn 1:1 (the large sprite is the bigger fire); the smoke
+        // column only grows a little on the largest footprints.
+        const scale = o.kind === 'smoke' ? 1 + Math.max(0, size - 2) * 0.1 : 1;
         s.scale.set(scale, scale);
         s.alpha = 1;
         // Smoke behind the flames, both just in front of the building and behind any unit standing in front of it.
@@ -631,6 +637,18 @@ export class EffectLayer {
     this.fx.destroy({ children: true });
   }
 }
+
+/**
+ * Sprite scale of a projectile at camera `zoom`: on screen an arrow (12 px of art) is at least 12 px long, so it
+ * stays visible at 0.5x (it was 6 px there; now 12), at most 18 px, so it does not grow to 24 px at 2x; 1:1 in between.
+ */
+export function projectileScale(zoom: number): number {
+  const z = Math.max(0.05, zoom);
+  return Math.max(PROJECTILE_MIN_PX / (PROJECTILE_ART_PX * z), Math.min(1, PROJECTILE_MAX_PX / (PROJECTILE_ART_PX * z)));
+}
+const PROJECTILE_ART_PX = 12;
+const PROJECTILE_MIN_PX = 12;
+const PROJECTILE_MAX_PX = 18;
 
 const OVERLAY_SPRITE: Readonly<Record<OverlayKind, EffectSpriteId>> = { fireSmall: 'fx.fireSmall', fireLarge: 'fx.fireLarge', smoke: 'fx.smoke' };
 
