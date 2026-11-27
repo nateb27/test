@@ -63,7 +63,8 @@ function floatProducer(d: AiDecision): { type: BuildingId; count: number } | nul
     d.ops.n++;
     if (!MILITARY_PRODUCERS.includes(b.typeId)) continue;
     producers++;
-    if (!b.constructed || b.queueLength === 0) idle++;
+    // Ranges and workshops can sit idle for want of gold; only the gold-free producers count.
+    if ((b.typeId === 'barracks' || b.typeId === 'stable') && (!b.constructed || b.queueLength === 0)) idle++;
   }
   if (idle > 0 || producers >= f.maxProducers) return null;
   const free = d.freeStock();
@@ -158,9 +159,12 @@ function lineChoice(
     d.ops.n++;
     const fixed = p.fixed[cls] ?? 0;
     if (c === 0 && fixed <= 0) continue;
-    const unit = unitForClass(cls, d.world.age);
-    if (unit === null || !trains.includes(unit) || !d.available(unit)) continue;
-    if (!d.canAfford(d.cost(unit), d.militaryBudget())) continue;
+    // The Cataphract replaces the Horseman from Age 3, but a Horseman (no gold) is trained when it is unaffordable.
+    const preferred = unitForClass(cls, d.world.age);
+    const options: UnitId[] = preferred === null ? [] : preferred === 'cataphract' ? ['cataphract', 'horseman'] : [preferred];
+    const budget = d.militaryBudget();
+    const unit = options.find((u) => trains.includes(u) && d.available(u) && d.canAfford(d.cost(u), budget)) ?? null;
+    if (unit === null) continue;
     const ctr = counter === null ? fixed : counter[cls];
     const score = (1 - c) * fixed + c * ctr;
     const share = armySize > 0 ? (shareCount[cls] ?? 0) / armySize : 0;

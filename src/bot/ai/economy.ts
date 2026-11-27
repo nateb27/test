@@ -30,13 +30,30 @@ export function runEconomy(d: AiDecision): void {
   }
   d.ops.n += view.villagers.length * 20 + view.nodes.length * 4;
   // Boom, then age: hold the villager count while the advance is saved for.
-  const plan =
-    d.ageCost !== null ? { ...d.profile.plan, villagerCapByAge: { ...d.profile.plan.villagerCapByAge, [d.world.age]: d.world.villagers.length } } : d.profile.plan;
+  let plan = d.profile.plan;
+  if (d.ageCost !== null) plan = { ...plan, villagerCapByAge: { ...plan.villagerCapByAge, [d.world.age]: d.world.villagers.length } };
+  // Once the gold within the work radius is mined out, the economy reaches for the far deposits (the late game would
+  // otherwise stall: Rams, Cataphracts, archers and the last ages all need gold).
+  if (!goldNear(d, plan.workRadius)) plan = { ...plan, workRadius: FAR_WORK_RADIUS };
   const cmds = decide(view, d.query, d.data, plan, reserve);
   for (const c of cmds) {
     d.emit(c);
     account(d, c);
   }
+}
+
+/** Work radius once the near gold is gone. */
+const FAR_WORK_RADIUS = 60;
+
+/** Is any gold node left within `radius` of the Town Center? */
+function goldNear(d: AiDecision, radius: number): boolean {
+  const tc = d.world.tc;
+  if (tc === null) return true;
+  for (const n of d.view.nodes) {
+    d.ops.n++;
+    if (n.resource === 'gold' && (n.cx - tc.cx) * (n.cx - tc.cx) + (n.cy - tc.cy) * (n.cy - tc.cy) <= radius * radius) return true;
+  }
+  return false;
 }
 
 /** Charge what an economy command costs to the decision's stockpile. */
@@ -81,43 +98,4 @@ export function feedTownCenter(d: AiDecision): void {
       if (tcView !== undefined) tcView.queueLength++;
     }
   }
-}
-
-/**
- * Extra Town Centers (hard's boom, `townCenters`): placed next to the nearest gold or stone node at least 10 tiles
- * from home (a drop-off where the miners work, and a second villager queue), paid from the whole stockpile; while
- * short of wood or stone, the cost is withheld from the economy (saved for). Never while defending.
- */
-export function expand(d: AiDecision): void {
-  const w = d.world;
-  if (w.tc === null || !w.tc.constructed || d.mem.defence.active) return;
-  const centre = d.data.start.centerBuilding;
-  let want = 1;
-  for (const t of d.profile.townCenters) if (w.age >= t.age && w.villagers.length >= t.villagers) want = Math.max(want, t.count);
-  if (d.countOf(centre) >= want) return;
-  if (!d.available(centre)) return;
-  const cost = d.cost(centre);
-  if (!d.canAfford(cost)) {
-    // Only stone is saved for: withholding the wood too would stop the farms the boom needs.
-    d.saving.stone = Math.max(d.saving.stone, cost.stone);
-    return;
-  }
-  const home = d.home();
-  let best: { cx: number; cy: number } | null = null;
-  let bestD = Infinity;
-  for (const n of d.view.nodes) {
-    d.ops.n++;
-    if (n.resource !== 'gold' && n.resource !== 'stone') continue;
-    const dd = (n.cx - home.x) * (n.cx - home.x) + (n.cy - home.y) * (n.cy - home.y);
-    if (dd < 10 * 10 || dd > 26 * 26) continue;
-    if (dd < bestD) {
-      best = n;
-      bestD = dd;
-    }
-  }
-  const near = best !== null ? { x: best.cx, y: best.cy } : home;
-  const spot = best !== null ? d.baseSpot(centre, 0, near, 7) : d.baseSpot(centre, 10);
-  if (spot === null) return;
-  const size = d.data.building(centre).footprint;
-  d.construct(centre, spot, d.pickBuilders(spot.tx + size / 2, spot.ty + size / 2, 4), false);
 }

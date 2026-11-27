@@ -576,35 +576,3 @@ function focusFire(d: AiDecision, units: readonly UnitInfo[], c: { x: number; y:
   }
   if (ids.length > 0) d.emit({ type: 'attack', unitIds: ids.sort((a, b) => a - b), targetId: t.id, queue: false });
 }
-
-/** At most this many stalled units are nudged per decision. */
-const UNSTICK_PER_DECISION = 12;
-
-/**
- * Defensive workaround: a unit chasing a building with no path and no pending request, close to the footprint but
- * outside its reach, would wait forever (it happens when the unit stands diagonally next to a footprint corner).
- * Such units get a `move` to a point just outside the footprint's nearest edge; once idle there they acquire the
- * building again from inside reach.
- */
-export function unstick(d: AiDecision): void {
-  let n = 0;
-  for (const u of d.world.army) {
-    if (n >= UNSTICK_PER_DECISION) return;
-    d.ops.n++;
-    if (!u.stalled || u.order === null || u.order.type !== 'attack') continue;
-    const t = d.world.byId.get(u.order.targetId);
-    if (t === undefined || !('size' in t)) continue;
-    const c = d.data.unit(u.typeId).combat;
-    const reach = c.range + d.data.combat.reach;
-    const dd = distSqTo(u.x, u.y, t);
-    if (dd <= reach * reach || dd > (reach + 2) * (reach + 2)) continue;
-    const px = Math.min(t.tx + t.size, Math.max(t.tx, u.x));
-    const py = Math.min(t.ty + t.size, Math.max(t.ty, u.y));
-    const len = Math.sqrt(dd);
-    const k = Math.min(reach * 0.5, 0.3) / len;
-    const x = Math.min(d.world.mapWidth - 0.01, Math.max(0.01, px + (u.x - px) * k));
-    const y = Math.min(d.world.mapHeight - 0.01, Math.max(0.01, py + (u.y - py) * k));
-    d.emit({ type: 'move', unitIds: [u.id], x, y, queue: false });
-    n++;
-  }
-}

@@ -20,11 +20,11 @@ import { registry, type DataRegistry } from '../../data';
 import { SaveError, type AiDifficulty, type Command, type ControllerSave, type PlayerId, type ResourceAmounts, type Sim } from '../../sim';
 import type { Controller } from '../controller';
 import { readView } from '../view';
-import { runArmy, unstick } from './army';
+import { runArmy } from './army';
 import { AiDecision, type AiOptions } from './context';
 import { runDefence } from './defence';
 import { DIFFICULTY } from './difficulty';
-import { economyDue, expand, feedTownCenter, runEconomy } from './economy';
+import { economyDue, feedTownCenter, runEconomy } from './economy';
 import { initialMemory, memoryToJson, parseMemory, type AiMemory } from './memory';
 import { buildMilitary, research, setRallies, trainArmy } from './military';
 import { PowerTable } from './power';
@@ -116,7 +116,6 @@ export class AiPlayer implements Controller {
     rebuild(d);
     staffFoundations(d);
     feedTownCenter(d);
-    expand(d);
     houses(d);
     buildMilitary(d);
     if (economyDue(d)) runEconomy(d);
@@ -124,7 +123,6 @@ export class AiPlayer implements Controller {
     research(d);
     setRallies(d);
     runArmy(d, defending);
-    unstick(d);
     mem.decisions++;
 
     const cost = this.cost;

@@ -141,17 +141,25 @@ describe('AI memory (6.2, 8.1 item 7)', () => {
 
 describe('AI decision cost (6.7, 8.1 item 8)', () => {
   it('stays inside the operation budget and (generously) the time budget in a full match', () => {
-    const r = playMatch({ seed: 1, seats: ['hard', 'standard'], maxTicks: 30 * MIN, timeDecisions: true, trackStuck: false });
-    for (const s of r.seats) {
+    // The match is deterministic, so every decision happens in both runs; for each decision the faster run counts.
+    // Machine load slows a decision in one run, not the same decision in both, while a really slow decision is slow
+    // in both (the approach of tests/sim/perfHarness.ts). The operation counts are the deterministic gate.
+    const play = () => playMatch({ seed: 1, seats: ['hard', 'standard'], maxTicks: 30 * MIN, timeDecisions: true, trackStuck: false });
+    const r = play();
+    const again = play();
+    expect(again.endTick).toBe(r.endTick);
+    for (const [i, s] of r.seats.entries()) {
+      const other = again.seats[i]!.decisionMs;
+      expect(other.length).toBe(s.decisionMs.length);
       const ops = s.ops!;
       const avgOps = ops.total / ops.decisions;
-      const ms = [...s.decisionMs].sort((x, y) => x - y);
+      const ms = s.decisionMs.map((x, k) => Math.min(x, other[k]!)).sort((x, y) => x - y);
       const avgMs = ms.reduce((t, x) => t + x, 0) / ms.length;
       const p99 = ms[Math.floor(ms.length * 0.99)]!;
       const perTick = (avgMs * ms.length) / r.endTick;
       console.info(
         `[ai] cost ${s.seat}: ${ops.decisions} decisions, ops avg ${Math.round(avgOps)} max ${ops.max}; ` +
-          `ms avg ${avgMs.toFixed(3)} p99 ${p99.toFixed(3)} max ${ms[ms.length - 1]!.toFixed(3)}; amortised ${perTick.toFixed(4)} ms/tick; army ${s.army}`,
+          `ms (best of 2 per decision) avg ${avgMs.toFixed(3)} p99 ${p99.toFixed(3)} max ${ms[ms.length - 1]!.toFixed(3)}; amortised ${perTick.toFixed(4)} ms/tick; army ${s.army}`,
       );
       // Operation budget (deterministic): see DESIGN.md "WP26".
       expect(avgOps).toBeLessThan(AI_OPS_AVG);

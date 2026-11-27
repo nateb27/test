@@ -26,8 +26,6 @@ export interface UnitInfo {
   power: number;
   order: Readonly<OrderState> | null;
   queued: number;
-  /** Chasing (attack order) with no path left and no path request pending: the unit is not going anywhere. */
-  stalled: boolean;
 }
 
 export interface BuildingInfo {
@@ -140,12 +138,6 @@ export function readWorld(sim: Sim, playerId: PlayerId, data: DataRegistry, powe
         power: powers.power(e.owner, e.typeId, e.hp),
         order: e.currentOrder,
         queued: e.orderQueue.length,
-        stalled:
-          e.currentOrder !== null &&
-          e.currentOrder.type === 'attack' &&
-          e.currentOrder.phase === 'chasing' &&
-          e.pendingPathRequestId === null &&
-          (e.path === null || e.path.nextIndex >= e.path.waypoints.length),
       };
       world.byId.set(e.id, info);
       if (mine) (villager ? world.villagers : world.army).push(info);

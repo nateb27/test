@@ -91,8 +91,6 @@ export interface DifficultyProfile {
    * of the wave's power (null: only the start-power rule `retreatBelow`). Raids use RAID_RETREAT instead.
    */
   localRetreat: number | null;
-  /** Extra Town Centers (hard's boom): once in `age` with `villagers`, own this many Town Centers in total. */
-  townCenters: readonly { age: number; villagers: number; count: number }[];
   /**
    * Never float (hard): while every military producer is busy and the stock after the army reserve holds at least
    * this much food plus wood, add another Barracks or Stable, up to `maxProducers` military producers (null: never).
@@ -218,7 +216,6 @@ export const DIFFICULTY: Readonly<Record<AiDifficulty, DifficultyProfile>> = {
     commitRatio: null,
     raidFirstWave: false,
     localRetreat: null,
-    townCenters: [],
     floatProducers: null,
     plan: {
       ...PLAN,
@@ -260,7 +257,6 @@ export const DIFFICULTY: Readonly<Record<AiDifficulty, DifficultyProfile>> = {
     commitRatio: null,
     raidFirstWave: false,
     localRetreat: null,
-    townCenters: [],
     floatProducers: null,
     plan: {
       ...PLAN,
@@ -304,7 +300,6 @@ export const DIFFICULTY: Readonly<Record<AiDifficulty, DifficultyProfile>> = {
     commitRatio: 1.3,
     raidFirstWave: true,
     localRetreat: 1.2,
-    townCenters: [],
     floatProducers: { stock: 700, maxProducers: 10 },
     plan: {
       ...PLAN,

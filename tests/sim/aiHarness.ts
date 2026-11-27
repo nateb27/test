@@ -290,9 +290,28 @@ function trackUnits(
 
 export function fmtTick(tick: number | null | undefined): string {
   if (tick === null || tick === undefined) return 'never';
-  const s = tick / TICK_RATE;
+  const s = Math.floor(tick / TICK_RATE);
   const m = Math.floor(s / 60);
-  return `${m}:${String(Math.round(s - m * 60)).padStart(2, '0')}`;
+  return `${m}:${String(s - m * 60).padStart(2, '0')}`;
+}
+
+/** Seeds of the long ladder and timing table (PLAN-M2 11 item 8: at least 5 seeds). */
+export const LADDER_SEEDS = [1, 2, 3, 4, 5];
+/** Vitest timeout of one long ladder test. */
+export const LONG = 3_600_000;
+
+/** One ladder match with a printed summary, command hygiene and the stuck rule checked for both seats. */
+export function ladderMatch(seats: [Seat, Seat], seed: number, limitMin: number): MatchReport {
+  const r = playMatch({ seed, seats, maxTicks: limitMin * MIN });
+  console.info(
+    `[ai] ${seats[0]} vs ${seats[1]} seed ${seed}: winner ${r.winner ?? 'none'} at ${fmtTick(r.endTick)} ` +
+      `(armies ${r.seats[0]!.army}/${r.seats[1]!.army}, villagers ${r.seats[0]!.villagers}/${r.seats[1]!.villagers})`,
+  );
+  for (const s of r.seats) {
+    expectHygiene(s);
+    expect(s.stuck, `player ${s.playerId} stuck units`).toEqual([]);
+  }
+  return r;
 }
 
 export const MIN = 60 * TICK_RATE;
