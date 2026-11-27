@@ -42,10 +42,29 @@ function cellCoord(v: number, cellSize: number, count: number): number {
   return Math.min(count - 1, Math.max(0, Math.floor(v / cellSize)));
 }
 
+/** When each index was last rebuilt: the tick, the entity count and `nextEntityId` then (scratch, not state). */
+const rebuiltAt = new WeakMap<SpatialIndex, { tick: number; count: number; nextId: number }>();
+
+/**
+ * The units of the current tick in ascending id (hp-0 units included), straight from the index, or null when the
+ * index does not describe the current entity set (not rebuilt this tick, or an entity was added or removed since).
+ * Between step 4 and cleanup (step 11) no unit is created or removed, so steps 5 to 10 can iterate this list instead
+ * of every entity (WP33: the 120 map holds about 1,800 resource nodes that those loops skipped one by one). Callers
+ * fall back to `state.entities` on null, so a hand-driven system test sees the same units either way.
+ */
+export function unitsThisTick(ctx: SimContext): readonly UnitEntity[] | null {
+  const index = ctx.runtime.spatial;
+  const at = rebuiltAt.get(index);
+  const s = ctx.state;
+  if (at === undefined || at.tick !== s.tick || at.count !== s.entities.length || at.nextId !== s.nextEntityId) return null;
+  return index.units;
+}
+
 /** Rebuild `ctx.runtime.spatial` from the current entities (start of tick step 4). */
 export function rebuildSpatialIndex(ctx: SimContext): void {
   const index = ctx.runtime.spatial;
   const { cellSize, cols, rows } = index;
+  // A fresh list each rebuild: callers of `unitsThisTick` may keep the previous tick's list.
   const units: UnitEntity[] = [];
   for (const cell of index.buildingCells) cell.length = 0;
   for (const e of ctx.state.entities) {
@@ -71,6 +90,7 @@ export function rebuildSpatialIndex(ctx: SimContext): void {
     index.unitHead[c] = i;
   }
   index.units = units;
+  rebuiltAt.set(index, { tick: ctx.state.tick, count: ctx.state.entities.length, nextId: ctx.state.nextEntityId });
 }
 
 /** Squared distance from (x, y) to the rectangle of cell (cx, cy). */

@@ -10,12 +10,18 @@
  * deliberately generous (the measured average at the time of writing is about
  * 0.3 ms and the post-warm-up worst about 8 ms): they catch a return to the
  * old behaviour (per-tick scans, allocation storms, a slow A*), not noise.
+ * WP33: each timing runs the same deterministic scenario three times and
+ * checks the average on the thread's CPU time (best run) and p99/max on the
+ * per-tick best wall time (`perfHarness.ts`), so a busy neighbour no longer
+ * fails it. The 8.4 battle has a smoke budget here (100 a side, 400 ticks);
+ * the full 200-a-side run is `performance.long.test.ts`.
  * `scripts/` holds the browser-side measurements; this file is sim only.
  */
 
 import { describe, expect, it } from 'vitest';
 import { hashState } from '../../src/sim';
-import { createStressScenario, STRESS_BUILDINGS, STRESS_UNITS } from '../../src/sim/stress';
+import { BATTLE_MIX, createBattleScenario, createStressScenario, STRESS_BUILDINGS, STRESS_UNITS } from '../../src/sim/stress';
+import { formatReport, measureTicks } from './perfHarness';
 
 const WARMUP = 150;
 const MEASURED = 2500;
@@ -44,31 +50,55 @@ describe('sim performance (plan 9.4)', () => {
     expect(run()).toEqual(run());
   });
 
-  it('averages well under 4 ms per tick and has no tick near 12 ms for long', () => {
-    const sc = createStressScenario(1);
-    const step = (): number => {
-      const commands = sc.commands(sc.sim.state.tick);
-      const t0 = performance.now();
-      sc.sim.step(commands);
-      return performance.now() - t0;
-    };
-    const cold: number[] = [];
-    for (let i = 0; i < WARMUP; i++) cold.push(step());
-    const times: number[] = [];
-    for (let i = 0; i < MEASURED; i++) times.push(step());
-    const sorted = [...times].sort((a, b) => a - b);
-    const avg = times.reduce((a, b) => a + b, 0) / times.length;
-    const p99 = sorted[Math.floor(times.length * 0.99)] as number;
-    const max = sorted[sorted.length - 1] as number;
-    console.log(
-      `stress tick (${MEASURED} ticks after ${WARMUP} warm-up): avg ${avg.toFixed(2)} ms, p99 ${p99.toFixed(2)} ms, ` +
-        `max ${max.toFixed(2)} ms; first ticks (cold, 200 path requests at once) max ${Math.max(...cold).toFixed(1)} ms`,
+  it('averages well under 4 ms per tick and has no tick near 12 ms for long (best of 3 runs)', async () => {
+    let last: ReturnType<typeof createStressScenario> | null = null;
+    const r = await measureTicks(
+      () => {
+        const sc = createStressScenario(1);
+        last = sc;
+        return { step: () => void sc.sim.step(sc.commands(sc.sim.state.tick)) };
+      },
+      WARMUP,
+      MEASURED,
+      3,
     );
-    expect(avg).toBeLessThan(2); // budget 4 ms; measured ~0.3 ms
-    expect(p99).toBeLessThan(12); // budget: worst tick 12 ms
-    expect(max).toBeLessThan(60); // an isolated GC pause or a loaded machine is tolerated, a regression is not
+    console.log(formatReport(`stress tick (${MEASURED} ticks after ${WARMUP} warm-up)`, r));
+    expect(r.cpuAvg).toBeLessThan(2); // budget 4 ms; measured ~0.35 ms
+    expect(r.bestWall.p99).toBeLessThan(12); // budget: p99 12 ms
+    expect(r.bestWall.max).toBeLessThan(60); // an isolated GC pause is tolerated, a regression is not
     // The match is really busy: nobody has run out of work.
+    const sc = last as unknown as ReturnType<typeof createStressScenario>;
     const idle = sc.sim.state.entities.filter((e) => e.kind === 'unit' && e.currentOrder === null).length;
     expect(idle).toBeLessThan(STRESS_UNITS / 4);
-  }, 60_000);
+  }, 120_000);
+});
+
+describe('battle scenario (PLAN-M2 8.4), smoke budget for npm test', () => {
+  it('has the planned size: 200 soldiers a side in the 8.4 mix (with siege) and 30 extra buildings a side', () => {
+    const sim = createBattleScenario(1, 200);
+    for (const side of [1, 2]) {
+      const units = sim.state.entities.filter((e) => e.kind === 'unit' && e.owner === side && e.typeId !== 'villager');
+      expect(units.length).toBe(200);
+      for (const { type, per200 } of BATTLE_MIX) expect(units.filter((u) => u.typeId === type).length, type).toBe(per200);
+      // Town Center + 30.
+      expect(sim.state.entities.filter((e) => e.kind === 'building' && e.owner === side).length).toBe(31);
+      const orders = units.map((u) => (u.kind === 'unit' ? (u.currentOrder?.type ?? u.orderQueue[0]?.type) : null));
+      expect(new Set(orders)).toEqual(new Set(['attackMove']));
+    }
+  });
+
+  it('100 a side, ticks 200 to 600: average under 4 ms, p99 under 12 ms (best of 3; the full run is in test:long)', async () => {
+    const r = await measureTicks(
+      () => {
+        const sim = createBattleScenario(1, 100);
+        return { step: () => void sim.step([]) };
+      },
+      199,
+      400,
+      3,
+    );
+    console.log(formatReport('battle 100/side, ticks 200-600', r));
+    expect(r.cpuAvg).toBeLessThan(4);
+    expect(r.bestWall.p99).toBeLessThan(12);
+  }, 120_000);
 });

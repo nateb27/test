@@ -69,6 +69,22 @@ export function runRaid(unit: UnitId, count = 5, villagers = 5, maxSeconds = 120
   };
 }
 
+/**
+ * Ticks until a lone idle `unit` of player 1, standing 3 tiles off the side of a completed Town Center of player 2 and
+ * given no order, is killed by its arrows (`null` after `maxTicks`). The e2e scenario 8 on the sim alone.
+ */
+export function runLoneUnitVsTownCenter(unit: UnitId, maxTicks = 2000): number | null {
+  const state = createArena();
+  createBuilding(state, 'townCenter', 2, CENTRE, CENTRE, true);
+  const u = placeGroup(state, 1, { unit, count: 1 }, { x: CENTRE + 2, y: CENTRE + 4 + 3, dir: 1 })[0]!;
+  const world = new Driver(state);
+  while (world.tick < maxTicks) {
+    world.step();
+    if (world.unit(u.id) === undefined) return world.tick;
+  }
+  return null;
+}
+
 export interface RepairFightResult {
   /** Seconds after repairs began until the building fell (`null`: it held to the cap). */
   destroyedAt: number | null;

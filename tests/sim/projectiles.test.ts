@@ -265,7 +265,7 @@ describe('WP22 Town Center arrows', () => {
     const target = createUnit(ctx.state, 'spearman', 2, 15.0, 12.0);
     tick(ctx);
     const p = ctx.state.projectiles[0]!;
-    const att = { attack: 5, attackType: 'pierce' as const, bonus: {} };
+    const att = { attack: 7, attackType: 'pierce' as const, bonus: {} };
     expect(p.damage).toBe(computeDamage(att, unitCombat(ctx, 2, 'spearman'), 1));
     expect(p.targetId).toBe(target.id);
   });

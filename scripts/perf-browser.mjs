@@ -1,7 +1,7 @@
 /**
  * WP12 browser measurements (plan 9.4). Not a CI test: run it by hand.
  *
- *   E2E_PORT=5470 node scripts/perf-browser.mjs [--skip-build] [--dir dist-perf] [--seconds 6] [--json out.json]
+ *   E2E_PORT=5470 node scripts/perf-browser.mjs [--skip-build] [--dir dist-perf] [--seconds 6] [--json out.json] [--no-battle]
  *
  * It builds the e2e flavour of the app (`window.__game` present) into
  * `dist-perf/`, serves it with `vite preview`, drives the real Chromium
@@ -240,6 +240,61 @@ for (const zoom of [1, 0.5]) {
 
 if (errors.length > 0) console.log('\nconsole errors:', errors.slice(0, 5));
 await context.close();
+
+// ---------------------------------------------------------------------------
+// 3. Battle (PLAN-M2 8.4, WP33): 200 soldiers a side attack-moving into each other, health bars and projectiles on.
+//    Skipped with --no-battle. The fight is decided within about 30 s of game time, so it samples 5 s at each zoom.
+// ---------------------------------------------------------------------------
+
+if (!flag('no-battle')) {
+  const b = await newPage();
+  await b.page.goto(base + '/');
+  await b.page.getByTestId('main-menu').waitFor();
+  await b.page.evaluate(() => window.__game.startBattle(1, 200));
+  await b.page.waitForFunction(() => window.__game?.screen === 'game' && (window.__game.state?.entities.filter((e) => e.kind === 'unit').length ?? 0) > 300, null, {
+    timeout: 60_000,
+  });
+  await b.page.getByTestId('minimap').waitFor();
+  await b.page.evaluate(() => window.__game.setPaused(false));
+  report.battle = {};
+  const battleSample = async (label, ms) => {
+    await b.page.evaluate(() => {
+      window.__rafStamps = [];
+      const loop = (t) => {
+        window.__rafStamps.push(t);
+        if (window.__rafRun) requestAnimationFrame(loop);
+      };
+      window.__rafRun = true;
+      requestAnimationFrame(loop);
+    });
+    const tick0 = await b.page.evaluate(() => window.__game.state.tick);
+    await b.page.waitForTimeout(ms);
+    const out = await b.page.evaluate(() => {
+      window.__rafRun = false;
+      const t = window.__rafStamps;
+      const dts = [];
+      for (let i = 1; i < t.length; i++) dts.push(t[i] - t[i - 1]);
+      const units = window.__game.state.entities.filter((e) => e.kind === 'unit').length;
+      return { dts, tick: window.__game.state.tick, units, projectiles: window.__game.state.projectiles.length };
+    });
+    const dts = [...out.dts].sort((x, y) => x - y);
+    const q = (p) => dts[Math.min(dts.length - 1, Math.floor(dts.length * p))];
+    const r = { fps: dts.length / (ms / 1000), frameP50Ms: q(0.5), frameP95Ms: q(0.95), ticksRun: out.tick - tick0, units: out.units, projectiles: out.projectiles };
+    report.battle[label] = r;
+    console.log(
+      `-- battle, ${label}: ${fmt(r.fps, 1)} fps, frame p50 ${fmt(r.frameP50Ms)} ms, p95 ${fmt(r.frameP95Ms)} ms | sim ticks ${r.ticksRun}/${fmt((ms / 1000) * 20, 0)} | ${r.units} units, ${r.projectiles} projectiles in flight`,
+    );
+  };
+  console.log('\n== Battle: 200 a side (plan 8.4: 60 fps at 1x, >= 45 at 0.5x on real hardware) ==');
+  for (const zoom of [1, 0.5]) {
+    await b.page.evaluate((z) => window.__game.setZoom(z), zoom);
+    await b.page.waitForTimeout(300);
+    await battleSample(`${zoom}x zoom`, Math.min(SECONDS, 5) * 1000);
+  }
+  if (b.errors.length > 0) console.log('\nconsole errors:', b.errors.slice(0, 5));
+  await b.context.close();
+}
+
 await browser.close();
 stopServer();
 

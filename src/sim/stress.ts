@@ -9,6 +9,8 @@
  * deterministic commands a scripted player issues on that tick so units keep
  * moving as well as gathering. No randomness: choices are integer arithmetic
  * on ids and the tick, so the scenario is identical on every run.
+ *
+ * `createBattleScenario` (WP33, PLAN-M2 8.4) builds the 200-a-side battle with both bases; see its doc comment.
  */
 
 import { registry } from '../data/index';
@@ -252,4 +254,99 @@ export function createStressScenario(seed = 1, data: DataRegistry = registry): S
       return out;
     },
   };
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Battle scenario (PLAN-M2 8.4, WP33)
+// ---------------------------------------------------------------------------------------------------------------------
+
+/** Unit mix per 200 soldiers, front line first (plan 8.4's 60/40/40/40/10/10 with 6 Horsemen traded for siege). */
+export const BATTLE_MIX: readonly { type: string; per200: number }[] = [
+  { type: 'spearman', per200: 60 },
+  { type: 'swordsman', per200: 40 },
+  { type: 'horseman', per200: 34 },
+  { type: 'cataphract', per200: 10 },
+  { type: 'archer', per200: 40 },
+  { type: 'siphonarios', per200: 10 },
+  { type: 'batteringRam', per200: 4 },
+  { type: 'trebuchet', per200: 2 },
+];
+
+/** Extra buildings per side, around its Town Center (30 in all). */
+const BATTLE_BUILDINGS: readonly { type: string; count: number }[] = [
+  { type: 'barracks', count: 3 },
+  { type: 'archeryRange', count: 2 },
+  { type: 'stable', count: 2 },
+  { type: 'siegeWorkshop', count: 1 },
+  { type: 'mill', count: 1 },
+  { type: 'lumberCamp', count: 2 },
+  { type: 'miningCamp', count: 1 },
+  { type: 'farm', count: 6 },
+  { type: 'house', count: 12 },
+];
+
+/** Distance between the two lines, in tiles (plan 8.4). */
+export const BATTLE_LINE_GAP = 14;
+
+/**
+ * The 8.4 battle: the generated two-player conquest map (both bases, starting villagers) plus 30 completed buildings
+ * per side around its Town Center, and `perSide` soldiers per side (`BATTLE_MIX`, scaled; remainder to Spearmen) in
+ * rows at the map centre, side 1 above and side 2 below the middle, the front rows `BATTLE_LINE_GAP` tiles apart.
+ * Units are written into state directly (no cheats); the first `step` (inside, so the returned sim is at tick 1)
+ * gives each side one `attackMove` to the other line's front. No AI controllers. Same seed, same battle.
+ */
+export function createBattleScenario(seed = 1, perSide = 200, data: DataRegistry = registry): Sim {
+  const size = 120;
+  const config: GameConfig = { seed, mapSize: size, players: [{ civ: 'byzantines' }, { civ: 'byzantines' }] };
+  const state = createInitialState(config, data);
+  generateMap({ state, runtime: rebuildRuntime(state, data), data, events: [] } satisfies SimContext, config);
+  const layout = new Layout(state, data, rebuildRuntime(state, data).occupancy);
+
+  for (const owner of [1, 2]) {
+    const tc = state.entities.find((e): e is BuildingEntity => e.kind === 'building' && e.owner === owner) as BuildingEntity;
+    const half = Math.floor(data.building(tc.typeId).footprint / 2);
+    for (const { type, count } of BATTLE_BUILDINGS) {
+      const fp = data.building(type).footprint;
+      for (let i = 0; i < count; i++) {
+        const spot = layout.spot(fp, tc.tile.tx + half, tc.tile.ty + half);
+        if (spot === null) continue;
+        layout.mark(spot.tx, spot.ty, fp);
+        createBuilding(state, type, owner, spot.tx, spot.ty, true);
+      }
+    }
+  }
+
+  const counts = BATTLE_MIX.map((m) => Math.floor((perSide * m.per200) / 200));
+  counts[0] = counts[0]! + perSide - counts.reduce((a, b) => a + b, 0);
+  const order: string[] = BATTLE_MIX.flatMap((m, i) => Array.from({ length: counts[i]! }, () => m.type));
+  const centre = Math.floor(size / 2);
+  const ids: EntityId[][] = [[], [], []];
+  for (const side of [1, 2]) {
+    const dir = side === 1 ? -1 : 1;
+    let placed = 0;
+    for (let row = 0; placed < order.length && row < size; row++) {
+      const ty = centre + dir * (BATTLE_LINE_GAP / 2 + row);
+      if (ty < 1 || ty >= size - 1) break;
+      for (let k = 0; placed < order.length && k < size; k++) {
+        const tx = centre + (k % 2 === 0 ? k / 2 : -(k + 1) / 2);
+        if (tx < 1 || tx >= size - 1 || layout.taken[ty * size + tx] !== 0) continue;
+        ids[side]!.push(createUnit(state, order[placed]!, side, tx + 0.5, ty + 0.5).id);
+        placed++;
+      }
+    }
+  }
+
+  const sim = simFromState(state, data);
+  sim.step(
+    [1, 2].map((side) => ({
+      type: 'attackMove' as const,
+      playerId: side,
+      seq: 1,
+      unitIds: ids[side]!,
+      x: centre + 0.5,
+      y: centre + (side === 1 ? 1 : -1) * (BATTLE_LINE_GAP / 2) + 0.5,
+      queue: false,
+    })),
+  );
+  return sim;
 }

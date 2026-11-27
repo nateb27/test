@@ -153,7 +153,7 @@ describe('combat data: buildings and rules', () => {
     expect(tc.buildTime).toBe(150);
     expect(tc.buildMenu).toBe('economy');
     expect(r.unit('villager').builds).toContain('townCenter');
-    expect(tc.combat.attack).toEqual({ attack: 5, attackType: 'pierce', range: 7, cooldown: 2, arrows: 2, projectile: 'arrow' });
+    expect(tc.combat.attack).toEqual({ attack: 7, attackType: 'pierce', range: 7, cooldown: 2, arrows: 2, projectile: 'arrow' });
     expect(r.buildings.filter((b) => b.combat.attack !== undefined).map((b) => b.id)).toEqual(['townCenter']);
   });
 
