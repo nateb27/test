@@ -9,7 +9,9 @@ import { processPathQueue } from '../../../../src/sim/path/queue';
 import { runMovement } from '../../../../src/sim/systems/movement';
 import { applyStopCommand, runOrders } from '../../../../src/sim/systems/orders/index';
 import { applyMoveCommand } from '../../../../src/sim/systems/orders/move';
-import type { Command, GameState, SimContext, UnitEntity } from '../../../../src/sim/types';
+import { createSpatialIndex } from '../../../../src/sim/systems/combat/spatial';
+import { ACQUIRE_BUDGET_PER_TICK, type Command, type GameState, type SimContext, type UnitEntity } from '../../../../src/sim/types';
+import { M2_STATE_FIELDS, m2PlayerFields } from '../../../sim/fixtures';
 
 /** Grid from ASCII rows: '#' is blocked, anything else walkable. */
 export function gridFromAscii(rows: readonly string[]): PathGrid {
@@ -63,10 +65,12 @@ export function makeState(width: number, height: number): GameState {
       popCap: 0,
       researched: [],
       cheats: { instantBuild: false, instantResearch: false },
+      ...m2PlayerFields(id),
     })),
     entities: [],
     pathQueue: [],
     objectives: { entries: [] },
+    ...M2_STATE_FIELDS(),
   };
 }
 
@@ -78,7 +82,15 @@ export function makeCtx(state: GameState, occupancy: Uint8Array): SimContext {
   const resolvedStats: SimContext['runtime']['resolvedStats'] = state.players.map(() => ({
     [TEST_UNIT]: { speed: TEST_SPEED },
   }));
-  return { state, runtime: { occupancy, resolvedStats, pendingRemoval: [] }, data: registry, events: [] };
+  const runtime: SimContext['runtime'] = {
+    occupancy,
+    resolvedStats,
+    pendingRemoval: [],
+    combat: state.players.map(() => ({})),
+    spatial: createSpatialIndex(state.map.width, state.map.height),
+    acquireBudget: ACQUIRE_BUDGET_PER_TICK,
+  };
+  return { state, runtime, data: registry, events: [] };
 }
 
 export function addUnit(state: GameState, owner: number, x: number, y: number): UnitEntity {
@@ -95,6 +107,11 @@ export function addUnit(state: GameState, owner: number, x: number, y: number): 
     path: null,
     pendingPathRequestId: null,
     carried: null,
+    hp: 1,
+    stance: 'aggressive',
+    combat: { cooldown: 0, windup: 0, swingTargetId: null, nextScanTick: 0, lastAttackTick: null },
+    lastAttackerId: null,
+    lastDamagedTick: null,
   };
   state.entities.push(unit);
   return unit;

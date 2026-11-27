@@ -675,6 +675,7 @@ describe('construction time follows the resolved stat cache', () => {
       nodes: registry.nodes,
       terrains: registry.terrains,
       start: registry.start,
+      combat: registry.combat,
     });
     const sim = createGame(CONFIG, data);
     const entities = sim.state.entities;

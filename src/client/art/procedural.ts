@@ -60,7 +60,8 @@ export interface ProceduralManifestOptions {
 
 const UNIT_STATES: readonly UnitAnimState[] = ['idle', 'walk', 'work', 'carry'];
 const BUILDING_STAGES: readonly BuildingStage[] = ['foundation', 'scaffold', 'complete'];
-const FRAME_MS: Readonly<Record<UnitAnimState, number>> = { idle: 700, walk: 220, work: 280, carry: 240 };
+// attack and death (M2) are not drawn yet (TODO(WP27)); their frame times are placeholders.
+const FRAME_MS: Readonly<Record<UnitAnimState, number>> = { idle: 700, walk: 220, work: 280, carry: 240, attack: 150, death: 200 };
 
 function makeTexture(s: Surface): Texture {
   return new Texture({ source: new CanvasSource({ resource: s.canvas, resolution: SS }) });

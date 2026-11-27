@@ -87,6 +87,8 @@ export function buildTopBar(input: BuildViewModelInput): TopBarVM {
     clockSeconds: Math.floor(state.tick / TICK_RATE),
     speed: client.speed,
     paused: client.paused,
+    idleMilitary: 0, // STUB (TODO(WP29)): count idle military units
+    playerColor: player.color,
   };
 }
 
@@ -174,6 +176,11 @@ function singleSelection(input: BuildViewModelInput, e: ReadonlyEntity): SingleS
     constructionProgress: e.kind === 'building' && !e.constructed ? e.progress : null,
     queue: e.kind === 'building' && e.owner === playerId ? queueItems(input, e) : [],
     facts: selectionFacts(input, e),
+    ownerName: state.players[e.owner]?.name ?? '',
+    // STUB (TODO(WP29)): combat line, stance and the repairing fact.
+    combat: null,
+    stance: null,
+    repairing: false,
   };
 }
 
@@ -221,5 +228,7 @@ export function buildHudViewModel(input: BuildViewModelInput): HudViewModel {
     banner: input.client.banner,
     menuOpen: input.client.menuOpen,
     placing: input.client.placing,
+    endScreen: null, // STUB (TODO(WP29/WP30)): end screen view-model
+    resignConfirmOpen: false, // STUB (TODO(WP29)): Resign confirmation
   };
 }

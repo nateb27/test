@@ -13,6 +13,7 @@ import { EntityLayer } from '../../../src/client/render/entities';
 import { worldToScreen } from '../../../src/client/render/iso';
 import { pickDrawn } from '../../../src/client/render/picking';
 import type { GameState } from '../../../src/sim/types';
+import { M2_STATE_FIELDS, m2PlayerFields } from '../../sim/fixtures';
 
 function manifest() {
   const frames = [new Texture(), new Texture()];
@@ -48,12 +49,13 @@ function state(entities: GameState['entities']): GameState {
     nextPathRequestId: 1,
     map: { width: 60, height: 60, tiles: [] },
     players: [
-      { id: 0, civ: null, color: 0x9e9e9e, resources: { food: 0, wood: 0, gold: 0, stone: 0 }, age: 1, popUsed: 0, popCap: 0, researched: [], cheats: { instantBuild: false, instantResearch: false } },
-      { id: 1, civ: 'byzantines', color: 0x2255cc, resources: { food: 0, wood: 0, gold: 0, stone: 0 }, age: 1, popUsed: 0, popCap: 0, researched: [], cheats: { instantBuild: false, instantResearch: false } },
+      { id: 0, civ: null, color: 0x9e9e9e, resources: { food: 0, wood: 0, gold: 0, stone: 0 }, age: 1, popUsed: 0, popCap: 0, researched: [], cheats: { instantBuild: false, instantResearch: false }, ...m2PlayerFields(0) },
+      { id: 1, civ: 'byzantines', color: 0x2255cc, resources: { food: 0, wood: 0, gold: 0, stone: 0 }, age: 1, popUsed: 0, popCap: 0, researched: [], cheats: { instantBuild: false, instantResearch: false }, ...m2PlayerFields(1) },
     ],
     entities,
     pathQueue: [],
     objectives: { entries: [] },
+    ...M2_STATE_FIELDS(),
   };
 }
 

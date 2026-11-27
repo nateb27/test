@@ -134,7 +134,7 @@ export class NotificationCenter {
           const entry = state.objectives.entries.find((o) => o.id === ev.objectiveId);
           const elapsed = formatClock(ev.tick / TICK_RATE);
           const subtitle =
-            entry !== undefined && entry.kind === 'reachAge'
+            entry !== undefined && entry.kind === 'reachAge' && entry.targetAge !== null
               ? `${this.registry.age(entry.targetAge).name} reached after ${elapsed}`
               : `Completed after ${elapsed}`;
           this.pushBanner({ kind: 'objective', title: 'Objective complete', subtitle });

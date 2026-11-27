@@ -19,6 +19,7 @@ const ALL_REASONS: Record<RejectReason, true> = {
   queueFull: true,
   invalidIndex: true,
   unknownDef: true,
+  playerDefeated: true,
 };
 
 function setup() {

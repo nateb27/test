@@ -81,7 +81,8 @@ const NODE_VARIANTS: Readonly<Record<NodeKey, number>> = {
 /** Earthy icon frames: the rendered buildings and nodes are light and wash out on the pale procedural ones. */
 const ICON_THEMES = { building: { top: '#6f6a4c', bottom: '#2f2c1f' }, node: { top: '#5d6b39', bottom: '#28311a' } };
 
-const FRAME_MS: Readonly<Record<UnitAnimState, number>> = { idle: 700, walk: 220, work: 300, carry: 240 };
+// attack and death (M2) are not rendered yet (TODO(WP27)); their frame times are placeholders.
+const FRAME_MS: Readonly<Record<UnitAnimState, number>> = { idle: 700, walk: 220, work: 300, carry: 240, attack: 150, death: 200 };
 const STAGES: readonly BuildingStage[] = ['foundation', 'scaffold', 'complete'];
 
 function seedHash(n: number): number {

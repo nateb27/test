@@ -35,6 +35,8 @@ export default defineConfig({
   },
   test: {
     include: ['tests/unit/**/*.test.{ts,tsx}', 'tests/sim/**/*.test.{ts,tsx}'],
+    // Long-running sim tests (`*.long.test.ts`) run only with `npm run test:long` (vitest.long.config.ts).
+    exclude: ['**/node_modules/**', '**/*.long.test.{ts,tsx}'],
     environment: 'node',
     // Heavy sim tests (determinism, bot pacing, long runs) must not depend on machine load: generous limits.
     testTimeout: 180_000,

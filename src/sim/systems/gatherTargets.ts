@@ -7,6 +7,7 @@
  */
 
 import { findEntity } from '../entities';
+import { recordStat } from './matchStats';
 import { approachTile } from '../path/approach';
 import {
   GATHER_RETARGET_RADIUS,
@@ -205,6 +206,11 @@ export function depositCarried(ctx: SimContext, unit: UnitEntity): void {
   const c = unit.carried;
   if (c === null) return;
   const player = ctx.state.players[unit.owner];
-  if (player !== undefined) player.resources[c.type] += c.amount;
+  if (player !== undefined) {
+    player.resources[c.type] += c.amount;
+    recordStat(ctx, unit.owner, (s) => {
+      s.resourcesGathered[c.type] += c.amount;
+    });
+  }
   unit.carried = null;
 }

@@ -14,6 +14,8 @@ import type {
   ResourceNodeEntity,
   UnitEntity,
 } from '../../../sim/types';
+import { registry } from '../../../data';
+import { emptyStats } from '../../../sim/systems/matchStats';
 import { BUILDING_IDS, UNIT_IDS } from '../../art/catalog';
 
 export interface Fixture {
@@ -50,6 +52,13 @@ function player(id: number, civ: string | null, color: number): PlayerState {
     popCap: 20,
     researched: [],
     cheats: { instantBuild: false, instantResearch: false },
+    name: id === 0 ? 'Neutral' : `Player ${id}`,
+    controller: id === 0 ? 'neutral' : 'human',
+    difficulty: null,
+    outcome: 'playing',
+    defeatedTick: null,
+    stats: emptyStats(),
+    alert: null,
   };
 }
 
@@ -82,6 +91,11 @@ export function makeUnit(
     path: null,
     pendingPathRequestId: null,
     carried: action === 'carry' ? { type: 'wood', amount: 8 } : null,
+    hp: registry.def(typeId)?.kind === 'unit' ? registry.unit(typeId).combat.hp : 1,
+    stance: 'aggressive',
+    combat: { cooldown: 0, windup: 0, swingTargetId: null, nextScanTick: 0, lastAttackTick: null },
+    lastAttackerId: null,
+    lastDamagedTick: null,
   };
 }
 
@@ -100,6 +114,14 @@ export function makeBuilding(id: number, owner: number, typeId: string, tx: numb
     rally: null,
     incomeAccumulator: 0,
     gathererIds: [],
+    hp: registry.def(typeId)?.kind === 'building' ? registry.building(typeId).combat.hp : 1,
+    builtHp: registry.def(typeId)?.kind === 'building' ? registry.building(typeId).combat.hp : 1,
+    attack: null,
+    lastAttackerId: null,
+    lastDamagedTick: null,
+    repairerIds: [],
+    repairAccumulator: 0,
+    repairCostAccumulator: { food: 0, wood: 0, gold: 0, stone: 0 },
   };
 }
 
@@ -200,6 +222,9 @@ export function buildFixture(mapSize = 120): Fixture {
     entities,
     pathQueue: [],
     objectives: { entries: [] },
+    projectiles: [],
+    nextProjectileId: 1,
+    match: { mode: 'sandbox', winner: null, endedTick: null },
   };
   return { state, ids: { townCenter: tcId, tcRing: ring, villagers } };
 }

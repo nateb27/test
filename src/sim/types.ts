@@ -44,8 +44,62 @@ export const SEPARATION_RADIUS = 0.3;
 export const UNIT_PICK_RADIUS = 0.4;
 /** When a gathered node is depleted or full, retarget within this many tiles. */
 export const GATHER_RETARGET_RADIUS = 8;
-/** Format version written by `serialize`. Bumped on incompatible changes. */
-export const SAVE_VERSION = 1;
+/** Format version written by `serialize`. Bumped on incompatible changes. v2: M2 combat state and controllers. */
+export const SAVE_VERSION = 2;
+
+// ---- Combat and match constants (M2, PLAN-M2 3.1) ----
+
+/** Units and buildings scan for targets at most once per this many ticks (staggered by id). */
+export const ACQUIRE_INTERVAL_TICKS = 10;
+/** Candidate checks one scan may spend. */
+export const ACQUIRE_MAX_CHECKS_PER_SCAN = 128;
+/** Candidate checks all scans of one tick may spend; a due unit over budget scans next tick. */
+export const ACQUIRE_BUDGET_PER_TICK = 8000;
+/** Spatial index cell side in tiles. */
+export const SPATIAL_CELL_SIZE = 4;
+/** Radius padding for spatial queries made after movement (steps 8-9). */
+export const SPATIAL_QUERY_PAD = 0.1;
+/** A chasing unit re-requests a path at most this often... */
+export const CHASE_REPATH_TICKS = 10;
+/** ...and only when the target has moved this far from the path's goal. */
+export const CHASE_REPATH_DISTANCE = 1.5;
+/** Within this distance and with a walkable straight segment, chase without A*. */
+export const CHASE_DIRECT_DISTANCE = 3;
+/** Stationary attackers push apart to this distance (idle units keep SEPARATION_RADIUS). */
+export const COMBAT_SEPARATION_RADIUS = 0.45;
+/** UnderAttack is emitted for a player at most once per this many ticks... */
+export const ALERT_MIN_TICKS = 100;
+/** ...unless the new damage is at least this far from the last alert. */
+export const ALERT_MIN_DISTANCE = 12;
+
+/** Selectable player colours, in setup-screen order. Human defaults to [0], AI to [1]. */
+export const PLAYER_COLORS: readonly { id: string; name: string; value: number }[] = [
+  { id: 'blue', name: 'Blue', value: 0x2f6bd8 },
+  { id: 'red', name: 'Red', value: 0xc62f2f },
+  { id: 'green', name: 'Green', value: 0x3a9a3a },
+  { id: 'yellow', name: 'Yellow', value: 0xd8b42a },
+  { id: 'teal', name: 'Teal', value: 0x22a3a3 },
+  { id: 'orange', name: 'Orange', value: 0xe0781f },
+];
+
+export type Stance = 'aggressive' | 'standGround';
+export type AiDifficulty = 'easy' | 'standard' | 'hard';
+export type PlayerController = 'neutral' | 'human' | 'ai';
+export type PlayerOutcome = 'playing' | 'won' | 'defeated';
+export type MatchMode = 'sandbox' | 'conquest';
+export type ProjectileKind = 'arrow' | 'stone' | 'fire';
+export type AttackType = 'melee' | 'pierce';
+/** Bonus-damage classes. A def lists the classes it belongs to. */
+export type ArmorClass = 'villager' | 'infantry' | 'spear' | 'archer' | 'cavalry' | 'siege' | 'building';
+
+/** Every value of the unions above, in a fixed order (validation, UI lists). */
+export const STANCES: readonly Stance[] = ['aggressive', 'standGround'];
+export const AI_DIFFICULTIES: readonly AiDifficulty[] = ['easy', 'standard', 'hard'];
+export const PROJECTILE_KINDS: readonly ProjectileKind[] = ['arrow', 'stone', 'fire'];
+export const ARMOR_CLASSES: readonly ArmorClass[] = ['villager', 'infantry', 'spear', 'archer', 'cavalry', 'siege', 'building'];
+
+/** Plain JSON, for opaque blobs such as AI memory. */
+export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
 // ---------------------------------------------------------------------------
 // Ids and primitives
@@ -162,6 +216,40 @@ export interface GameState {
   /** Pending path requests in FIFO order (processed in step 5 of the tick). */
   pathQueue: PathRequest[];
   objectives: ObjectiveState;
+  /** In-flight projectiles, sorted by id. */
+  projectiles: Projectile[];
+  /** Next projectile id (separate from entity ids). Starts at 1. */
+  nextProjectileId: number;
+  match: MatchState;
+}
+
+export interface MatchState {
+  mode: MatchMode;
+  /** Set when the match ends with a winner; null otherwise (also on a draw). */
+  winner: PlayerId | null;
+  /** Tick (state.tick + 1 of the deciding tick) the match ended, or null while running / in sandbox. */
+  endedTick: number | null;
+}
+
+/** Per-player match statistics (end screen). Updated through `recordStat` (systems/matchStats.ts). */
+export interface PlayerStats {
+  unitsTrained: number;
+  unitsLost: number;
+  unitsKilled: number;
+  /** Completed constructions (not the starting Town Center). */
+  buildingsBuilt: number;
+  buildingsLost: number;
+  buildingsDestroyed: number;
+  /** Deposited at drop-offs plus passive income. Integers. */
+  resourcesGathered: ResourceAmounts;
+  /** Age advances included. */
+  techsResearched: number;
+  peakPopulation: number;
+  /**
+   * Tick each age was reached (`state.tick + 1` of the completing tick, like objectives); index = age - 1; [0] is 0,
+   * unreached ages are null.
+   */
+  ageReachedTick: (number | null)[];
 }
 
 /** Cheat flags. Set only by `cheat` commands; part of state so replays stay exact. */
@@ -176,7 +264,7 @@ export interface PlayerState {
   id: PlayerId;
   /** `null` only for the neutral player 0. */
   civ: CivId | null;
-  /** Team colour as 0xRRGGBB. */
+  /** Team colour as 0xRRGGBB. From the config slot (`PLAYER_COLORS`), not the civ. Never changed by the sim. */
   color: number;
   /** Integers >= 0. Fractions live in per-building/per-order accumulators. */
   resources: ResourceAmounts;
@@ -188,6 +276,17 @@ export interface PlayerState {
   /** Completed techs (including age advances), in completion order. */
   researched: TechId[];
   cheats: PlayerCheats;
+  /** Display name ('Neutral', 'Player', 'Computer (Standard)', ...). Never changed by the sim. */
+  name: string;
+  controller: PlayerController;
+  /** Set for `controller: 'ai'`, else null. */
+  difficulty: AiDifficulty | null;
+  outcome: PlayerOutcome;
+  /** `state.tick + 1` of the tick the player was defeated, or null. */
+  defeatedTick: number | null;
+  stats: PlayerStats;
+  /** Last UnderAttack alert emitted for this player, for throttling. */
+  alert: { tick: number; x: number; y: number } | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -231,6 +330,34 @@ export interface UnitEntity extends EntityBase {
   pendingPathRequestId: number | null;
   /** Resource being carried, or `null`. */
   carried: CarriedResource | null;
+  /** Integer, 0..max resolved hp. 0 means dead this tick (removed in step 11). */
+  hp: number;
+  stance: Stance;
+  combat: UnitCombatState;
+  /** Last enemy entity that damaged this unit (retaliation, kill credit), or null. */
+  lastAttackerId: EntityId | null;
+  /** `state.tick` of the tick it was last damaged, or null. */
+  lastDamagedTick: number | null;
+}
+
+export interface UnitCombatState {
+  /** Ticks until the unit may start another attack (0 = ready). */
+  cooldown: number;
+  /** > 0 while winding up: ticks left until release. */
+  windup: number;
+  /** Target fixed when the wind-up started, or null. */
+  swingTargetId: EntityId | null;
+  /** First tick on which the acquisition step may scan for this unit. */
+  nextScanTick: number;
+  /** Tick of the last release (renderer hit effects and attack animation), or null. */
+  lastAttackTick: number | null;
+}
+
+export interface BuildingAttackState {
+  cooldown: number;
+  targetId: EntityId | null;
+  nextScanTick: number;
+  lastAttackTick: number | null;
 }
 
 export interface BuildingEntity extends EntityBase {
@@ -254,6 +381,20 @@ export interface BuildingEntity extends EntityBase {
   incomeAccumulator: number;
   /** Villagers working this building as a farm (sorted ascending). Empty for non-farms. */
   gathererIds: EntityId[];
+  /** Integer, 0..max resolved hp. 0 means destroyed this tick (removed in step 11). */
+  hp: number;
+  /** HP granted by construction so far (PLAN-M2 4.11); equals max hp once constructed. */
+  builtHp: number;
+  /** Non-null exactly when the def has `combat.attack` (Town Center). */
+  attack: BuildingAttackState | null;
+  lastAttackerId: EntityId | null;
+  lastDamagedTick: number | null;
+  /** Villagers in the `repairing` phase on it (ascending), pruned each tick like builderIds. */
+  repairerIds: EntityId[];
+  /** Fraction of the next whole hp of repair, [0, 1). */
+  repairAccumulator: number;
+  /** Fraction of the next whole resource owed for repair, each in [0, 1). */
+  repairCostAccumulator: ResourceAmounts;
 }
 
 export interface ResourceNodeEntity extends EntityBase {
@@ -268,6 +409,27 @@ export interface ResourceNodeEntity extends EntityBase {
 }
 
 export type Entity = UnitEntity | BuildingEntity | ResourceNodeEntity;
+
+// ---------------------------------------------------------------------------
+// Projectiles (not entities: own id sequence, never selected or pathed)
+// ---------------------------------------------------------------------------
+
+export interface Projectile {
+  id: number;
+  kind: ProjectileKind;
+  owner: PlayerId;
+  /** Shooter id (may have died since) and def (stats for splash are resolved from it at impact). */
+  sourceId: EntityId;
+  sourceType: UnitId | BuildingId;
+  targetId: EntityId;
+  from: Vec2;
+  /** Target anchor, updated every tick while the target exists, frozen after. */
+  to: Vec2;
+  flightTicks: number;
+  ticksLeft: number;
+  /** Damage to the primary target, computed at fire time (integer >= 1). */
+  damage: number;
+}
 
 // ---------------------------------------------------------------------------
 // Production
@@ -352,7 +514,41 @@ export interface DropOffOrder {
   buildingId: EntityId;
 }
 
-export type Order = MoveOrder | GatherOrder | BuildOrder | AssistOrder | DropOffOrder;
+/** Attack one entity. `auto` = created by acquisition (leashed, stance-dependent), not by a command. */
+export interface AttackOrder {
+  type: 'attack';
+  targetId: EntityId;
+  auto: boolean;
+}
+
+/** Walk to a point, engaging enemies met on the way, then continue. */
+export interface AttackMoveOrder {
+  type: 'attackMove';
+  x: number;
+  y: number;
+}
+
+/** Never move; attack whatever is in reach. Lasts until replaced. */
+export interface HoldOrder {
+  type: 'hold';
+}
+
+/** Repair an own completed, damaged building. */
+export interface RepairOrder {
+  type: 'repair';
+  buildingId: EntityId;
+}
+
+export type Order =
+  | MoveOrder
+  | GatherOrder
+  | BuildOrder
+  | AssistOrder
+  | DropOffOrder
+  | AttackOrder
+  | AttackMoveOrder
+  | HoldOrder
+  | RepairOrder;
 export type OrderType = Order['type'];
 
 /**
@@ -398,12 +594,40 @@ export interface DropOffOrderState extends DropOffOrder {
   phase: WalkPhase;
 }
 
+export interface AttackOrderState extends AttackOrder {
+  phase: 'start' | 'chasing' | 'attacking';
+  /** Where an auto engagement began (leash centre); null for commanded attacks. */
+  anchor: Vec2 | null;
+  /** Earliest tick for the next chase re-path. */
+  repathTick: number;
+}
+
+export interface AttackMoveOrderState extends AttackMoveOrder {
+  phase: 'start' | 'walking' | 'engaging';
+  targetId: EntityId | null;
+  anchor: Vec2 | null;
+  repathTick: number;
+}
+
+export interface HoldOrderState extends HoldOrder {
+  phase: 'holding';
+  targetId: EntityId | null;
+}
+
+export interface RepairOrderState extends RepairOrder {
+  phase: 'start' | 'toSite' | 'repairing';
+}
+
 export type OrderState =
   | MoveOrderState
   | GatherOrderState
   | BuildOrderState
   | AssistOrderState
-  | DropOffOrderState;
+  | DropOffOrderState
+  | AttackOrderState
+  | AttackMoveOrderState
+  | HoldOrderState
+  | RepairOrderState;
 
 // ---------------------------------------------------------------------------
 // Pathfinding
@@ -441,15 +665,15 @@ export type PathGoal =
 // Objectives
 // ---------------------------------------------------------------------------
 
-/** Objective kinds. M1 has only `reachAge`; later: `destroyTownCenters`. */
-export type ObjectiveKind = 'reachAge';
+/** Objective kinds: `reachAge` (sandbox matches) and `conquest` (conquest matches, id `conquest:<playerId>`). */
+export type ObjectiveKind = 'reachAge' | 'conquest';
 
 export interface ObjectiveEntry {
   id: string;
   kind: ObjectiveKind;
   playerId: PlayerId;
-  /** For `reachAge`: the age to reach (4 in M1). */
-  targetAge: AgeNumber;
+  /** For `reachAge`: the age to reach (4). `null` for `conquest`. */
+  targetAge: AgeNumber | null;
   /** Tick on which it completed, or `null`. Game continues as a sandbox afterwards. */
   completedTick: number | null;
 }
@@ -568,11 +792,59 @@ export type CheatAction =
   | { kind: 'addResources'; amounts: Partial<ResourceAmounts> }
   | { kind: 'instantBuild'; enabled: boolean }
   | { kind: 'instantResearch'; enabled: boolean }
-  | { kind: 'spawnUnit'; unitType: UnitId; x: number; y: number };
+  /** `owner` defaults to the issuing player (lets e2e tests spawn enemies). */
+  | { kind: 'spawnUnit'; unitType: UnitId; x: number; y: number; owner?: PlayerId }
+  /** Set an entity's hp (clamped to 0..max); 0 kills it in step 11. */
+  | { kind: 'setHp'; entityId: EntityId; hp: number }
+  /** Mark a player defeated as if conquered. */
+  | { kind: 'defeat'; playerId: PlayerId };
 
 export interface CheatCommand extends CommandBase {
   type: 'cheat';
   cheat: CheatAction;
+}
+
+/** Attack one enemy entity. */
+export interface AttackCommand extends CommandBase {
+  type: 'attack';
+  unitIds: EntityId[];
+  targetId: EntityId;
+  queue: boolean;
+}
+
+/** Walk to a point (expanded into group slots like `move`), engaging enemies on the way. */
+export interface AttackMoveCommand extends CommandBase {
+  type: 'attackMove';
+  unitIds: EntityId[];
+  x: number;
+  y: number;
+  queue: boolean;
+}
+
+/** Hold position until another order replaces it. */
+export interface HoldCommand extends CommandBase {
+  type: 'hold';
+  unitIds: EntityId[];
+}
+
+/** Change stance; does not change the current order. */
+export interface SetStanceCommand extends CommandBase {
+  type: 'setStance';
+  unitIds: EntityId[];
+  stance: Stance;
+}
+
+/** Repair an own completed, damaged building. */
+export interface RepairCommand extends CommandBase {
+  type: 'repair';
+  unitIds: EntityId[];
+  buildingId: EntityId;
+  queue: boolean;
+}
+
+/** Give up the match. */
+export interface ResignCommand extends CommandBase {
+  type: 'resign';
 }
 
 export type Command =
@@ -588,7 +860,13 @@ export type Command =
   | CancelConstructionCommand
   | SetRallyCommand
   | DeleteCommand
-  | CheatCommand;
+  | CheatCommand
+  | AttackCommand
+  | AttackMoveCommand
+  | HoldCommand
+  | SetStanceCommand
+  | RepairCommand
+  | ResignCommand;
 
 export type CommandType = Command['type'];
 
@@ -686,7 +964,9 @@ export type RejectReason =
   /** cancelQueue index out of range. */
   | 'invalidIndex'
   /** Unknown def id. */
-  | 'unknownDef';
+  | 'unknownDef'
+  /** The issuing player has been defeated (or resigned); only cheats still apply. */
+  | 'playerDefeated';
 
 // ---------------------------------------------------------------------------
 // Events (emitted by step, consumed by the client)
@@ -776,6 +1056,53 @@ export interface ObjectiveCompletedEvent {
   tick: number;
 }
 
+export interface UnitDiedEvent {
+  type: 'UnitDied';
+  playerId: PlayerId;
+  unitId: EntityId;
+  unitType: UnitId;
+  x: number;
+  y: number;
+  facing: Facing;
+  killerPlayerId: PlayerId | null;
+}
+
+export interface BuildingDestroyedEvent {
+  type: 'BuildingDestroyed';
+  playerId: PlayerId;
+  buildingId: EntityId;
+  buildingType: BuildingId;
+  tx: number;
+  ty: number;
+  size: number;
+  constructed: boolean;
+  killerPlayerId: PlayerId | null;
+}
+
+export interface UnderAttackEvent {
+  type: 'UnderAttack';
+  playerId: PlayerId;
+  entityId: EntityId;
+  entityKind: 'unit' | 'building';
+  /** Town Center hit (HUD wording). */
+  townCenter: boolean;
+  x: number;
+  y: number;
+  attackerPlayerId: PlayerId;
+}
+
+export interface PlayerDefeatedEvent {
+  type: 'PlayerDefeated';
+  playerId: PlayerId;
+  reason: 'conquered' | 'resigned';
+}
+
+export interface MatchEndedEvent {
+  type: 'MatchEnded';
+  winner: PlayerId | null;
+  tick: number;
+}
+
 export type SimEvent =
   | UnitTrainedEvent
   | BuildingPlacedEvent
@@ -786,7 +1113,12 @@ export type SimEvent =
   | VillagerIdleEvent
   | PopulationCappedEvent
   | CommandRejectedEvent
-  | ObjectiveCompletedEvent;
+  | ObjectiveCompletedEvent
+  | UnitDiedEvent
+  | BuildingDestroyedEvent
+  | UnderAttackEvent
+  | PlayerDefeatedEvent
+  | MatchEndedEvent;
 
 export type SimEventType = SimEvent['type'];
 
@@ -799,16 +1131,19 @@ export type GatherKind = 'wood' | 'berries' | 'farm' | 'gold' | 'stone';
 
 /**
  * Every stat a Modifier can target and `query.resolvedStat` can return.
- * Units: hp, attack, armor, range (provisional, unused in M1), speed (tiles/s),
+ * Units: hp, attack, meleeArmor, pierceArmor, range, speed (tiles/s),
  * carryCapacity, gatherRate.* (per second), popCost, trainTime (s).
- * Buildings: hp, armor, buildTime (s), popProvided, incomeRate (per second).
+ * Buildings: hp, meleeArmor, pierceArmor (+ attack, range for defs with `combat.attack`), buildTime (s),
+ * popProvided, incomeRate (per second).
+ * Combat stats (hp, attack, meleeArmor, pierceArmor, range) are rounded with Math.round after resolution.
  * Techs: researchTime (s).
  * All producibles: cost.* (each component rounded with Math.round after resolution, min 0).
  */
 export type StatKey =
   | 'hp'
   | 'attack'
-  | 'armor'
+  | 'meleeArmor'
+  | 'pierceArmor'
   | 'range'
   | 'speed'
   | 'carryCapacity'
@@ -844,12 +1179,27 @@ export type DeepReadonly<T> = T extends (infer R)[]
 export type ReadonlyGameState = DeepReadonly<GameState>;
 export type ReadonlyEntity = DeepReadonly<Entity>;
 
+/** One real player slot of a match. */
+export interface PlayerConfig {
+  civ: CivId;
+  /** Default PLAYER_COLORS[slotIndex].value (slot 0 blue, slot 1 red, ...). */
+  color?: number;
+  /** Default 'human' for slot 0, 'ai' for others if difficulty is set, else 'human'. */
+  controller?: 'human' | 'ai';
+  /** AI difficulty; an AI slot without one plays 'standard'. Ignored for human slots. */
+  difficulty?: AiDifficulty;
+  /** Default 'Player' (slot 0), 'Player N' (other human slots), 'Computer (Standard)' etc. (AI slots). */
+  name?: string;
+}
+
 export interface GameConfig {
   seed: number;
   /** Map side length in tiles (MAP_SIZE in M1). */
   mapSize: number;
   /** Real players only; they get ids 1..n. The neutral player 0 is added automatically. */
-  players: { civ: CivId }[];
+  players: PlayerConfig[];
+  /** Default: 'conquest' with exactly 2 players, else 'sandbox'. */
+  mode?: MatchMode;
 }
 
 /** Read-only queries. Each answers from current state; none mutates. */
@@ -904,6 +1254,77 @@ export interface SimRuntime {
   resolvedStats: Record<DefId, Partial<Record<StatKey, number>>>[];
   /** Entities flagged for removal in the cleanup step of the current tick. Empty between ticks. */
   pendingRemoval: EntityId[];
+  /**
+   * Resolved combat profiles per player and def (units and buildings), rebuilt with resolvedStats.
+   * Read through `unitCombat` / `buildingCombat` (systems/combat/damage.ts).
+   */
+  combat: Record<DefId, ResolvedUnitCombat | ResolvedBuildingCombat>[];
+  /** Rebuilt every tick in step 4. */
+  spatial: SpatialIndex;
+  /** Check budget left this tick (reset in step 4). */
+  acquireBudget: number;
+}
+
+/** A unit def's combat stats after modifiers, in ticks and tiles. */
+export interface ResolvedUnitCombat {
+  kind: 'unit';
+  maxHp: number;
+  attack: number;
+  attackType: AttackType;
+  meleeArmor: number;
+  pierceArmor: number;
+  range: number;
+  minRange: number;
+  /** range + CombatRules.reach: centre-to-target-edge distance at which attacks connect. */
+  reach: number;
+  /** max(1, round(windup * TICK_RATE)) */
+  windupTicks: number;
+  /** max(windupTicks + 1, round(cooldown * TICK_RATE)) */
+  cooldownTicks: number;
+  sight: number;
+  classes: readonly ArmorClass[];
+  bonus: Readonly<Partial<Record<ArmorClass, number>>>;
+  bonusResist: number;
+  projectile: ProjectileKind | null;
+  splash: { radius: number; percent: number } | null;
+  targets: 'any' | 'buildings';
+  autoAcquire: boolean;
+}
+
+/** A building def's combat stats after modifiers. */
+export interface ResolvedBuildingCombat {
+  kind: 'building';
+  maxHp: number;
+  meleeArmor: number;
+  pierceArmor: number;
+  /** Always 0 (lets a building profile be passed to `computeDamage` as the defender). */
+  bonusResist: number;
+  /** Always ['building']. */
+  classes: readonly ArmorClass[];
+  attack: {
+    attack: number;
+    attackType: AttackType;
+    range: number;
+    /** range + CombatRules.reach. */
+    reach: number;
+    /** max(1, round(cooldown * TICK_RATE)) */
+    cooldownTicks: number;
+    arrows: number;
+    projectile: ProjectileKind;
+  } | null;
+}
+
+/** Uniform grid over the map (PLAN-M2 2.3). Runtime only; never saved or hashed. */
+export interface SpatialIndex {
+  cellSize: number;
+  cols: number;
+  rows: number;
+  /** Per cell: index into `units` of the first unit, -1 if none; linked via `unitNext` in ascending id. */
+  unitHead: Int32Array;
+  unitNext: Int32Array;
+  units: UnitEntity[];
+  /** Per cell: ids of buildings whose footprint overlaps the cell, ascending. */
+  buildingCells: EntityId[][];
 }
 
 /** Everything a system function receives. */

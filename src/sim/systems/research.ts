@@ -2,6 +2,7 @@
 
 import { enqueueItem, validateProducer } from './production';
 import { emit, reject, type CommandHandler } from './common';
+import { recordStat } from './matchStats';
 import { recomputePopulation } from './population';
 import { rebuildResolvedStats } from '../rules/stats';
 import type { EntityId, PlayerId, SimContext, TechId } from '../types';
@@ -31,10 +32,17 @@ export function completeResearch(ctx: SimContext, playerId: PlayerId, techId: Te
   if (player === undefined || tech === undefined || tech.kind !== 'tech') return;
   if (!player.researched.includes(techId)) player.researched.push(techId);
   rebuildResolvedStats(ctx, playerId);
+  recordStat(ctx, playerId, (s) => {
+    s.techsResearched += 1;
+  });
   emit(ctx, { type: 'ResearchCompleted', playerId, techId, buildingId });
   if (tech.advancesTo !== undefined && tech.advancesTo > player.age) {
-    player.age = tech.advancesTo;
-    emit(ctx, { type: 'AgeAdvanced', playerId, age: tech.advancesTo });
+    const age = tech.advancesTo;
+    player.age = age;
+    recordStat(ctx, playerId, (s) => {
+      s.ageReachedTick[age - 1] = ctx.state.tick + 1;
+    });
+    emit(ctx, { type: 'AgeAdvanced', playerId, age });
   }
   recomputePopulation(ctx);
 }

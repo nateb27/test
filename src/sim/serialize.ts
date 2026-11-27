@@ -1,27 +1,53 @@
 /**
- * Save format: canonical JSON of `{ version: SAVE_VERSION, state }`.
- * Owned by WP1 (versioning and validation hardened by WP12).
+ * Save format v2 (PLAN-M2 2.8, 3.6): canonical JSON of `{ version: 2, state, controllers }`.
+ * Owned by WP1 (versioning and validation hardened by WP12); in M2 by WP20, then the orchestrator.
  *
- * Only GameState is saved. Everything derived from it (occupancy grid,
- * resolved stat tables, the path component cache, the movement spatial hash)
- * is rebuilt from state on load by `simFromState` -> `rebuildRuntime`.
+ * Only GameState (plus the AI controllers' own memory, beside it) is saved. Everything derived from the state
+ * (occupancy grid, resolved stat tables and combat profiles, the spatial index, the path component cache, the movement
+ * spatial hash) is rebuilt on load by `simFromState` -> `rebuildRuntime`. `hashState` covers the state only.
  *
  * Changing the shape or meaning of GameState means bumping `SAVE_VERSION`
  * (src/sim/types.ts) and, if old saves should keep loading, adding a function
  * to `MIGRATIONS` that turns a version-N state into a version-(N+1) state.
- * `tests/sim/fixtures/save-v1.json` is a committed save: the test that loads
- * it fails when the format changes without a version bump or migration.
+ * Committed saves: `tests/sim/fixtures/save-v1.json` (must keep loading through the migration; its re-serialised
+ * form is `save-v1-as-v2.json`) and `save-v2.json` (must round-trip byte for byte).
  */
 
 import { registry } from '../data/index';
 import type { DataRegistry } from '../data/schema';
 import { canonicalJson } from './hash';
 import { simFromState } from './sim';
-import { MAX_PRODUCTION_QUEUE, SAVE_VERSION, type GameState, type Sim } from './types';
+import {
+  AI_DIFFICULTIES,
+  MAX_PRODUCTION_QUEUE,
+  PROJECTILE_KINDS,
+  SAVE_VERSION,
+  STANCES,
+  type AiDifficulty,
+  type GameState,
+  type JsonValue,
+  type PlayerId,
+  type Sim,
+} from './types';
+
+/** What an AI controller saves beside the state (`controller.save()`, PLAN-M2 2.7). */
+export interface ControllerSave {
+  playerId: PlayerId;
+  kind: 'ai';
+  difficulty: AiDifficulty;
+  memory: JsonValue;
+}
+
+/** A loaded save file: the sim plus the controllers to rebuild (empty for v1 files). */
+export interface LoadedSave {
+  sim: Sim;
+  controllers: ControllerSave[];
+}
 
 interface SaveFile {
   version: number;
   state: GameState;
+  controllers: ControllerSave[];
 }
 
 export type SaveErrorCode =
@@ -70,19 +96,99 @@ export class SaveVersionError extends SaveError {
   }
 }
 
+type Migration = (state: Record<string, unknown>, data: DataRegistry) => Record<string, unknown>;
+
 /**
  * Upgrade steps: `MIGRATIONS[n]` turns the state of a version-n save into the
- * state of a version-(n+1) save. Empty while the format is at version 1.
+ * state of a version-(n+1) save. A step may assume nothing about a damaged file: anything it throws becomes
+ * `SaveError('corrupt')`, and the result is validated like any current save.
  */
-const MIGRATIONS: Readonly<Record<number, (state: Record<string, unknown>) => Record<string, unknown>>> = {};
+const MIGRATIONS: Readonly<Record<number, Migration>> = {
+  1: migrateV1toV2,
+};
 
-/** Canonical JSON of the sim's state. Runtime caches are not included. */
-export function serialize(sim: Sim): string {
-  return canonicalJson({ version: SAVE_VERSION, state: sim.state });
+/**
+ * v1 -> v2 (PLAN-M2 3.6): projectiles, match (sandbox), player identity/outcome/stats, unit and building combat
+ * state. Objectives are unchanged; controllers start empty (set by the caller).
+ */
+function migrateV1toV2(state: Record<string, unknown>, data: DataRegistry): Record<string, unknown> {
+  const tick = state.tick as number;
+  state.projectiles = [];
+  state.nextProjectileId = 1;
+  state.match = { mode: 'sandbox', winner: null, endedTick: null };
+  for (const p of state.players as Record<string, unknown>[]) {
+    const id = p.id as number;
+    const age = p.age as number;
+    p.name = id === 0 ? 'Neutral' : id === 1 ? 'Player' : `Player ${id}`;
+    p.controller = id === 0 ? 'neutral' : 'human';
+    p.difficulty = null;
+    p.outcome = 'playing';
+    p.defeatedTick = null;
+    p.alert = null;
+    p.stats = {
+      unitsTrained: 0,
+      unitsLost: 0,
+      unitsKilled: 0,
+      buildingsBuilt: 0,
+      buildingsLost: 0,
+      buildingsDestroyed: 0,
+      resourcesGathered: { food: 0, wood: 0, gold: 0, stone: 0 },
+      techsResearched: 0,
+      peakPopulation: p.popUsed,
+      // The tick an age was reached is unknown in v1: reached ages are approximated by the save's tick.
+      ageReachedTick: [0, age >= 2 ? tick : null, age >= 3 ? tick : null, age >= 4 ? tick : null],
+    };
+  }
+  const s = data.combat.constructionStartPercent;
+  for (const e of state.entities as Record<string, unknown>[]) {
+    const id = e.id as number;
+    const def = data.def(e.typeId as string);
+    if (e.kind === 'unit') {
+      e.hp = def !== undefined && def.kind === 'unit' ? def.combat.hp : 1; // no hp modifiers exist in v1 data
+      e.stance = 'aggressive';
+      e.combat = { cooldown: 0, windup: 0, swingTargetId: null, nextScanTick: tick + (id % 10), lastAttackTick: null };
+      e.lastAttackerId = null;
+      e.lastDamagedTick = null;
+    } else if (e.kind === 'building') {
+      const building = def !== undefined && def.kind === 'building' ? def : undefined;
+      const maxHp = building?.combat.hp ?? 1;
+      const progress = e.progress as number;
+      const hp = e.constructed === true ? maxHp : Math.max(1, Math.floor((maxHp * (s + (100 - s) * progress)) / 100));
+      e.hp = hp;
+      e.builtHp = hp;
+      e.attack =
+        building?.combat.attack !== undefined
+          ? { cooldown: 0, targetId: null, nextScanTick: tick + (id % 10), lastAttackTick: null }
+          : null;
+      e.lastAttackerId = null;
+      e.lastDamagedTick = null;
+      e.repairerIds = [];
+      e.repairAccumulator = 0;
+      e.repairCostAccumulator = { food: 0, wood: 0, gold: 0, stone: 0 };
+    }
+  }
+  return state;
 }
 
-/** Rebuild a Sim from `serialize` output. Throws `SaveError` (or `SaveVersionError`) when the file cannot be used. */
+/**
+ * Canonical JSON of a v2 save file: the sim's state (runtime caches are not included) and the controllers' saves
+ * (`controller.save()` of each AI, omitted nulls filtered by the caller), sorted by player id.
+ */
+export function serialize(sim: Sim, controllers: readonly ControllerSave[] = []): string {
+  const sorted = [...controllers].sort((a, b) => a.playerId - b.playerId);
+  return canonicalJson({ version: SAVE_VERSION, state: sim.state, controllers: sorted });
+}
+
+/** Rebuild a Sim from `serialize` output, ignoring any controllers. Throws `SaveError` (or `SaveVersionError`). */
 export function deserialize(json: string, data: DataRegistry = registry): Sim {
+  return deserializeSave(json, data).sim;
+}
+
+/**
+ * Rebuild a Sim and the controller saves from a save file (v1 files give `controllers: []` and load as sandbox
+ * matches). Throws `SaveError` (or `SaveVersionError`) when the file cannot be used.
+ */
+export function deserializeSave(json: string, data: DataRegistry = registry): LoadedSave {
   let parsed: unknown;
   try {
     parsed = JSON.parse(json);
@@ -98,17 +204,54 @@ export function deserialize(json: string, data: DataRegistry = registry): Sim {
   }
   let version: unknown = file.version;
   let state = file.state as unknown as Record<string, unknown>;
+  const fromVersion = version;
   if (typeof version === 'number' && Number.isInteger(version) && version < SAVE_VERSION) {
     while ((version as number) < SAVE_VERSION) {
       const step = MIGRATIONS[version as number];
       if (step === undefined) throw new SaveVersionError(file.version, SAVE_VERSION);
-      state = step(state);
+      try {
+        state = step(state, data);
+      } catch (e) {
+        if (e instanceof SaveError) throw e;
+        bad(`it could not be upgraded from version ${String(version)}`);
+      }
       version = (version as number) + 1;
     }
   }
   if (version !== SAVE_VERSION) throw new SaveVersionError(file.version, SAVE_VERSION);
   validateState(state, data);
-  return simFromState(state as unknown as GameState, data);
+  const controllers = fromVersion === SAVE_VERSION ? validateControllers(file.controllers, state) : [];
+  const sim = simFromState(state as unknown as GameState, data);
+  validateHp(sim);
+  return { sim, controllers };
+}
+
+/** Controller saves: an array of `{ playerId, kind: 'ai', difficulty, memory }`, one per AI player id at most. */
+function validateControllers(value: unknown, state: Record<string, unknown>): ControllerSave[] {
+  if (!Array.isArray(value)) bad('the controller list is missing');
+  const players = state.players as Record<string, unknown>[];
+  const seen = new Set<number>();
+  return (value as unknown[]).map((c, i) => {
+    if (!isRecord(c)) bad(`controller ${i} is invalid`);
+    const save = c as Record<string, unknown>;
+    if (!isInt(save.playerId, 1) || save.playerId >= players.length || seen.has(save.playerId)) {
+      bad(`controller ${i} has an invalid player`);
+    }
+    seen.add(save.playerId as number);
+    if (save.kind !== 'ai' || !AI_DIFFICULTIES.includes(save.difficulty as AiDifficulty)) bad(`controller ${i} is of an unknown kind`);
+    if (!('memory' in save)) bad(`controller ${i} has no memory`);
+    return { playerId: save.playerId as number, kind: 'ai', difficulty: save.difficulty as AiDifficulty, memory: save.memory as JsonValue };
+  });
+}
+
+/** hp (and builtHp) within 0..resolved max, checked once the runtime exists. */
+function validateHp(sim: Sim): void {
+  for (const e of sim.state.entities) {
+    if (e.kind === 'node') continue;
+    const max = sim.query.resolvedStat(e.owner, e.typeId, 'hp');
+    if (e.hp > max) bad(`${e.kind} ${e.id} has more hit points than it can have`);
+    if (e.kind === 'building' && (e.builtHp < 1 || e.builtHp > max)) bad(`building ${e.id} has invalid construction hit points`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -135,8 +278,34 @@ function isNum(v: unknown): v is number {
   return typeof v === 'number' && Number.isFinite(v);
 }
 
+function isIntOrNull(v: unknown): boolean {
+  return v === null || isInt(v);
+}
+
+function validateStats(v: unknown): boolean {
+  if (!isRecord(v)) return false;
+  const counters = ['unitsTrained', 'unitsLost', 'unitsKilled', 'buildingsBuilt', 'buildingsLost', 'buildingsDestroyed', 'techsResearched', 'peakPopulation'];
+  if (!counters.every((k) => isInt(v[k]))) return false;
+  if (!validResources(v.resourcesGathered)) return false;
+  const ages = v.ageReachedTick;
+  return Array.isArray(ages) && ages.length === 4 && ages.every(isIntOrNull);
+}
+
+function validatePlayerM2(player: Record<string, unknown>, i: number): void {
+  if (typeof player.name !== 'string') bad(`player ${i} has no name`);
+  if (!isInt(player.color) || (player.color as number) > 0xffffff) bad(`player ${i} has an invalid colour`);
+  const controller = player.controller;
+  if (controller !== (i === 0 ? 'neutral' : 'human') && !(i > 0 && controller === 'ai')) bad(`player ${i} has an invalid controller`);
+  if (player.difficulty !== null && !AI_DIFFICULTIES.includes(player.difficulty as AiDifficulty)) bad(`player ${i} has an invalid difficulty`);
+  if (!['playing', 'won', 'defeated'].includes(player.outcome as string)) bad(`player ${i} has an invalid outcome`);
+  if (!isIntOrNull(player.defeatedTick)) bad(`player ${i} has an invalid defeat tick`);
+  if (!validateStats(player.stats)) bad(`player ${i} has invalid statistics`);
+  const alert = player.alert;
+  if (alert !== null && (!isRecord(alert) || !isInt(alert.tick) || !isNum(alert.x) || !isNum(alert.y))) bad(`player ${i} has an invalid alert`);
+}
+
 function validateState(state: Record<string, unknown>, data: DataRegistry): void {
-  for (const key of ['tick', 'seed', 'mapSeed', 'nextEntityId', 'occupancyVersion', 'nextPathRequestId']) {
+  for (const key of ['tick', 'seed', 'mapSeed', 'nextEntityId', 'occupancyVersion', 'nextPathRequestId', 'nextProjectileId']) {
     if (!isInt(state[key])) bad(`"${key}" is not a whole number`);
   }
   const rng = state.rng;
@@ -165,17 +334,39 @@ function validateState(state: Record<string, unknown>, data: DataRegistry): void
     if (player.civ !== null && (typeof player.civ !== 'string' || !data.civs.some((c) => c.id === player.civ))) {
       bad(`player ${i} has an unknown civilization`);
     }
+    validatePlayerM2(player, i);
   });
+  const playerTotal = (players as unknown[]).length;
+
+  const match = state.match;
+  if (!isRecord(match) || (match.mode !== 'sandbox' && match.mode !== 'conquest')) bad('the match mode is missing');
+  const m = match as Record<string, unknown>;
+  if (m.winner !== null && (!isInt(m.winner, 1) || (m.winner as number) >= playerTotal)) bad('the match winner is not a player');
+  if (!isIntOrNull(m.endedTick)) bad('the match end tick is invalid');
 
   if (!Array.isArray(state.pathQueue)) bad('the path queue is missing');
   if (!isRecord(state.objectives) || !Array.isArray(state.objectives.entries)) bad('the objectives are missing');
+  for (const [i, o] of (state.objectives.entries as unknown[]).entries()) {
+    if (!isRecord(o) || typeof o.id !== 'string' || !isInt(o.playerId) || !isIntOrNull(o.completedTick)) bad(`objective ${i} is invalid`);
+    const entry = o as Record<string, unknown>;
+    const okKind =
+      (entry.kind === 'reachAge' && [1, 2, 3, 4].includes(entry.targetAge as number)) ||
+      (entry.kind === 'conquest' && entry.targetAge === null);
+    if (!okKind) bad(`objective ${i} has an invalid kind`);
+  }
 
   const entities = state.entities;
   if (!Array.isArray(entities)) bad('the entity list is missing');
   const playerCount = (players as unknown[]).length;
   const ids = new Set<number>();
-  for (const e of entities as unknown[]) if (isRecord(e) && typeof e.id === 'number') ids.add(e.id);
-  const ctx: Ctx = { data, width, height, ids };
+  const unitIds = new Set<number>();
+  for (const e of entities as unknown[]) {
+    if (isRecord(e) && typeof e.id === 'number') {
+      ids.add(e.id);
+      if (e.kind === 'unit') unitIds.add(e.id);
+    }
+  }
+  const ctx: Ctx = { data, width, height, ids, unitIds };
 
   let last = 0;
   for (const e of entities as unknown[]) {
@@ -196,6 +387,28 @@ function validateState(state: Record<string, unknown>, data: DataRegistry): void
     }
   }
 
+  const projectiles = state.projectiles;
+  if (!Array.isArray(projectiles)) bad('the projectile list is missing');
+  let lastProjectile = 0;
+  for (const p of projectiles as unknown[]) {
+    if (!isRecord(p) || !isInt(p.id, 1) || p.id <= lastProjectile || p.id >= (state.nextProjectileId as number)) {
+      bad('projectile ids are not unique and ascending');
+    }
+    const pr = p as Record<string, unknown>;
+    lastProjectile = pr.id as number;
+    const what = `projectile ${lastProjectile}`;
+    if (!PROJECTILE_KINDS.includes(pr.kind as never)) bad(`${what} is of an unknown kind`);
+    if (!isInt(pr.owner) || (pr.owner as number) >= playerTotal) bad(`${what} has an invalid owner`);
+    if (!isInt(pr.sourceId, 1) || !isInt(pr.targetId, 1)) bad(`${what} has invalid references`);
+    const source = typeof pr.sourceType === 'string' ? data.def(pr.sourceType) : undefined;
+    if (source === undefined || (source.kind !== 'unit' && source.kind !== 'building')) bad(`${what} has an unknown source`);
+    if (!isFiniteVec(pr.from) || !isFiniteVec(pr.to)) bad(`${what} has an invalid position`);
+    if (!isInt(pr.flightTicks, 1) || !isInt(pr.ticksLeft, 1) || (pr.ticksLeft as number) > (pr.flightTicks as number)) {
+      bad(`${what} has an invalid flight time`);
+    }
+    if (!isInt(pr.damage, 1)) bad(`${what} has invalid damage`);
+  }
+
   for (const [i, r] of (state.pathQueue as unknown[]).entries()) {
     if (!isRecord(r) || !isInt(r.id) || !isInt(r.unitId, 1) || !ids.has(r.unitId)) bad(`path request ${i} is invalid`);
     const req = r as Record<string, unknown>;
@@ -206,10 +419,16 @@ function validateState(state: Record<string, unknown>, data: DataRegistry): void
 }
 
 interface Ctx {
+  /** Ids of every entity, and of the units among them. */
+  unitIds: ReadonlySet<number>;
   data: DataRegistry;
   width: number;
   height: number;
   ids: ReadonlySet<number>;
+}
+
+function isFiniteVec(v: unknown): boolean {
+  return isRecord(v) && isNum(v.x) && isNum(v.y);
 }
 
 function isVec(v: unknown, ctx: Ctx): boolean {
@@ -236,9 +455,58 @@ function validOrder(o: unknown, ctx: Ctx): boolean {
     case 'build':
     case 'assist':
     case 'dropOff':
+    case 'repair':
       return isInt(o.buildingId, 1);
+    case 'attack':
+      return isInt(o.targetId, 1) && typeof o.auto === 'boolean';
+    case 'attackMove':
+      return isVec(o, ctx);
+    case 'hold':
+      return true;
     default:
       return false;
+  }
+}
+
+/** M2 fields shared by units and buildings: hp, attacker, damage tick. */
+function validateCombatCommon(entity: Record<string, unknown>, what: string): void {
+  if (!isInt(entity.hp)) bad(`${what} has invalid hit points`);
+  if (entity.lastAttackerId !== null && !isInt(entity.lastAttackerId, 1)) bad(`${what} has an invalid attacker`);
+  if (!isIntOrNull(entity.lastDamagedTick)) bad(`${what} has an invalid damage tick`);
+}
+
+function validateUnitCombat(entity: Record<string, unknown>, id: number): void {
+  const what = `unit ${id}`;
+  validateCombatCommon(entity, what);
+  if (!STANCES.includes(entity.stance as never)) bad(`${what} has an invalid stance`);
+  const c = entity.combat;
+  if (!isRecord(c) || !isInt(c.cooldown) || !isInt(c.windup) || !isInt(c.nextScanTick) || !isIntOrNull(c.lastAttackTick)) {
+    bad(`${what} has an invalid combat state`);
+  }
+  const swing = (c as Record<string, unknown>).swingTargetId;
+  if (swing !== null && !isInt(swing, 1)) bad(`${what} has an invalid combat state`);
+}
+
+function validateBuildingCombat(entity: Record<string, unknown>, id: number, ctx: Ctx): void {
+  const what = `building ${id}`;
+  validateCombatCommon(entity, what);
+  if (!isInt(entity.builtHp, 1)) bad(`${what} has invalid construction hit points`);
+  const hasAttack = ctx.data.building(entity.typeId as string).combat.attack !== undefined;
+  const a = entity.attack;
+  if (hasAttack) {
+    if (!isRecord(a) || !isInt(a.cooldown) || !isInt(a.nextScanTick) || !isIntOrNull(a.lastAttackTick) || (a.targetId !== null && !isInt(a.targetId, 1))) {
+      bad(`${what} has an invalid attack state`);
+    }
+  } else if (a !== null) {
+    bad(`${what} has an attack state but cannot attack`);
+  }
+  if (!Array.isArray(entity.repairerIds) || !entity.repairerIds.every((r) => isInt(r, 1) && ctx.unitIds.has(r))) {
+    bad(`${what} has an invalid repairer list`);
+  }
+  if (!isNum(entity.repairAccumulator) || (entity.repairAccumulator as number) < 0) bad(`${what} has an invalid repair accumulator`);
+  const acc = entity.repairCostAccumulator;
+  if (!isRecord(acc) || !['food', 'wood', 'gold', 'stone'].every((k) => isNum(acc[k]) && (acc[k] as number) >= 0)) {
+    bad(`${what} has an invalid repair cost accumulator`);
   }
 }
 
@@ -264,6 +532,7 @@ function validateUnit(entity: Record<string, unknown>, id: number, ctx: Ctx): vo
     }
   }
   if (entity.pendingPathRequestId !== null && !isInt(entity.pendingPathRequestId)) bad(`unit ${id} has an invalid path request`);
+  validateUnitCombat(entity, id);
 }
 
 function validateStatic(entity: Record<string, unknown>, id: number, ctx: Ctx): void {
@@ -287,6 +556,7 @@ function validateStatic(entity: Record<string, unknown>, id: number, ctx: Ctx): 
     bad(`building ${id} has invalid progress`);
   }
   if (!isNum(entity.incomeAccumulator)) bad(`building ${id} has an invalid income accumulator`);
+  validateBuildingCombat(entity, id, ctx);
   if (!validResources(entity.costPaid)) bad(`building ${id} has an invalid cost record`);
   const rally = entity.rally;
   if (rally !== null) {

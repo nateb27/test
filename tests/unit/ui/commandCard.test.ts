@@ -134,7 +134,7 @@ describe('villager card', () => {
     const vm = card(fx, [fx.villagers[0]!], 'economy')!;
     expect(vm.page).toBe('economy');
     const places = vm.buttons.filter((b) => b.action.type === 'place').map((b) => b.defId);
-    expect(places).toEqual(['house', 'mill', 'lumberCamp', 'miningCamp', 'farm', 'silkWorkshop']);
+    expect(places).toEqual(['house', 'mill', 'lumberCamp', 'miningCamp', 'farm', 'silkWorkshop', 'townCenter']); // Town Center buildable in M2
     const back = vm.buttons.find((b) => b.action.type === 'page')!;
     expect(back.slot).toBe(14);
     expect(back.hotkey).toBe('B');
@@ -167,7 +167,7 @@ describe('villager card', () => {
     expect(vm.buttons.find((b) => b.defId === 'farm')!.cost).toEqual({ food: 0, wood: 40, gold: 0, stone: 0 });
   });
 
-  it('uses the real sim queries: resolved costs and times, and the Town Center is in no build menu', () => {
+  it('uses the real sim queries: resolved costs and times, and the Town Center is in the economy menu (M2)', () => {
     const sim = createGame({ seed: 3, mapSize: 120, players: [{ civ: 'byzantines' }] });
     const villager = sim.state.entities.find((e) => e.kind === 'unit' && e.owner === 1)!;
     const seen = new Set<string>();
@@ -175,7 +175,7 @@ describe('villager card', () => {
       const vm = buildCommandCard({ playerId: 1, civ: 'byzantines', registry, query: sim.query, selected: [villager], page })!;
       for (const b of vm.buttons) if (b.defId !== null) seen.add(b.defId);
     }
-    expect(seen.has('townCenter')).toBe(false);
+    expect(seen.has('townCenter')).toBe(true);
     expect(seen.has('house')).toBe(true);
     expect(seen.has('silkWorkshop')).toBe(true);
     const eco = buildCommandCard({ playerId: 1, civ: 'byzantines', registry, query: sim.query, selected: [villager], page: 'economy' })!;

@@ -25,7 +25,7 @@ import type {
   SimEvent,
   UnitEntity,
 } from '../../src/sim/types';
-import { fixtureData } from './fixtures';
+import { fixtureData, M2_STATE_FIELDS, m2PlayerFields, TEST_BUILDING_COMBAT, TEST_UNIT_COMBAT } from './fixtures';
 
 export const GATHERER = 'tester';
 export const SOLDIER = 'soldier';
@@ -57,7 +57,7 @@ function unitDef(id: string, gather: UnitDef['gather']): UnitDef {
     trainTime: 1,
     popCost: 1,
     speed: 2,
-    combat: { hp: 1, attack: 0, armor: 0, range: 0 },
+    combat: TEST_UNIT_COMBAT,
     sprite: `unit.${id}`,
   };
   if (gather !== undefined) def.gather = gather;
@@ -79,7 +79,7 @@ function buildingDef(id: string, footprint: number, blocking: boolean, extra: Pa
     researches: [],
     countsTowardAge: false,
     buildMenu: 'none',
-    combat: { hp: 1, armor: 0 },
+    combat: TEST_BUILDING_COMBAT,
     sprite: `building.${id}`,
     ...extra,
   };
@@ -100,6 +100,7 @@ export function makeData(rates: Partial<Record<GatherKind, number>> = EXACT_RATE
     civs: registry.civs,
     nodes: fixtureData.nodes,
     terrains: registry.terrains,
+    combat: registry.combat,
     start: fixtureData.start,
   });
 }
@@ -124,10 +125,12 @@ export function emptyState(size = 40): GameState {
       popCap: 0,
       researched: [],
       cheats: { instantBuild: false, instantResearch: false },
+      ...m2PlayerFields(id),
     })),
     entities: [],
     pathQueue: [],
     objectives: { entries: [] },
+    ...M2_STATE_FIELDS(),
   };
 }
 
@@ -206,7 +209,8 @@ export function tree(state: GameState, tx: number, ty: number, amount = 100): Re
   return createNode(state, 'tree', tx, ty, amount);
 }
 export function building(state: GameState, type: string, tx: number, ty: number, constructed = true, owner = 1): BuildingEntity {
-  return createBuilding(state, type, owner, tx, ty, constructed);
+  // The helper defs all share one building table (1 hp, no attack); create with it so the M2 fields match.
+  return createBuilding(state, type, owner, tx, ty, constructed, undefined, makeData());
 }
 
 export function unitOf(w: World, id: number): UnitEntity {

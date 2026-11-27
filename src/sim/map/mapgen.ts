@@ -14,6 +14,7 @@
 
 import type { DataRegistry, NodeDef } from '../../data/schema';
 import { createBuilding, createNode, createUnit } from '../entities';
+import { buildingCombat, unitCombat } from '../systems/combat/damage';
 import { createRng, rngInt, rngRange } from '../rng';
 import type {
   EntityId,
@@ -384,7 +385,8 @@ function attempt(ctx: SimContext, config: GameConfig, seed: number): { starts: S
     markTiles(g, tcTile.tx, tcTile.ty, fp, group);
     let townCenterId: EntityId | null = null;
     if (centerDef !== undefined) {
-      townCenterId = createBuilding(state, centerDef.id, playerId, tcTile.tx, tcTile.ty, true).id;
+      const tcHp = buildingCombat(ctx, playerId, centerDef.id).maxHp;
+      townCenterId = createBuilding(state, centerDef.id, playerId, tcTile.tx, tcTile.ty, true, undefined, data, tcHp).id;
       if (centerDef.blocking) setFootprint(ctx.runtime.occupancy, width, height, tcTile, fp, 1);
     }
     const unitIds: EntityId[] = [];
@@ -395,7 +397,8 @@ function attempt(ctx: SimContext, config: GameConfig, seed: number): { starts: S
     for (const u of data.start.units) {
       for (let i = 0; i < u.count; i++, k++) {
         const t = ring[(offset + Math.floor((k * ring.length) / total)) % ring.length] as TilePos;
-        unitIds.push(createUnit(state, u.unitType, playerId, t.tx + 0.5, t.ty + 0.5).id);
+        const hp = unitCombat(ctx, playerId, u.unitType).maxHp;
+        unitIds.push(createUnit(state, u.unitType, playerId, t.tx + 0.5, t.ty + 0.5, 1, hp).id);
       }
     }
     starts.push({ playerId, anchor, townCenterId, unitIds, guaranteed: [] });

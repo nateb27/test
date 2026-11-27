@@ -127,6 +127,7 @@ export class Match {
     if (profiler !== null) profiler.recordTick(performance.now() - wall0);
     if (events.length > 0) {
       const t1 = perf.start();
+      this.renderer.pushEvents(events); // decals and effects (WP27)
       for (const l of this.listeners) l(events);
       perf.end('sim.listeners', t1);
     }

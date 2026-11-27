@@ -12,7 +12,7 @@ import { perf } from '../debug/perf';
 import type { AssetManifest } from '../art/manifest';
 import { registry as defaultRegistry } from '../../data';
 import type { DataRegistry } from '../../data/schema';
-import type { EntityId, ReadonlyGameState, Vec2 } from '../../sim/types';
+import type { EntityId, ReadonlyGameState, SimEvent, Vec2 } from '../../sim/types';
 import { Camera, CameraInput, type CameraInputOptions, type WorldPxRect } from './camera';
 import { EntityLayer, footprintOf, type DrawnEntity } from './entities';
 import { mapScreenBounds, screenToWorld, worldToScreen, type ScreenPoint } from './iso';
@@ -63,6 +63,19 @@ export interface WorldRendererApi extends WorldRenderer {
   readonly lastDrawn: readonly DrawnEntity[];
   /** Label of the texture an entity was drawn with on the last frame, or null (debug and tests). */
   drawnTexture(id: EntityId): string | null;
+  /** Feed a tick's events to the decal and effect layer (corpses, rubble, hit effects). PLAN-M2 3.8, 7.2. */
+  pushEvents(events: readonly SimEvent[]): void;
+  /** What the effect layer holds and drew on the last frame (debug hook `effects()`). */
+  effectStats(): EffectStats;
+}
+
+/** Counts reported by `WorldRendererApi.effectStats`. */
+export interface EffectStats {
+  projectiles: number;
+  corpses: number;
+  rubble: number;
+  fires: number;
+  effects: number;
 }
 
 export interface RendererOptions {
@@ -172,6 +185,9 @@ export async function createWorldRenderer(options: RendererOptions): Promise<Wor
       return pickRect(entities.drawn, { minX: a.x, minY: a.y, maxX: c.x, maxY: c.y }, worldToScreen, kinds);
     },
     drawnTexture: (id) => entities.drawnTexture(id),
+    // STUB (TODO(WP27)): the decal and effect layer; until then events are ignored and nothing is counted.
+    pushEvents: () => {},
+    effectStats: () => ({ projectiles: 0, corpses: 0, rubble: 0, fires: 0, effects: 0 }),
     entityCanvasBounds(id) {
       const d = entities.getDrawn(id);
       if (d === undefined) return null;

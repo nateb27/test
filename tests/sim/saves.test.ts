@@ -8,13 +8,14 @@
  *   held at the population cap, and a 200-unit stress match. "Exactly" means
  *   the re-serialised text is identical, the derived caches answer every
  *   query the same way, and both sims then evolve identically.
- * - `tests/sim/fixtures/save-v1.json` is a committed save. If this suite
- *   fails on it, the format changed: bump SAVE_VERSION and add a migration in
- *   src/sim/serialize.ts, then regenerate it with
- *   `UPDATE_SAVE_FIXTURE=1 npx vitest run tests/sim/saves.test.ts`.
+ * - `tests/sim/fixtures/save-v1.json` is a committed version-1 save (frozen: it
+ *   is never regenerated). It must keep loading through the v1 -> v2 migration;
+ *   its re-serialised form is `save-v1-as-v2.json` (tests/sim/m2contracts.test.ts).
+ *   If a suite fails on these, the format changed: bump SAVE_VERSION and add a
+ *   migration in src/sim/serialize.ts.
  */
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -146,7 +147,7 @@ function cacheView(sim: Sim): unknown {
   }
   const stats: Record<string, number | null> = {};
   const keys: StatKey[] = [
-    'hp', 'attack', 'armor', 'range', 'speed', 'carryCapacity', 'gatherRate.wood', 'gatherRate.berries', 'gatherRate.farm',
+    'hp', 'attack', 'meleeArmor', 'pierceArmor', 'range', 'speed', 'carryCapacity', 'gatherRate.wood', 'gatherRate.berries', 'gatherRate.farm',
     'gatherRate.gold', 'gatherRate.stone', 'popCost', 'popProvided', 'trainTime', 'buildTime', 'researchTime', 'incomeRate',
     'cost.food', 'cost.wood', 'cost.gold', 'cost.stone',
   ];
@@ -199,7 +200,8 @@ describe('save format', () => {
 
   it('is canonical JSON with a version field and nothing derived', () => {
     const parsed = JSON.parse(json) as Record<string, unknown>;
-    expect(Object.keys(parsed).sort()).toEqual(['state', 'version']);
+    expect(Object.keys(parsed).sort()).toEqual(['controllers', 'state', 'version']);
+    expect(parsed.controllers).toEqual([]);
     expect(parsed.version).toBe(SAVE_VERSION);
     expect(json).not.toContain('"occupancy"');
     expect(json).not.toContain('"resolvedStats"');
@@ -467,29 +469,9 @@ describe('restores exactly', () => {
 // The committed fixture
 // ---------------------------------------------------------------------------
 
-/** A short scripted game on a small map: gathering, a house under way, queues, a rally point, research. */
-function buildFixtureGame(): Sim {
-  const g = new Game({ seed: 2024, mapSize: 48, players: [{ civ: 'byzantines' }] });
-  g.rich();
-  const vs = g.units();
-  g.issue({ type: 'gather', unitIds: [vs[0]!.id, vs[1]!.id], nodeId: g.nearestNode('tree'), queue: false });
-  g.issue({ type: 'gather', unitIds: [vs[2]!.id], nodeId: g.nearestNode('berryBush'), queue: false });
-  g.issue({ type: 'gather', unitIds: [vs[3]!.id], nodeId: g.nearestNode('goldDeposit'), queue: false });
-  const { tx, ty } = g.spot('house', 4);
-  g.issue({ type: 'build', unitIds: [vs[4]!.id, vs[5]!.id], buildingType: 'house', tx, ty, queue: false });
-  const tc = g.townCenter();
-  g.issue({ type: 'train', buildingId: tc.id, unitType: 'villager' });
-  g.issue({ type: 'train', buildingId: tc.id, unitType: 'villager' });
-  g.issue({ type: 'setRally', buildingIds: [tc.id], x: tc.tile.tx + 6.5, y: tc.tile.ty + 6.5 });
-  g.run(420);
-  return g.sim;
-}
-
+// The fixture was made (in M1) by a short scripted game on a 48x48 map: gathering, a house under way, queues, a rally
+// point. It is frozen as a version-1 file and is no longer regenerated.
 describe('committed save fixture (format v1)', () => {
-  it.runIf(process.env.UPDATE_SAVE_FIXTURE === '1')('regenerates the fixture', () => {
-    writeFileSync(FIXTURE, serialize(buildFixtureGame()) + '\n');
-  });
-
   const text = readFileSync(FIXTURE, 'utf8').trim();
 
   it('is a version-1 save of a game in progress', () => {
@@ -500,10 +482,13 @@ describe('committed save fixture (format v1)', () => {
     expect(text.length).toBeLessThan(120_000);
   });
 
-  it('still loads and re-serialises byte for byte', () => {
+  it('still loads (through the v1 -> v2 migration) and re-serialises stably as version 2', () => {
     const sim = deserialize(text);
     expect(sim.state.tick).toBe(421);
-    expect(serialize(sim)).toBe(text);
+    const v2 = serialize(sim);
+    expect(JSON.parse(v2).version).toBe(2);
+    expect(serialize(deserialize(v2))).toBe(v2);
+    expect(sim.state.match.mode).toBe('sandbox');
     expect(parseSave(text)).toMatchObject({ ok: true });
   });
 

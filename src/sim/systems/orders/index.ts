@@ -5,10 +5,14 @@
  * WP6 (gather, dropOff) and WP7 (build, assist) never edit the same file.
  */
 
+import { attackOrderHandler } from './attack';
+import { attackMoveOrderHandler } from './attackMove';
 import { buildOrderHandler, assistOrderHandler } from './build';
 import { dropOffOrderHandler } from './dropOff';
 import { gatherOrderHandler } from './gather';
+import { holdOrderHandler } from './hold';
 import { moveOrderHandler } from './move';
+import { repairOrderHandler } from './repair';
 import { findEntity } from '../../entities';
 import { reject, type CommandHandler } from '../common';
 import type { Command, EntityId, Order, OrderState, OrderType, SimContext, UnitEntity } from '../../types';
@@ -62,6 +66,18 @@ export const orderHandlers: HandlerTable = {
   },
   get dropOff() {
     return dropOffOrderHandler;
+  },
+  get attack() {
+    return attackOrderHandler; // orders/attack.ts (WP21)
+  },
+  get attackMove() {
+    return attackMoveOrderHandler; // orders/attackMove.ts (WP21)
+  },
+  get hold() {
+    return holdOrderHandler; // orders/hold.ts (WP21)
+  },
+  get repair() {
+    return repairOrderHandler; // orders/repair.ts (WP24)
   },
 };
 
