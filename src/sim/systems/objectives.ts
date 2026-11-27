@@ -14,7 +14,7 @@ export function runObjectives(ctx: SimContext): void {
     if (entry.completedTick !== null) continue;
     const player = ctx.state.players[entry.playerId];
     if (player === undefined) continue;
-    if (entry.kind === 'reachAge' && entry.targetAge !== null && player.age >= entry.targetAge) {
+    if (entry.kind === 'conquest' ? player.outcome === 'won' : entry.kind === 'reachAge' && entry.targetAge !== null && player.age >= entry.targetAge) {
       entry.completedTick = ctx.state.tick + 1;
       emit(ctx, {
         type: 'ObjectiveCompleted',

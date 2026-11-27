@@ -128,7 +128,8 @@ export const fixtureData: DataRegistry = createRegistry({
 });
 
 export function configFor(seed: number, players = 1, mapSize = 120): GameConfig {
-  return { seed, mapSize, players: Array.from({ length: players }, () => ({ civ: 'byzantines' })) };
+  // The fixture registry has no producers, so a 2-player default (conquest) would end at once: pin the M1 sandbox.
+  return { seed, mapSize, mode: 'sandbox', players: Array.from({ length: players }, () => ({ civ: 'byzantines' })) };
 }
 
 /** Generate a map without wrapping it in a Sim, to inspect the report. */
