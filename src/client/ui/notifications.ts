@@ -141,7 +141,10 @@ export class NotificationCenter {
           break;
         }
         case 'BuildingDestroyed':
-          if (ev.playerId === this.playerId) this.push('error', destroyedText(defName(this.registry, ev.buildingType)));
+          // A defeated player's buildings are all removed at once (resign, conquest): the end screen says it, not a toast each.
+          if (ev.playerId === this.playerId && state.players[this.playerId]?.outcome !== 'defeated') {
+            this.push('error', destroyedText(defName(this.registry, ev.buildingType)));
+          }
           break;
         case 'PlayerDefeated': {
           if (ev.playerId === this.playerId) break; // the end screen announces the player's own defeat

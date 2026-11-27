@@ -362,6 +362,14 @@ describe('alerts and notifications (plan 7.3)', () => {
     expect(center.toasts.map((t) => [t.kind, t.text])).toEqual([['error', 'Barracks destroyed']]);
   });
 
+  it('a defeated player is not told about each building removed with the defeat (the end screen says it)', () => {
+    const { fx, center } = setup();
+    const state = structuredClone(fx.state) as typeof fx.state;
+    (state.players[1] as { outcome: string }).outcome = 'defeated';
+    center.ingest([{ type: 'BuildingDestroyed', playerId: 1, buildingId: 9, buildingType: 'townCenter', tx: 1, ty: 1, size: 4, constructed: true, killerPlayerId: null }], state);
+    expect(center.toasts).toEqual([]);
+  });
+
   it('the opponent being defeated shows a banner with its name; the player\'s own defeat does not', () => {
     const { fx, center } = setup();
     center.ingest([{ type: 'PlayerDefeated', playerId: 1, reason: 'conquered' }], fx.state);
