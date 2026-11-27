@@ -28,6 +28,11 @@ export interface BotPlan {
   stockHeadroom: number;
   shares: Readonly<Record<number, Readonly<Record<ResourceType, number>>>>;
   ageBuildings: Readonly<Record<number, readonly string[]>>;
+  /**
+   * Operations one decision may spend (the AI's budget, PLAN-M2 6.7; unset for the M1 bot): past it, the rest of the
+   * rules (and of the idle villagers) wait for the next decision a second later.
+   */
+  opBudget?: number;
   holdSeconds: Readonly<Record<number, number>>;
   foodPerGatherer: number;
   ageBuildingsFoodShare: number;

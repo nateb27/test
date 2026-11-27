@@ -28,19 +28,24 @@ export function runEconomy(d: AiDecision): void {
   for (const v of view.villagers) {
     if (d.claimed.has(v.id) || d.mem.defence.villagerIds.includes(v.id)) v.claimed = true;
   }
-  d.ops.n += view.villagers.length * 20 + view.nodes.length * 4;
   // Boom, then age: hold the villager count while the advance is saved for.
   let plan = d.profile.plan;
   if (d.ageCost !== null) plan = { ...plan, villagerCapByAge: { ...plan.villagerCapByAge, [d.world.age]: d.world.villagers.length } };
   // Once the gold within the work radius is mined out, the economy reaches for the far deposits (the late game would
   // otherwise stall: Rams, Cataphracts, archers and the last ages all need gold).
   if (!goldNear(d, plan.workRadius)) plan = { ...plan, workRadius: FAR_WORK_RADIUS };
+
+  // The economy's share of the decision budget (PLAN-M2 6.7): what it does not get to waits a second.
+  plan = { ...plan, opBudget: ECONOMY_OP_BUDGET };
   const cmds = decide(view, d.query, d.data, plan, reserve);
   for (const c of cmds) {
     d.emit(c);
     account(d, c);
   }
 }
+
+/** Operations the economy layer may spend in one decision (the rest of a decision stays well under AI_OPS_MAX). */
+export const ECONOMY_OP_BUDGET = 120_000;
 
 /** Work radius once the near gold is gone. */
 const FAR_WORK_RADIUS = 60;

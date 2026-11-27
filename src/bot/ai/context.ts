@@ -13,8 +13,8 @@ import {
   type PlayerId,
   type ResourceAmounts,
   type Sim,
-  type SimQuery,
 } from '../../sim';
+import { CachedQuery } from '../cachedQuery';
 import { blockedFromView, findSpot, type Blocked } from '../placement';
 import type { BotView, VillagerView } from '../view';
 import { BANK_CAP, RALLY_DISTANCE, type DifficultyProfile } from './difficulty';
@@ -40,7 +40,8 @@ export class AiDecision {
   /** Villagers given an order this decision (the economy layer must not reassign them). */
   readonly claimed = new Set<EntityId>();
   readonly tick: number;
-  readonly query: SimQuery;
+  /** `sim.query` with availability remembered for this decision and every call counted into `ops`. */
+  readonly query: CachedQuery;
   readonly combatOrders: boolean;
   popUsed: number;
   readonly popCap: number;
@@ -52,6 +53,12 @@ export class AiDecision {
   ageCost: ResourceAmounts | null = null;
   /** A threat is being answered this decision and the difficulty spends everything on the army then. */
   allOutDefence = false;
+  /**
+   * Finishing (every difficulty): a wave has gone out and the enemy's fighting power is under a quarter of this AI's
+   * army. Waves then reinforce continuously, the composition drops archers (useless against buildings), Siege
+   * Workshops come first in Age 3, and `finishAllOut` difficulties spend their whole stock on the army.
+   */
+  finishing = false;
   private blockedGrid: Blocked | null = null;
 
   constructor(
@@ -67,7 +74,7 @@ export class AiDecision {
     options: AiOptions,
   ) {
     this.tick = sim.state.tick;
-    this.query = sim.query;
+    this.query = new CachedQuery(sim.query, sim.state.entities.length, ops);
     this.stock = { ...view.resources };
     this.popUsed = view.popUsed;
     this.popCap = view.popCap;
@@ -117,7 +124,11 @@ export class AiDecision {
   /** What the military may spend now: the reserve plus any surplus above `surplusAbove` (and the advance being saved for). */
   militaryBudget(): ResourceAmounts {
     const out = { food: 0, wood: 0, gold: 0, stone: 0 };
-    if (this.allOutDefence) return { ...this.stock };
+    if (this.allOutDefence || (this.finishing && this.profile.finishAllOut)) {
+      // Everything except the advance being saved for (boom, then age).
+      for (const r of RESOURCE_TYPES) out[r] = Math.max(0, this.stock[r] - (this.ageCost?.[r] ?? 0));
+      return out;
+    }
     for (const r of RESOURCE_TYPES) {
       const res = this.reserveAvailable(r);
       out[r] = res + Math.max(0, this.stock[r] - res - this.profile.surplusAbove - (this.ageCost?.[r] ?? 0));
@@ -215,7 +226,10 @@ export class AiDecision {
   }
 
   blocked(): Blocked {
-    if (this.blockedGrid === null) this.blockedGrid = blockedFromView(this.view);
+    if (this.blockedGrid === null) {
+      this.blockedGrid = blockedFromView(this.view);
+      this.ops.n += this.view.nodes.length + this.view.buildings.length;
+    }
     return this.blockedGrid;
   }
 
@@ -223,9 +237,8 @@ export class AiDecision {
   baseSpot(type: BuildingId, minDist: number, near?: { x: number; y: number }, maxDist = 22): { tx: number; ty: number } | null {
     const h = near ?? this.home();
     const r = this.rally();
-    this.ops.n += maxDist * maxDist * 4;
     return findSpot(
-      { view: this.view, query: this.query, data: this.data, playerId: this.playerId, blocked: this.blocked() },
+      { view: this.view, query: this.query, data: this.data, playerId: this.playerId, blocked: this.blocked(), ops: this.ops },
       {
         type,
         near: h,

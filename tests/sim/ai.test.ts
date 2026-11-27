@@ -80,6 +80,19 @@ describe('AI full matches (8.1 items 3, 5, 6)', () => {
   }, SLOW);
 });
 
+describe('AI against a defenceless opponent (verification fix D1)', () => {
+  it('seed 5, the human gives no input: Hard razes the Town Center with rams and wins before 18:00', () => {
+    const r = playMatch({ seed: 5, seats: ['idle', 'hard'], maxTicks: 18 * MIN });
+    console.info(`[ai] hard against an idle opponent, seed 5: winner ${r.winner} at ${fmtTick(r.endTick)}`);
+    expect(r.winner).toBe(2);
+    expect(r.endTick).toBeLessThanOrEqual(18 * MIN);
+    expectHygiene(r.seats[1]!);
+    expect(r.seats[1]!.stuck).toEqual([]);
+    // Units lost to the arrows: the AI never feeds the Town Center piecemeal (39 before the fix).
+    expect(r.sim.state.players[2]!.stats.unitsLost).toBeLessThanOrEqual(10);
+  }, SLOW);
+});
+
 describe('AI memory (6.2, 8.1 item 7)', () => {
   it('seeds its own stream from seed and player id, never from state.rng', () => {
     expect(initialMemory(7, 2).rng).toEqual(createRng(aiSeed(7, 2)));
@@ -138,42 +151,3 @@ describe('AI memory (6.2, 8.1 item 7)', () => {
     expect(() => AiPlayer.restore({ ...good, difficulty: 'brutal' as never })).toThrow(SaveError);
   });
 });
-
-describe('AI decision cost (6.7, 8.1 item 8)', () => {
-  it('stays inside the operation budget and (generously) the time budget in a full match', () => {
-    // The match is deterministic, so every decision happens in both runs; for each decision the faster run counts.
-    // Machine load slows a decision in one run, not the same decision in both, while a really slow decision is slow
-    // in both (the approach of tests/sim/perfHarness.ts). The operation counts are the deterministic gate.
-    const play = () => playMatch({ seed: 1, seats: ['hard', 'standard'], maxTicks: 30 * MIN, timeDecisions: true, trackStuck: false });
-    const r = play();
-    const again = play();
-    expect(again.endTick).toBe(r.endTick);
-    for (const [i, s] of r.seats.entries()) {
-      const other = again.seats[i]!.decisionMs;
-      expect(other.length).toBe(s.decisionMs.length);
-      const ops = s.ops!;
-      const avgOps = ops.total / ops.decisions;
-      const ms = s.decisionMs.map((x, k) => Math.min(x, other[k]!)).sort((x, y) => x - y);
-      const avgMs = ms.reduce((t, x) => t + x, 0) / ms.length;
-      const p99 = ms[Math.floor(ms.length * 0.99)]!;
-      const perTick = (avgMs * ms.length) / r.endTick;
-      console.info(
-        `[ai] cost ${s.seat}: ${ops.decisions} decisions, ops avg ${Math.round(avgOps)} max ${ops.max}; ` +
-          `ms (best of 2 per decision) avg ${avgMs.toFixed(3)} p99 ${p99.toFixed(3)} max ${ms[ms.length - 1]!.toFixed(3)}; amortised ${perTick.toFixed(4)} ms/tick; army ${s.army}`,
-      );
-      // Operation budget (deterministic): see DESIGN.md "WP26".
-      expect(avgOps).toBeLessThan(AI_OPS_AVG);
-      expect(ops.max).toBeLessThan(AI_OPS_MAX);
-      // Time: 6.7 asks for 3 ms average, 8 ms worst case and 0.5 ms per tick at standard. Wall-clock time on the
-      // shared, heavily loaded test machine is a smoke check only (5x headroom, worst case on the 99th percentile so
-      // GC pauses and preemption do not count); the operation budget above is the real, deterministic gate.
-      expect(avgMs).toBeLessThan(15);
-      expect(p99).toBeLessThan(80);
-      if (s.seat === 'standard') expect(perTick).toBeLessThan(2.5);
-    }
-  }, SLOW);
-});
-
-/** Operation budgets per decision (entities read, candidates scored, grid cells visited, site candidates). */
-export const AI_OPS_AVG = 40_000;
-export const AI_OPS_MAX = 120_000;

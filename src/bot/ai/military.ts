@@ -5,12 +5,13 @@
 
 import type { BuildingId, UnitId } from '../../sim';
 import type { AiDecision } from './context';
-import { COUNTER, UNIT_CLASS, UPGRADE_LINE, unitForClass, type UnitClass } from './difficulty';
+import { COUNTER, FINISH_FIXED, UNIT_CLASS, UPGRADE_LINE, unitForClass, type UnitClass } from './difficulty';
 import type { BuildingInfo } from './world';
 
 /** Buildings whose units the AI trains. */
 export const MILITARY_PRODUCERS: readonly string[] = ['barracks', 'archeryRange', 'stable', 'siegeWorkshop'];
 const SIEGE_TYPES: readonly UnitId[] = ['batteringRam', 'trebuchet'];
+const RAM: UnitId = 'batteringRam';
 const CANDIDATE_CLASSES: readonly UnitClass[] = ['spear', 'sword', 'archer', 'horse'];
 
 /** Production buildings on the schedule; one new site per decision. */
@@ -23,8 +24,10 @@ export function buildMilitary(d: AiDecision): void {
   if (w.villagers.length >= p.firstBarracks.villagers || (p.firstBarracks.seconds !== null && time >= p.firstBarracks.seconds)) {
     wanted.push({ type: 'barracks', count: 1 });
   }
-  for (const m of p.militaryBuildings) if (w.age >= m.age && w.villagers.length >= (m.villagers ?? 0)) wanted.push({ type: m.type, count: m.count });
+  // Age 2 buildings, then (rams as soon as they can be had) the Siege Workshop, then the rest of the schedule.
+  for (const m of p.militaryBuildings) if (m.age <= 2 && w.age >= m.age && w.villagers.length >= (m.villagers ?? 0)) wanted.push({ type: m.type, count: m.count });
   if (w.age >= 3 && (p.siege.rams > 0 || p.siege.siphonarioi > 0)) wanted.push({ type: 'siegeWorkshop', count: 1 });
+  for (const m of p.militaryBuildings) if (m.age > 2 && w.age >= m.age && w.villagers.length >= (m.villagers ?? 0)) wanted.push({ type: m.type, count: m.count });
   const extra = floatProducer(d);
   if (extra !== null) wanted.push(extra);
   for (const want of wanted) {
@@ -68,7 +71,8 @@ function floatProducer(d: AiDecision): { type: BuildingId; count: number } | nul
   }
   if (idle > 0 || producers >= f.maxProducers) return null;
   const free = d.freeStock();
-  if (free.food + free.wood < f.stock) return null;
+  // Finishing a beaten enemy: more producers sooner (half the stock).
+  if (free.food + free.wood < (d.finishing ? f.stock / 2 : f.stock)) return null;
   const type: BuildingId = free.food >= 2 * free.wood ? 'stable' : 'barracks';
   return { type, count: d.countOf(type) + 1 };
 }
@@ -121,9 +125,10 @@ export function trainArmy(d: AiDecision): void {
     shareCount[cls] = (shareCount[cls] ?? 0) + 1;
   }
   const producers = w.buildings.filter((b) => b.constructed && MILITARY_PRODUCERS.includes(b.typeId)).sort((a, b) => a.id - b.id);
+  const ramAt = trainRam(d, producers);
   for (const b of producers) {
     d.ops.n += 4;
-    if (b.queueLength >= 2) continue;
+    if (b.queueLength >= 2 || b.id === ramAt) continue;
     const unit = b.typeId === 'siegeWorkshop' ? siegeChoice(d, b) : lineChoice(d, b, counter, shareCount, armySize);
     if (unit === null) continue;
     const cost = d.cost(unit);
@@ -142,6 +147,60 @@ export function trainArmy(d: AiDecision): void {
   }
 }
 
+/**
+ * Rams first (6.3 siege, "as soon as it can"): while the AI has fewer than `siege.rams` (alive and queued), one is
+ * queued per decision, from the whole stockpile (less an advance being saved for), at a Siege Workshop (Citadel Age).
+ * While finishing a beaten enemy also at a Barracks, from the Township Age (the Barracks builds rams from Age 2): the
+ * Siege Workshop first, then the shortest queue, then the lowest id. Returns the producer used, or null.
+ */
+function trainRam(d: AiDecision, producers: readonly BuildingInfo[]): number | null {
+  if (!ramWanted(d)) return null;
+  let best: BuildingInfo | null = null;
+  for (const b of producers) {
+    d.ops.n++;
+    const workshop = b.typeId === 'siegeWorkshop';
+    // The Barracks builds rams only while finishing; otherwise they come from the Siege Workshop (Age 3).
+    if (b.queueLength >= 2 || !d.data.building(b.typeId).trains.includes(RAM) || (!workshop && !d.finishing)) continue;
+    const bestWorkshop = best !== null && best.typeId === 'siegeWorkshop';
+    if (best === null || (workshop && !bestWorkshop) || (workshop === bestWorkshop && b.queueLength < best.queueLength)) best = b;
+  }
+  if (best === null) return null;
+  const cost = d.cost(RAM);
+  const budget = { ...d.stock };
+  if (d.ageCost !== null) for (const r of ['food', 'wood', 'gold', 'stone'] as const) budget[r] = Math.max(0, budget[r] - d.ageCost[r]);
+  const pop = d.data.unit(RAM).popCost;
+  if (d.popUsed + pop > d.popCap || !d.canAfford(cost, budget)) return null;
+  d.pay(cost, true);
+  d.popUsed += pop;
+  d.emit({ type: 'train', buildingId: best.id, unitType: RAM });
+  return best.id;
+}
+
+/** Does the AI want another ram now (see `trainRam`)? */
+function ramWanted(d: AiDecision): boolean {
+  const s = d.profile.siege;
+  if (s.rams <= 0 || d.world.age < (d.finishing ? 2 : 3) || !d.available(RAM)) return false;
+  let have = 0;
+  for (const b of d.world.buildings) {
+    d.ops.n++;
+    for (const q of b.queuedUnits) if (q === RAM) have++;
+  }
+  for (const u of d.world.army) if (u.typeId === RAM) have++;
+  return have < s.rams;
+}
+
+/**
+ * Before the economy spends: while a ram is wanted and a building that trains it stands, its cost is held back from
+ * the economy this decision (rams do not wait for the wood that farms and Houses would otherwise take first).
+ */
+export function saveForRam(d: AiDecision): void {
+  if (!ramWanted(d)) return;
+  const from = (b: BuildingInfo): boolean => b.constructed && (b.typeId === 'siegeWorkshop' || (d.finishing && d.data.building(b.typeId).trains.includes(RAM)));
+  if (!d.world.buildings.some(from)) return;
+  const cost = d.cost(RAM);
+  for (const r of ['food', 'wood', 'gold', 'stone'] as const) d.saving[r] = Math.max(d.saving[r], cost[r]);
+}
+
 /** Best unit for a Barracks, Archery Range or Stable: highest `score - currentShare` among the affordable, available ones. */
 function lineChoice(
   d: AiDecision,
@@ -153,12 +212,14 @@ function lineChoice(
   const p = d.profile;
   const c = p.counterWeight;
   const trains = d.data.building(b.typeId).trains;
+  // Finishing an enemy with no army at all (counter weight above 0): units that raze buildings and outlast arrows.
+  const fixedTable = d.finishing && counter === null && c > 0 ? FINISH_FIXED : p.fixed;
   let best: UnitId | null = null;
   let bestScore = -Infinity;
   for (const cls of CANDIDATE_CLASSES) {
     d.ops.n++;
-    const fixed = p.fixed[cls] ?? 0;
-    if (c === 0 && fixed <= 0) continue;
+    const fixed = fixedTable[cls] ?? 0;
+    if ((c === 0 || fixedTable === FINISH_FIXED) && fixed <= 0) continue;
     // The Cataphract replaces the Horseman from Age 3, but a Horseman (no gold) is trained when it is unaffordable.
     const preferred = unitForClass(cls, d.world.age);
     const options: UnitId[] = preferred === null ? [] : preferred === 'cataphract' ? ['cataphract', 'horseman'] : [preferred];
@@ -183,8 +244,8 @@ function siegeChoice(d: AiDecision, b: BuildingInfo): UnitId | null {
   const have: Record<string, number> = {};
   for (const u of d.world.army) if (SIEGE_TYPES.includes(u.typeId) || u.typeId === 'siphonarios') have[u.typeId] = (have[u.typeId] ?? 0) + 1;
   for (const q of b.queuedUnits) have[q] = (have[q] ?? 0) + 1;
+  // Rams are queued by `trainRam`.
   const wants: [UnitId, number, number][] = [
-    ['batteringRam', s.rams, 3],
     ['trebuchet', s.trebuchets, 4],
     ['siphonarios', s.siphonarioi, 4],
   ];
