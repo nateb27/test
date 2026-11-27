@@ -4,7 +4,7 @@
  */
 
 import { UNIT_IDS, type UnitKey } from '../catalog';
-import type { BuildingStage, UnitAnimState } from '../manifest';
+import type { BuildingStage, BasicUnitState as UnitAnimState } from '../manifest';
 import { BUILDING_LOOKS, buildLook, stageModel } from './models/looks';
 import { berryModel, depositModel, TREE_VARIANTS, treeModel } from './models/nature';
 import { unitModel } from './models/units';

@@ -19,7 +19,7 @@ import type {
   SpriteAsset,
   SpriteId,
   SpriteState,
-  UnitAnimState,
+  BasicUnitState as UnitAnimState,
 } from './manifest';
 import { buildingCanvasSize, drawBuilding } from './buildings';
 import {

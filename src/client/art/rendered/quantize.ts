@@ -4,13 +4,17 @@
  * are reduced to it with serpentine Floyd-Steinberg error diffusion.
  */
 
+import ART_CONSTANTS from './artConstants.json';
 import { PALETTE_RGB } from './paletteData';
 
-/** Shades in a player-colour ramp. */
-export const TEAM_LEVELS = 16;
+/** Shades in a player-colour ramp (shared with the offline sprite pipeline through artConstants.json). */
+export const TEAM_LEVELS: number = ART_CONSTANTS.team.levels;
+/** Display luminance of the brightest team-cloth level. */
+export const TEAM_LUM_DIVISOR: number = ART_CONSTANTS.team.lumDivisor;
+const CW = ART_CONSTANTS.palette.channelWeights;
 /** Colours fitted to the art (the rest of the 256 are the team ramp). */
 export const SHARED_COLOURS = 256 - TEAM_LEVELS;
-export const DITHER = 0.85;
+export const DITHER: number = ART_CONSTANTS.palette.dither;
 
 /** Nearest-colour lookup with a 6-bit-per-channel cache. */
 export class Quantizer {
@@ -41,7 +45,7 @@ export class Quantizer {
       const dr = p[q * 3]! - cr;
       const dg = p[q * 3 + 1]! - cg;
       const db = p[q * 3 + 2]! - cb;
-      const dd = dr * dr * 0.9 + dg * dg * 1.2 + db * db * 0.7;
+      const dd = dr * dr * CW[0]! + dg * dg * CW[1]! + db * db * CW[2]!;
       if (dd < bd) {
         bd = dd;
         c = q;
@@ -190,7 +194,7 @@ export function addToHistogram(hist: Uint32Array, rgb: ArrayLike<number>, stride
 /** Brightness of a rendered team-cloth pixel as a ramp level 0..TEAM_LEVELS-1. */
 export function teamLevel(r: number, g: number, b: number): number {
   const lum = 0.3 * r + 0.59 * g + 0.11 * b;
-  const t = Math.max(0, Math.min(0.999, lum / 150));
+  const t = Math.max(0, Math.min(0.999, lum / TEAM_LUM_DIVISOR));
   return Math.floor(t * TEAM_LEVELS);
 }
 

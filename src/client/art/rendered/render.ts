@@ -10,15 +10,15 @@
  */
 
 import { isTeam, material, out } from './materials';
-import { LIGHT, toDisplay } from './light';
+import { ART_CONSTANTS, LIGHT, toDisplay } from './light';
 import { hash3 } from './noise';
 import { HALF_H, HALF_W, K, ZS } from './project';
 import { castPrimary, hit, occluded } from './raycast';
-import { TEAM_LEVELS, ditherMasked, sharedQuantizer, teamRamp } from './quantize';
+import { TEAM_LEVELS, TEAM_LUM_DIVISOR, ditherMasked, sharedQuantizer, teamRamp } from './quantize';
 import { blur2, samp, type Model } from './voxel';
 
 /** Player colour the team pixels are written in before the manifest re-tints them. */
-export const REFERENCE_TEAM = 0x2f5fbf;
+export const REFERENCE_TEAM: number = ART_CONSTANTS.team.referenceColor;
 
 export interface SpriteFrame {
   /** Frame size in output pixels, and the anchor inside it. */
@@ -566,7 +566,7 @@ export function* renderSprite(spec: SpriteSpec): Generator<void, SpriteOut, void
     for (let x = 0; x < w; x++) {
       const i = x + w * y;
       if (!teamPx[i]) continue;
-      const lf = (0.3 * rgb[i * 3]! + 0.59 * rgb[i * 3 + 1]! + 0.11 * rgb[i * 3 + 2]!) / 150;
+      const lf = (0.3 * rgb[i * 3]! + 0.59 * rgb[i * 3 + 1]! + 0.11 * rgb[i * 3 + 2]!) / TEAM_LUM_DIVISOR;
       const bayer = (((x & 1) ^ (y & 1)) * 2 + (y & 1)) / 4 - 0.375;
       const lv = Math.max(0, Math.min(TEAM_LEVELS - 1, Math.floor(Math.min(0.999, lf) * TEAM_LEVELS + bayer)));
       levels[i] = lv;

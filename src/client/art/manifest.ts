@@ -10,8 +10,52 @@ import type { Facing } from '../../sim/types';
 
 export type { IconId, SpriteId } from '../../data/schema';
 
-/** Animation states for units. */
-export type UnitAnimState = 'idle' | 'walk' | 'work' | 'carry';
+/**
+ * Animation states for units. The first four are what every unit art has; the rest are optional, more specific states
+ * (added for the pre-rendered sheets): a villager's job (`chop`, `mine`, `farm`, `forage`, `build`, otherwise `work`),
+ * walking with a load (`carryWood`... otherwise `carry`), `attack`, `death` (plays once) and `corpse`. Art that lacks
+ * one is asked for the generic state instead (`GENERIC_STATE`).
+ */
+export type UnitAnimState =
+  | 'idle'
+  | 'walk'
+  | 'work'
+  | 'carry'
+  | 'chop'
+  | 'mine'
+  | 'farm'
+  | 'forage'
+  | 'build'
+  | 'carryWood'
+  | 'carryFood'
+  | 'carryGold'
+  | 'carryStone'
+  | 'attack'
+  | 'death'
+  | 'corpse';
+
+/** The four states every unit art has. */
+export type BasicUnitState = 'idle' | 'walk' | 'work' | 'carry';
+
+/** The basic state to use when an art has no animation for a specific one. */
+export const GENERIC_STATE: Readonly<Record<UnitAnimState, BasicUnitState>> = {
+  idle: 'idle',
+  walk: 'walk',
+  work: 'work',
+  carry: 'carry',
+  chop: 'work',
+  mine: 'work',
+  farm: 'work',
+  forage: 'work',
+  build: 'work',
+  carryWood: 'carry',
+  carryFood: 'carry',
+  carryGold: 'carry',
+  carryStone: 'carry',
+  attack: 'work',
+  death: 'idle',
+  corpse: 'idle',
+};
 /** Visual construction stages for buildings. */
 export type BuildingStage = 'foundation' | 'scaffold' | 'complete';
 /** Any sprite state. Nodes and other static sprites use 'default'. */
@@ -33,6 +77,23 @@ export interface SpriteAnimation {
    * sit on top of a sprite use it instead of scanning the texture.
    */
   readonly modelTop?: readonly number[];
+  /**
+   * Optional, per frame: the ground shadow as its own texture (same frame size and anchor as `frames`). The renderer
+   * draws it on a layer under every entity, so shadows never cover figures.
+   */
+  readonly shadows?: readonly Texture[];
+  /**
+   * Optional, per frame: the figure's box (no shadow, no outline) in texture pixels of the untrimmed frame, for
+   * picking.
+   */
+  readonly bodies?: readonly { readonly x: number; readonly y: number; readonly w: number; readonly h: number }[];
+  /**
+   * Optional, locomotion: ground distance in tiles covered by one loop. The renderer then advances frames by the
+   * distance the unit moved (feet do not slide at any speed) instead of by time.
+   */
+  readonly cycle?: number;
+  /** Optional: `false` plays the frames once and holds the last one (death). Default true. */
+  readonly loop?: boolean;
 }
 
 /**

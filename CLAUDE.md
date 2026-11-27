@@ -12,9 +12,12 @@ npm test           # Vitest: tests/unit/** and tests/sim/**
 npm run build      # typecheck + production build to dist/ (relative paths, base './')
 npm run e2e        # Playwright against `vite build --mode e2e` (dist-e2e/), with window.__game
 npm run art:palette  # refit the shared 256-colour palette of the rendered art (after big material/light changes)
+npm run art:units    # re-render unit sprite sheets in Blender (incremental; needs scripts/art/.venv, see scripts/art/README.md)
+npm run art:trees    # re-render tree and berry-bush sheets
+npm run art:sheets   # re-pack sheets from the render cache (after art:palette)
 ```
 
-Art: `?art=rendered` (voxel renderer, default in dev/production) or `?art=fast` (procedural, default in the e2e build); see "Rendered art" in `docs/DESIGN.md`.
+Art: `?art=rendered` (default in dev/production: units, trees and bushes from the pre-rendered sheets in `src/client/art/sheets/`, everything else from the in-browser voxel renderer) or `?art=fast` (procedural, default in the e2e build); see "Rendered art" in `docs/DESIGN.md`. Sheets are generated offline (`scripts/art/`, Blender; never in CI) and committed; light, tone map and team constants live in `src/client/art/rendered/artConstants.json`, shared by both renderers.
 
 Run Playwright with `--trace off` (the script already does). E2E tests pin the map with `?seed=N`, start paused and move time only with `__game.step` / `__game.advanceClock` (see "E2E determinism" in `docs/DESIGN.md`); never add sleeps, retries or fixed click positions. Do not run `playwright install` in the dev container; the config uses `/opt/pw-browsers/chromium` when present.
 

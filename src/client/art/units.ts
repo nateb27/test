@@ -5,7 +5,7 @@
  */
 
 import type { Facing } from '../../sim/types';
-import type { UnitAnimState } from './manifest';
+import type { BasicUnitState as UnitAnimState } from './manifest';
 import { circle, ellipse, line, outlinedLine, poly, rrect, shadow, type Ctx, type Pt } from './draw';
 import { C, OUTLINE, type TeamColors } from './palette';
 import type { UnitKey } from './catalog';

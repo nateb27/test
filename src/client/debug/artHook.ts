@@ -7,6 +7,7 @@
 import { allSpriteIds } from '../art/catalog';
 import type { GameArt } from '../art/select';
 import type { ArtLoadReport } from '../art/rendered/manifest';
+import type { SheetLoadReport } from '../art/sheet/manifest';
 import type { BuildingStage, SpriteState, UnitAnimState } from '../art/manifest';
 import type { AppHost } from '../app/host';
 import type { CommandInput, Facing } from '../../sim/types';
@@ -22,9 +23,30 @@ export interface ArtAuditRow {
   minOpaque: number;
 }
 
+export interface RecolourDiff {
+  /** Opaque pixels of the frame. */
+  pixels: number;
+  /** Pixels on the player-colour ramp. */
+  team: number;
+  /** Pixels whose colour differs between the two player colours. */
+  differing: number;
+  /** Differing pixels that are not ramp pixels (must be 0). */
+  differingOutsideTeam: number;
+}
+
 export interface ArtDebugHook {
   mode(): string | null;
   report(): ArtLoadReport | null;
+  /** Load report of the pre-rendered sheets (null without them). */
+  sheets(): SheetLoadReport | null;
+  /** States of a sheet (e.g. 'villager'), with frames and facings, or null. */
+  sheetStates(name: string): Record<string, { frames: number; facings: number; loop: boolean }> | null;
+  /** Force a unit's animation state (null clears): previews attack, death and corpse, which the sim never triggers. */
+  preview(entityId: number, state: string | null): void;
+  /** Draw one entity in another player colour (0xRRGGBB, null clears). */
+  colour(entityId: number, primary: number | null): void;
+  /** Compare a sheet frame recoloured for two player colours. */
+  recolourDiff(sheet: string, state: string, facing: number, frame: number, colorA: number, colorB: number): RecolourDiff | null;
   audit(): ArtAuditRow[];
   drawnTexture(entityId: number): string | null;
   issue(command: CommandInput): void;
@@ -45,6 +67,37 @@ export function installArtHook(host: AppHost): void {
   window.__art = {
     mode: () => art()?.artMode ?? null,
     report: () => art()?.rendered?.report ?? null,
+    sheets: () => art()?.sheets?.report ?? null,
+    sheetStates(name) {
+      const meta = art()?.sheets?.meta(name) ?? null;
+      if (meta === null) return null;
+      const out: Record<string, { frames: number; facings: number; loop: boolean }> = {};
+      for (const [k, v] of Object.entries(meta.states)) out[k] = { frames: v.frames, facings: v.facings, loop: v.loop };
+      return out;
+    },
+    colour: (id, primary) => host.match?.renderer.previewColour?.(id, primary),
+    preview: (id, state) => host.match?.renderer.previewAnimation?.(id, state as UnitAnimState | null),
+    recolourDiff(sheet, state, facing, frame, colorA, colorB) {
+      const sh = art()?.sheets ?? null;
+      const a = sh?.framePixels(sheet, state, facing, frame, colorA) ?? null;
+      const b = sh?.framePixels(sheet, state, facing, frame, colorB) ?? null;
+      if (a === null || b === null) return null;
+      let pixels = 0;
+      let team = 0;
+      let differing = 0;
+      let differingOutsideTeam = 0;
+      for (let i = 0; i < a.w * a.h; i++) {
+        if (a.rgba[i * 4 + 3]! !== 255) continue;
+        pixels++;
+        team += a.team[i]!;
+        const d = a.rgba[i * 4] !== b.rgba[i * 4] || a.rgba[i * 4 + 1] !== b.rgba[i * 4 + 1] || a.rgba[i * 4 + 2] !== b.rgba[i * 4 + 2];
+        if (d) {
+          differing++;
+          if (a.team[i] === 0) differingOutsideTeam++;
+        }
+      }
+      return { pixels, team, differing, differingOutsideTeam };
+    },
     audit() {
       const m = art();
       if (m === null) return [];
@@ -61,11 +114,11 @@ export function installArtHook(host: AppHost): void {
             seen.add(t);
             minW = Math.min(minW, t.frame.width);
             minH = Math.min(minH, t.frame.height);
-            const o = t.label !== undefined ? (m.rendered?.opaquePixels(t.label) ?? -1) : -1;
+            const o = t.label === undefined ? -1 : t.label.startsWith('sheet.') ? (m.sheets?.opaquePixels(t.label) ?? -1) : (m.rendered?.opaquePixels(t.label) ?? -1);
             minOpaque = Math.min(minOpaque, o);
           }
         };
-        if (id.startsWith('unit.')) for (const s of UNIT_STATES) for (let f = 0; f < 8; f++) look(s, f as Facing, 1, 0);
+        if (id.startsWith('unit.')) for (const s of [...UNIT_STATES, ...asset.states] as SpriteState[]) for (let f = 0; f < 8; f++) look(s, f as Facing, 1, 0);
         else if (id.startsWith('building.')) for (const s of STAGES) for (let a = 1; a <= 4; a++) look(s, 0, a, 0);
         else for (let seed = 0; seed < 64; seed++) look('default', 0, 1, seed);
         rows.push({ id, textures: seen.size, minW, minH, minOpaque: Number.isFinite(minOpaque) ? minOpaque : -1 });

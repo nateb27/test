@@ -1,0 +1,29 @@
+{
+  "light": {
+    "sunAz": 150,
+    "sunEl": 50,
+    "sunCol": [2.9, 2.65, 2.25],
+    "skyCol": [0.55, 0.64, 0.82],
+    "bounceCol": [0.34, 0.29, 0.21],
+    "exposure": 1.12,
+    "sat": 0.95,
+    "contrast": 1.1,
+    "grit": 1.0,
+    "dry": 1.15,
+    "soft": 0.04
+  },
+  "team": {
+    "levels": 16,
+    "lumDivisor": 150,
+    "referenceColor": 3104703,
+    "clothAlbedo": [0.2, 0.32, 0.62]
+  },
+  "palette": {
+    "dither": 0.85,
+    "channelWeights": [0.9, 1.2, 0.7]
+  },
+  "projection": {
+    "tileW": 64,
+    "tileH": 32
+  }
+}

@@ -7,7 +7,7 @@
 
 import { Container, Sprite, type Texture } from 'pixi.js';
 import type { DataRegistry } from '../../data/schema';
-import type { AssetManifest, BuildingStage, SpriteAnimation, SpriteAsset, SpriteState, UnitAnimState } from '../art/manifest';
+import { GENERIC_STATE, type AssetManifest, type BuildingStage, type SpriteAnimation, type SpriteAsset, type SpriteState, type UnitAnimState } from '../art/manifest';
 import type { TeamAssetManifest } from '../art/procedural';
 import { DEFAULT_FOOTPRINT } from '../art/catalog';
 import { DEFAULT_PRIMARY, DEFAULT_SECONDARY } from '../art/palette';
@@ -48,6 +48,51 @@ export function unitAnimState(u: DeepReadonly<RUnit>): UnitAnimState {
     if ((o.type === 'build' || o.type === 'assist') && o.phase === 'building') return 'work';
   }
   return 'idle';
+}
+
+/**
+ * The specific animation state for what a unit is doing: the villager's job (`chop`, `mine`, `farm`, `forage`,
+ * `build`) and the load it carries (`carryWood`...). `targetType` gives the type id of an entity (to tell a farm from
+ * a berry bush). Art without these states falls back to `unitAnimState`'s generic one (`GENERIC_STATE`).
+ */
+export function unitAnimDetail(u: DeepReadonly<RUnit>, targetType?: (id: EntityId) => string | undefined): UnitAnimState {
+  const base = unitAnimState(u);
+  if (base === 'carry' && u.carried !== null) {
+    const t = u.carried.type;
+    return t === 'wood' ? 'carryWood' : t === 'food' ? 'carryFood' : t === 'gold' ? 'carryGold' : 'carryStone';
+  }
+  if (base === 'work') {
+    const o = u.currentOrder;
+    if (o === null) return base;
+    if (o.type === 'build' || o.type === 'assist') return 'build';
+    if (o.type === 'gather') {
+      if (o.resource === 'wood') return 'chop';
+      if (o.resource === 'gold' || o.resource === 'stone') return 'mine';
+      return targetType?.(o.targetId) === 'farm' ? 'farm' : 'forage';
+    }
+  }
+  return base;
+}
+
+/** The state to ask an art for: `wanted` when it has it, else the generic one. */
+export function resolveUnitState(asset: SpriteAsset, wanted: UnitAnimState): UnitAnimState {
+  return asset.states.includes(wanted) ? wanted : GENERIC_STATE[wanted];
+}
+
+/**
+ * Frame of an animation to show. Locomotion with a `cycle` advances by distance travelled (`dist`, tiles), a
+ * one-shot (`loop: false`) holds its last frame, everything else runs on the clock (`t` ms, offset per entity).
+ */
+export function animFrame(anim: SpriteAnimation, t: number, dist: number | null, oneShotT: number | null = null): number {
+  const n = anim.frames.length;
+  if (n <= 1) return 0;
+  if (oneShotT !== null) {
+    const i = anim.frameMs > 0 ? Math.floor(oneShotT / anim.frameMs) : 0;
+    return anim.loop === false ? Math.min(n - 1, i) : i % n;
+  }
+  if (anim.loop === false) return n - 1;
+  if (dist !== null && anim.cycle !== undefined && anim.cycle > 0) return Math.floor((dist / anim.cycle) * n) % n;
+  return anim.frameMs > 0 ? Math.floor(t / anim.frameMs) % n : 0;
 }
 
 /** Construction stage drawn for a building. Under 30% progress it is a bare foundation. */
@@ -196,6 +241,12 @@ interface Entry {
   /** Texture currently set on the sprite (statics skip the rest of the work while it is unchanged). */
   tex: Texture | null;
   mirror: boolean;
+  /** Ground shadow sprite (art with a separate shadow layer), on `EntityLayer.shadows`. */
+  shadow: Sprite | null;
+  /** Units: distance walked (tiles) and the last drawn position, for distance-driven walk cycles. */
+  dist: number;
+  lastX: number;
+  lastY: number;
 }
 
 function newEntry(registry: DataRegistry | null, e: ReadonlyEntity): Entry {
@@ -215,7 +266,7 @@ function newEntry(registry: DataRegistry | null, e: ReadonlyEntity): Entry {
     top: null,
     owner: e.owner,
   };
-  return { e, drawn, sx, sy, z: 0, sprite: null, asset: null, gen: 0, tex: null, mirror: false };
+  return { e, drawn, sx, sy, z: 0, sprite: null, asset: null, gen: 0, tex: null, mirror: false, shadow: null, dist: 0, lastX: a.x, lastY: a.y };
 }
 
 /** `compareDepth` on entries. */
@@ -223,8 +274,20 @@ function byDepth(a: Entry, b: Entry): number {
   return a.drawn.depth - b.drawn.depth || a.drawn.id - b.drawn.id;
 }
 
+/** A state forced on a unit for previewing (dev/e2e art hook), with the clock time it started. */
+interface Preview {
+  state: UnitAnimState;
+  start: number | null;
+}
+
 export class EntityLayer {
   readonly container = new Container();
+  /** Ground shadows of art that has them as a separate layer: drawn under every entity, so they never cover figures. */
+  readonly shadows = new Container();
+  private previews = new Map<EntityId, Preview>();
+  /** Player colours forced on single entities (dev/e2e art previews: one owner, two colours side by side). */
+  private colours = new Map<EntityId, number>();
+  private entityIndex: readonly ReadonlyEntity[] = [];
   /** Buildings and nodes, ascending (depth, id). Their position never changes, so they are sorted once per change of the entity set. */
   private statics: Entry[] = [];
   private staticById = new Map<EntityId, Entry>();
@@ -249,6 +312,23 @@ export class EntityLayer {
 
   private assetFor(id: string, primary: number, secondary: number): SpriteAsset {
     return isTeamManifest(this.manifest) ? this.manifest.teamSprite(id, primary, secondary) : this.manifest.sprite(id);
+  }
+
+  /**
+   * Force an animation state on a unit (null clears it); one-shot states (death) start over. Dev/e2e art previews:
+   * the sim has no combat yet, so nothing else shows attack, death or corpse.
+   */
+  previewAnimation(id: EntityId, state: UnitAnimState | null): void {
+    if (state === null) this.previews.delete(id);
+    else this.previews.set(id, { state, start: null });
+  }
+
+  /** Draw one entity in another player colour (null clears). Dev/e2e art previews. */
+  previewColour(id: EntityId, primary: number | null): void {
+    if (primary === null) this.colours.delete(id);
+    else this.colours.set(id, primary);
+    const entry = this.staticById.get(id) ?? this.units.get(id);
+    if (entry !== undefined) entry.asset = null;
   }
 
   /** Label of the texture an entity was drawn with on the last frame (debug and tests). */
@@ -283,6 +363,7 @@ export class EntityLayer {
     for (const [id, entry] of this.staticById) {
       if (!live.has(id)) {
         entry.sprite?.destroy();
+        entry.shadow?.destroy();
         this.staticById.delete(id);
       }
     }
@@ -303,7 +384,7 @@ export class EntityLayer {
     }
     if (entry.asset === null) {
       const c = colors(entry.e.owner);
-      entry.asset = this.assetFor(spriteIdOf(this.registry, entry.e), c.primary, c.secondary);
+      entry.asset = this.assetFor(spriteIdOf(this.registry, entry.e), this.colours.get(entry.e.id) ?? c.primary, c.secondary);
     }
   }
 
@@ -319,6 +400,7 @@ export class EntityLayer {
     const a = Math.min(1, Math.max(0, alpha));
     const team = teamLookup(state, this.registry);
     this.players = state.players;
+    this.entityIndex = state.entities;
 
     this.syncStatics(state);
 
@@ -345,6 +427,9 @@ export class EntityLayer {
         entry = newEntry(this.registry, e);
         this.units.set(e.id, entry);
       }
+      entry.dist += Math.sqrt((x - entry.lastX) * (x - entry.lastX) + (y - entry.lastY) * (y - entry.lastY));
+      entry.lastX = x;
+      entry.lastY = y;
       const d = entry.drawn;
       d.wx = x;
       d.wy = y;
@@ -392,12 +477,16 @@ export class EntityLayer {
     // Hide what left the screen; forget what left the world.
     for (const entry of this.statics) {
       if (entry.gen !== gen && entry.sprite !== null && entry.sprite.visible) entry.sprite.visible = false;
+      if (entry.gen !== gen && entry.shadow !== null) entry.shadow.visible = false;
     }
     for (const [id, entry] of this.units) {
       if (entry.gen === gen) continue;
       if (entry.sprite !== null) entry.sprite.visible = false;
+      if (entry.shadow !== null) entry.shadow.visible = false;
       if (!entityExists(state, id)) {
         entry.sprite?.destroy();
+        entry.shadow?.destroy();
+        this.previews.delete(id);
         this.units.delete(id);
       }
     }
@@ -412,12 +501,16 @@ export class EntityLayer {
     const asset = entry.asset as SpriteAsset;
     const e = entry.e;
     let animState: SpriteState = 'default';
-    if (e.kind === 'unit') animState = unitAnimState(e);
-    else if (e.kind === 'building') animState = buildingStage(e);
+    let preview: Preview | undefined;
+    if (e.kind === 'unit') {
+      preview = this.previews.get(e.id);
+      animState = resolveUnitState(asset, preview?.state ?? unitAnimDetail(e, (id) => this.typeOf(id)));
+    } else if (e.kind === 'building') animState = buildingStage(e);
     const anim: SpriteAnimation = asset.animation(animState, e.kind === 'unit' ? e.facing : 0, { age: this.players[e.owner]?.age ?? 1, seed: e.id });
-    const frameIdx =
-      anim.frames.length > 1 && anim.frameMs > 0 ? Math.floor((nowMs + e.id * 137) / anim.frameMs) % anim.frames.length : 0;
+    if (preview !== undefined && preview.start === null) preview.start = nowMs;
+    const frameIdx = animFrame(anim, nowMs + e.id * 137, e.kind === 'unit' ? entry.dist + e.id * 0.37 : null, preview !== undefined ? nowMs - (preview.start ?? nowMs) : null);
     const tex = anim.frames[frameIdx]!;
+    this.showShadow(entry, anim, frameIdx, asset);
     const d = entry.drawn;
     const isUnit = e.kind === 'unit';
     // Buildings and nodes only need their sprite rewritten when the texture changed.
@@ -437,7 +530,17 @@ export class EntityLayer {
       b.minY = entry.sy - asset.anchor.y * h;
       b.maxX = entry.sx + (1 - asset.anchor.x) * w;
       b.maxY = entry.sy + (1 - asset.anchor.y) * h;
-      if (isUnit) {
+      const body = anim.bodies?.[frameIdx];
+      if (isUnit && body !== undefined) {
+        // The figure's own box (not its shadow), widened to a comfortable click target for small units.
+        const x0 = b.minX + body.x;
+        const x1 = x0 + body.w;
+        const pad = Math.max(0, (12 - body.w) / 2);
+        d.hit.minX = (mirror ? 2 * entry.sx - x1 : x0) - pad;
+        d.hit.maxX = (mirror ? 2 * entry.sx - x0 : x1) + pad;
+        d.hit.minY = b.minY + body.y - 1;
+        d.hit.maxY = Math.max(b.minY + body.y + body.h, entry.sy + 3);
+      } else if (isUnit) {
         const hw = w * 0.2;
         d.hit.minX = entry.sx - hw;
         d.hit.maxX = entry.sx + hw;
@@ -458,7 +561,41 @@ export class EntityLayer {
     spr.visible = true;
   }
 
+  /** Type id of an entity by id (binary search: `entities` is sorted by id). */
+  private typeOf(id: EntityId): string | undefined {
+    const list = this.entityIndex;
+    let lo = 0;
+    let hi = list.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const v = list[mid]!.id;
+      if (v === id) return list[mid]!.typeId;
+      if (v < id) lo = mid + 1;
+      else hi = mid - 1;
+    }
+    return undefined;
+  }
+
+  /** Draw (or hide) the separate ground shadow of the frame shown. */
+  private showShadow(entry: Entry, anim: SpriteAnimation, frameIdx: number, asset: SpriteAsset): void {
+    const st = anim.shadows?.[frameIdx];
+    if (st === undefined) {
+      if (entry.shadow !== null) entry.shadow.visible = false;
+      return;
+    }
+    if (entry.shadow === null) {
+      entry.shadow = new Sprite();
+      this.shadows.addChild(entry.shadow);
+    }
+    const sh = entry.shadow;
+    sh.texture = st;
+    sh.anchor.set(asset.anchor.x, asset.anchor.y);
+    sh.position.set(entry.sx, entry.sy);
+    sh.visible = true;
+  }
+
   destroy(): void {
+    this.previews.clear();
     this.statics = [];
     this.staticById.clear();
     this.units.clear();

@@ -23,13 +23,13 @@ import type {
   SpriteId,
   SpriteState,
   TerrainArt,
-  UnitAnimState,
+  BasicUnitState as UnitAnimState,
 } from '../manifest';
 import { DEFAULT_PRIMARY, DEFAULT_TEAM } from '../palette';
 import type { TeamAssetManifest } from '../procedural';
 import { buildAtlas, type Atlas, type AtlasEntry } from './atlas';
 import { cacheKey, loadCached, saveCached } from './cache';
-import { allJobs, BERRY_VARIANTS, buildingSpriteName, DEPOSIT_VARIANTS, unitSpriteName, unitStateSource, UNIT_STATES, buildingFrame, isEssential, type NamedSprite } from './jobs';
+import { allJobs, type Job, BERRY_VARIANTS, buildingSpriteName, DEPOSIT_VARIANTS, unitSpriteName, unitStateSource, UNIT_STATES, buildingFrame, isEssential, type NamedSprite } from './jobs';
 import { lookFor } from './models/looks';
 import { TREE_VARIANTS } from './models/nature';
 import { PALETTE_RGB } from './paletteData';
@@ -61,6 +61,25 @@ export interface RenderedManifestOptions {
   /** Serves sprites that are still rendering in the background (the procedural art). */
   fallback?: TeamAssetManifest;
   onReport?: (r: ArtLoadReport) => void;
+  /**
+   * Sprite ids another provider already serves (the pre-rendered sheets, asked once their load has finished): their
+   * voxel jobs are skipped. They stay the fallback when that provider has nothing for them.
+   */
+  covered?: (spriteId: string) => boolean;
+}
+
+function jobSprite(j: Job): string | null {
+  switch (j.type) {
+    case 'unit':
+    case 'unitIcon':
+      return `unit.${j.key}`;
+    case 'tree':
+      return 'node.tree';
+    case 'berry':
+      return 'node.berryBush';
+    default:
+      return null;
+  }
 }
 
 export interface RenderedManifest extends TeamAssetManifest {
@@ -405,7 +424,11 @@ export function createRenderedManifest(options: RenderedManifestOptions = {}): R
         return;
       }
       const t0 = performance.now();
-      const jobs = allJobs();
+      const covered = options.covered;
+      const jobs = allJobs().filter((j) => {
+        const id = jobSprite(j);
+        return id === null || covered === undefined || !covered(id);
+      });
       const key = cacheKey(typeof __ART_HASH__ === 'string' ? __ART_HASH__ : 'dev', PALETTE_RGB, jobs);
       const cached = options.noCache === true ? null : await loadCached(key);
       if (cached !== null) {

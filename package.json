@@ -11,7 +11,10 @@
     "lint": "eslint . --max-warnings 0",
     "test": "vitest run",
     "e2e": "playwright test --trace off",
-    "art:palette": "node scripts/art-tool.mjs palette"
+    "art:palette": "node scripts/art-tool.mjs palette",
+    "art:units": "node scripts/art/run.mjs units",
+    "art:trees": "node scripts/art/run.mjs trees",
+    "art:sheets": "node scripts/art/run.mjs pack"
   },
   "dependencies": {
     "pixi.js": "^8.23.0",
