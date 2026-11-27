@@ -11,16 +11,33 @@
 
 import { Container, Graphics, Sprite, Text, Texture } from 'pixi.js';
 import type { DataRegistry } from '../../../data/schema';
-import type { CommandInput, EntityId, PlayerId, Sim } from '../../../sim/types';
+import { TILE_H, TILE_W, type CommandInput, type EntityId, type PlayerId, type Sim } from '../../../sim/types';
 import type { AssetManifest, SpriteAsset } from '../../art/manifest';
 import type { TeamAssetManifest } from '../../art/procedural';
 import type { PlacementGhost } from '../../input/placement/types';
 import { footprintOf } from '../entities';
 import { worldToScreen } from '../iso';
 import type { WorldRendererApi } from '../renderer';
-import { barCentreY, barFor, markerForCommand, markerLook, MarkerRing, MARKER_COLOR, MAX_MARKERS, RESOURCE_COLOR } from './logic';
+import {
+  barFor,
+  buildingBarCentres,
+  healthBarColor,
+  healthBarFill,
+  healthBarShown,
+  healthBarSize,
+  HP_FRAME,
+  HP_UNIT_GAP,
+  markerForCommand,
+  markerLook,
+  MarkerRing,
+  MARKER_COLOR,
+  MaxHpCache,
+  MAX_MARKERS,
+  RESOURCE_COLOR,
+} from './logic';
 import { SpritePool } from './pool';
 import { OverlayTextures } from './textures';
+import { UnitTopCache } from './unitTop';
 
 const OWN_COLOR = 0x62ff7a;
 const OTHER_COLOR = 0xffe27a;
@@ -73,6 +90,9 @@ export class WorldOverlays {
   private readonly rallyLinePool: SpritePool;
   private readonly markerPool: SpritePool;
   private readonly barPool: SpritePool;
+  private readonly hpPool: SpritePool;
+  private readonly maxHp: MaxHpCache;
+  private readonly unitTops: UnitTopCache;
   private readonly carryPool: SpritePool;
   private readonly flagPool: SpritePool;
   private readonly ghostArt = new Sprite();
@@ -84,7 +104,7 @@ export class WorldOverlays {
   private readonly markers = new MarkerRing();
   private readonly now: () => number;
   /** Sprites drawn on the last update, per kind (tests and debugging). */
-  readonly stats = { rings: 0, outlines: 0, bars: 0, carry: 0, flags: 0, markers: 0, ghostTiles: 0, markersAdded: 0 };
+  readonly stats = { rings: 0, outlines: 0, bars: 0, healthBars: 0, carry: 0, flags: 0, markers: 0, ghostTiles: 0, markersAdded: 0 };
   private ghostSprite: { type: string; asset: SpriteAsset } | null = null;
   private labelText = '';
   private boxKey = '';
@@ -112,6 +132,16 @@ export class WorldOverlays {
     this.ghostLabel.anchor.set(0.5, 0);
     this.above.addChild(this.ghostArt);
     this.barPool = pool(this.above);
+    this.hpPool = pool(this.above);
+    this.unitTops = new UnitTopCache(deps.registry, deps.manifest);
+    this.maxHp = new MaxHpCache((owner, typeId) => {
+      try {
+        return deps.sim.query.resolvedStat(owner, typeId, 'hp');
+      } catch {
+        const d = deps.registry.def(typeId);
+        return d !== undefined && (d.kind === 'unit' || d.kind === 'building') ? d.combat.hp : 0;
+      }
+    });
     this.carryPool = pool(this.above);
     this.flagPool = pool(this.above);
     this.above.addChild(this.box, this.ghostLabel);
@@ -139,8 +169,10 @@ export class WorldOverlays {
     this.rallyLinePool.begin();
     this.markerPool.begin();
     this.barPool.begin();
+    this.hpPool.begin();
     this.carryPool.begin();
     this.flagPool.begin();
+    const players = this.deps.sim.state.players;
 
     for (const d of renderer.lastDrawn) {
       const selected = selection.length > 0 && sortedHas(selection, d.id);
@@ -153,36 +185,50 @@ export class WorldOverlays {
       }
       const own = d.owner === playerId;
       if (d.kind === 'unit') {
-        const s = worldToScreen(d.wx, d.wy);
+        const sx = (d.wx - d.wy) * (TILE_W / 2);
+        const sy = (d.wx + d.wy) * (TILE_H / 2);
         if (selected) {
           const r = this.ringPool.next(T.ring);
-          r.position.set(s.x, s.y);
+          r.position.set(sx, sy);
           r.tint = own ? OWN_COLOR : ENEMY_COLOR;
         }
-        if (own) {
-          const e = this.deps.sim.query.entityById(d.id);
-          if (e !== undefined && e.kind === 'unit' && e.carried !== null) {
-            const c = this.carryPool.next(T.dot);
-            c.position.set(s.x, d.hit.minY - 4);
-            c.tint = RESOURCE_COLOR[e.carried.type];
-            c.scale.set(Math.min(1.8, Math.max(1, inv * 0.9)));
-          }
+        const e = this.deps.sim.query.entityById(d.id);
+        if (e === undefined || e.kind !== 'unit') continue;
+        const top = this.unitTops.top(e, d) ?? d.hit.minY;
+        let carryX = sx;
+        let carryY = d.hit.minY - 4;
+        const max = this.maxHp.get(e.owner, e.typeId, players[e.owner]?.researched.length ?? 0);
+        if (healthBarShown(e.hp, max, selected)) {
+          const sz = healthBarSize('unit', 0);
+          this.healthBar(sx, top - (HP_UNIT_GAP + sz.h / 2) * inv, e.hp, max, own, sz.w, sz.h, inv);
+          carryX = sx + (sz.w / 2 + 6) * inv;
+          carryY = top - (HP_UNIT_GAP + sz.h / 2) * inv;
+        }
+        if (own && e.carried !== null) {
+          const c = this.carryPool.next(T.dot);
+          c.position.set(carryX, carryY);
+          c.tint = RESOURCE_COLOR[e.carried.type];
+          c.scale.set(Math.min(1.8, Math.max(1, inv * 0.9)));
         }
         continue;
       }
       // building
       const e = this.deps.sim.query.entityById(d.id);
-      if (e === undefined) continue;
+      if (e === undefined || e.kind !== 'building') continue;
       const size = footprintOf(registry, e);
       if (selected) this.outline(d.wx, d.wy, size, own ? OWN_COLOR : ENEMY_COLOR);
+      const c = worldToScreen(d.wx, d.wy);
+      const max = this.maxHp.get(e.owner, e.typeId, players[e.owner]?.researched.length ?? 0);
+      // Just above the visible top of the art (sprite textures have empty rows above it; without a measurement
+      // the footprint gives an estimate). The offsets are in world pixels so they scale with the building.
+      const hasHp = healthBarShown(e.hp, max, selected);
       const bar = barFor(e, playerId);
-      if (bar !== null) {
-        // Just above the visible top of the art (sprite textures have empty rows above it; without a measurement
-        // the footprint gives an estimate). The offset is in world pixels so it scales with the building.
-        const c = worldToScreen(d.wx, d.wy);
-        const y = barCentreY(c.y, d.top, size, e.kind === 'building' && e.constructed, (BAR_H / 2 + 4) * inv);
-        this.bar(c.x, y, bar.fraction, bar.kind === 'construction' ? CONSTRUCTION_COLOR : PRODUCTION_COLOR, inv);
+      const ys = buildingBarCentres(c.y, d.top, size, e.constructed, inv, hasHp);
+      if (hasHp && ys.health !== null) {
+        const sz = healthBarSize('building', size);
+        this.healthBar(c.x, ys.health, e.hp, max, own, sz.w, sz.h, inv);
       }
+      if (bar !== null) this.bar(c.x, ys.progress, bar.fraction, bar.kind === 'construction' ? CONSTRUCTION_COLOR : PRODUCTION_COLOR, inv);
     }
 
     this.rallies(selection, inv);
@@ -194,6 +240,7 @@ export class WorldOverlays {
     st.rings = this.ringPool.count;
     st.outlines = this.outlinePool.count;
     st.bars = this.barPool.count / 2;
+    st.healthBars = this.hpPool.count / 2;
     st.carry = this.carryPool.count;
     st.flags = this.flagPool.count;
     st.markers = this.markerPool.count;
@@ -204,6 +251,7 @@ export class WorldOverlays {
     this.rallyLinePool.end();
     this.markerPool.end();
     this.barPool.end();
+    this.hpPool.end();
     this.carryPool.end();
     this.flagPool.end();
   }
@@ -231,6 +279,23 @@ export class WorldOverlays {
     fg.width = Math.max(inv, w * fraction);
     fg.height = h;
     fg.tint = color;
+  }
+
+  /** A health bar: dark frame (1 px all round, also the empty part) and the coloured fill. Sizes are screen px. */
+  private healthBar(cx: number, y: number, hp: number, max: number, own: boolean, w: number, h: number, inv: number): void {
+    const bg = this.hpPool.next(Texture.WHITE);
+    bg.anchor.set(0, 0.5);
+    bg.position.set(cx - (w / 2 + 1) * inv, y);
+    bg.width = (w + 2) * inv;
+    bg.height = (h + 2) * inv;
+    bg.tint = HP_FRAME;
+    bg.alpha = 0.9;
+    const fg = this.hpPool.next(Texture.WHITE);
+    fg.anchor.set(0, 0.5);
+    fg.position.set(cx - (w / 2) * inv, y);
+    fg.width = healthBarFill(hp, max, w) * inv;
+    fg.height = h * inv;
+    fg.tint = healthBarColor(hp, max, own);
   }
 
   private rallies(selection: readonly EntityId[], inv: number): void {
@@ -365,7 +430,7 @@ export class WorldOverlays {
   }
 
   destroy(): void {
-    for (const p of [this.tilePool, this.outlinePool, this.ringPool, this.rallyLinePool, this.markerPool, this.barPool, this.carryPool, this.flagPool]) p.destroy();
+    for (const p of [this.tilePool, this.outlinePool, this.ringPool, this.rallyLinePool, this.markerPool, this.barPool, this.hpPool, this.carryPool, this.flagPool]) p.destroy();
     this.ghostArt.destroy();
     this.ghostLabel.destroy();
     this.box.destroy();
