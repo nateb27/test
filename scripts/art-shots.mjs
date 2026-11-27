@@ -51,7 +51,16 @@ if (await answers()) {
   console.error(`art-shots: port ${PORT} is already in use by another server; free it or set SHOT_PORT`);
   process.exit(1);
 }
-const server = spawn('npx', ['vite', 'preview', '--outDir', DIST, '--port', String(PORT), '--strictPort'], { stdio: ['ignore', 'pipe', 'pipe'] });
+// Its own process group, so stopping it also stops the vite process npx starts (else that one kept the port).
+const server = spawn('npx', ['vite', 'preview', '--outDir', DIST, '--port', String(PORT), '--strictPort'], { stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+const stopServer = () => {
+  try {
+    process.kill(-server.pid, 'SIGTERM');
+  } catch {
+    // already gone
+  }
+};
+process.on('exit', stopServer);
 let serverLog = '';
 let serverExit = null;
 server.stdout.on('data', (d) => (serverLog += d));
@@ -499,6 +508,6 @@ try {
   process.exitCode = 1;
   throw e;
 } finally {
-  server.kill();
+  stopServer();
   console.log(errors.length ? `console errors:\n${errors.join('\n')}` : 'no console errors');
 }

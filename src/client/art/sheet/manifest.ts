@@ -390,8 +390,9 @@ export function createSheetManifest(options: SheetManifestOptions = {}): SheetMa
 
 /**
  * The head-and-torso box of a standing figure (RGBA, alpha already 0 or 255), for a portrait that a weapon does not
- * fill. The body starts at the first of two rows at least BODY_ROW of the widest row wide (a spear shaft or a raised
- * sword above the head is a few pixels wide and is skipped); the bust is the top BUST of the body from there. Columns
+ * fill. The body starts at the first of two rows at least BODY_ROW of the widest row (and BODY_MIN_PX) wide (a spear
+ * shaft or a raised sword above the head is two or three pixels wide and is skipped, a head is wider, even next to a
+ * shield as wide as the Spearman's); the bust is the top BUST of the body from there. Columns
  * are kept where the bust rows hold at least BODY_COLUMN of its height in figure pixels (a spear crossing the chest is
  * cut), widened to at least the bust's height times 0.8 so the head is not squeezed. Returns the whole image when it
  * cannot tell.
@@ -410,7 +411,8 @@ export function bustBox(data: Uint8ClampedArray, w: number, h: number): { x: num
   while (bottom > 0 && rowCount[bottom] === 0) bottom--;
   let top = -1;
   for (let r = 0; r + 1 < h; r++) {
-    if (rowCount[r]! >= BODY_ROW * widest && rowCount[r + 1]! >= BODY_ROW * widest) {
+    const min = Math.max(BODY_MIN_PX, BODY_ROW * widest);
+    if (rowCount[r]! >= min && rowCount[r + 1]! >= min) {
       top = r;
       break;
     }
@@ -436,7 +438,9 @@ export function bustBox(data: Uint8ClampedArray, w: number, h: number): { x: num
   }
   return { x: x0, y: top, w: x1 - x0 + 1, h: bh };
 }
-const BODY_ROW = 0.3;
+const BODY_ROW = 0.15;
+/** A weapon shaft is at most this wide in the sheet's pixels; a head is wider. */
+const BODY_MIN_PX = 4;
 const BUST = 0.6;
 const BODY_COLUMN = 0.2;
 

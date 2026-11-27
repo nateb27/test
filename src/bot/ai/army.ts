@@ -312,7 +312,8 @@ const plain = (target: BuildingInfo | UnitInfo): WavePlan => ({ target, mode: 's
 /**
  * Raid (hard's first wave): every unit gets an explicit `attack` on the exposed enemy villager nearest to it (out of
  * every Town Center's reach), re-chosen when its target dies or becomes covered; failing that, on villagers under the
- * arrows when the fight model says the raid kills them at a cost of at most one unit in four. Returns false when there
+ * arrows when the fight model says the raid kills them losing at most one raider per two villagers (never all of it).
+ * Returns false when there
  * is no such villager (the wave then raids an outlying building it razes in time, or goes home).
  */
 function orderRaid(d: AiDecision, units: readonly UnitInfo[], ctx: WaveContext): boolean {
