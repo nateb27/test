@@ -7,10 +7,21 @@ import { Icon, resourceIconId } from './Icon';
 
 const RESOURCE_LABEL = { food: 'Food', wood: 'Wood', gold: 'Gold', stone: 'Stone' } as const;
 
-export function TopBar({ vm, actions }: { vm: TopBarVM; actions: Pick<HudActions, 'cycleIdleVillager' | 'setSpeed' | 'togglePause'> }) {
+function hex(color: number): string {
+  return `#${color.toString(16).padStart(6, '0')}`;
+}
+
+export function TopBar({
+  vm,
+  actions,
+}: {
+  vm: TopBarVM;
+  actions: Pick<HudActions, 'cycleIdleVillager' | 'cycleIdleMilitary' | 'setSpeed' | 'togglePause'>;
+}) {
   return (
     <div class="topbar panel" data-testid="top-bar">
       <div class="topbar-group resources">
+        <span class="player-swatch" data-testid="player-swatch" data-color={hex(vm.playerColor)} style={{ background: hex(vm.playerColor) }} title="Your colour" />
         {RESOURCE_TYPES.map((r) => (
           <div class={`res res-${r}`} key={r} data-testid={`res-${r}`} title={RESOURCE_LABEL[r]}>
             <Icon id={resourceIconId(r)} size={24} />
@@ -43,6 +54,17 @@ export function TopBar({ vm, actions }: { vm: TopBarVM; actions: Pick<HudActions
         >
           <Icon id="icon.unit.villager" size={22} />
           <span class="num">{vm.idleVillagers}</span>
+        </button>
+        <button
+          type="button"
+          class="idle-btn"
+          data-testid="idle-military"
+          disabled={vm.idleMilitary === 0}
+          title="Select next idle soldier (,)"
+          onClick={() => actions.cycleIdleMilitary()}
+        >
+          <Icon id="icon.unit.spearman" size={22} />
+          <span class="num">{vm.idleMilitary}</span>
         </button>
         <span class="clock" data-testid="clock" title="Game time">
           {formatClock(vm.clockSeconds)}

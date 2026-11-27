@@ -88,10 +88,11 @@ export function CommandCard({
             <button
               type="button"
               key={slot}
-              class={`card-slot ${b.enabled ? '' : 'disabled'} ${short ? 'unaffordable' : ''}`}
+              class={`card-slot ${b.enabled ? '' : 'disabled'} ${short ? 'unaffordable' : ''} ${b.active === true ? 'active' : ''}`}
               data-testid={`slot-${slot}`}
               data-action={b.action.type}
               aria-disabled={!b.enabled}
+              {...(b.active !== undefined ? { 'aria-pressed': b.active } : {})}
               aria-label={`${b.label} (${hotkey})`}
               onClick={() => actions.clickSlot(slot)}
               onMouseEnter={() => setHover(slot)}

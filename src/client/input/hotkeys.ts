@@ -10,6 +10,10 @@ import { CARD_HOTKEYS } from '../ui/viewModel';
 export type HotkeyAction =
   | { type: 'selectTownCenter' }
   | { type: 'cycleIdleVillager' }
+  /** M2: select and centre the next idle military unit. */
+  | { type: 'cycleIdleMilitary' }
+  /** M2: centre the camera on the latest alert. */
+  | { type: 'jumpToAlert' }
   | { type: 'deleteSelection' }
   /** Cancel placement / the current input mode; otherwise open the menu. */
   | { type: 'cancel' }
@@ -46,6 +50,8 @@ export const HOTKEYS: readonly HotkeyBinding[] = [
   ...DIGITS.map((n): HotkeyBinding => ({ code: `Digit${n}`, action: { type: 'recallGroup', group: n }, description: `Select control group ${n} (twice: centre camera)` })),
   { code: 'KeyH', action: { type: 'selectTownCenter' }, description: 'Select and centre the Town Center' },
   { code: 'Period', action: { type: 'cycleIdleVillager' }, description: 'Cycle idle villagers' },
+  { code: 'Comma', action: { type: 'cycleIdleMilitary' }, description: 'Cycle idle military units' },
+  { code: 'Space', action: { type: 'jumpToAlert' }, description: 'Centre the camera on the latest alert' },
   { code: 'Delete', action: { type: 'deleteSelection' }, description: 'Delete selected own entities' },
   { code: 'Escape', action: { type: 'cancel' }, description: 'Cancel placement, or open the menu' },
   { code: 'F3', action: { type: 'toggleDebug' }, description: 'Toggle the debug overlay' },

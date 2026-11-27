@@ -167,6 +167,11 @@ export function baseStat(data: DataRegistry = defaultRegistry): HudQueries['reso
   return (_playerId, defId, stat: StatKey) => {
     const def = data.def(defId);
     if (def === undefined) throw new Error(`unknown def ${defId}`);
+    if (def.kind === 'unit' && (stat === 'hp' || stat === 'attack' || stat === 'range' || stat === 'meleeArmor' || stat === 'pierceArmor')) return def.combat[stat];
+    if (def.kind === 'building') {
+      if (stat === 'hp' || stat === 'meleeArmor' || stat === 'pierceArmor') return def.combat[stat];
+      if ((stat === 'attack' || stat === 'range') && def.combat.attack !== undefined) return def.combat.attack[stat];
+    }
     if (stat === 'trainTime' && def.kind === 'unit') return def.trainTime;
     if (stat === 'buildTime' && def.kind === 'building') return def.buildTime;
     if (stat === 'researchTime' && def.kind === 'tech') return def.researchTime;

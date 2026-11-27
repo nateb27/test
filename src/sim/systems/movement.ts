@@ -74,6 +74,8 @@ function noNegZero(v: number): number {
 function moveAlongPath(ctx: SimContext, grid: PathGrid, unit: UnitEntity): void {
   const path = unit.path;
   if (path === null || unit.pendingPathRequestId !== null) return;
+  // PLAN-M2 4.3: a unit does not move while winding up, whatever its order (the path is kept for afterwards).
+  if (unit.combat.windup > 0) return;
   if (path.nextIndex >= path.waypoints.length) {
     // A used-up path with no order holding it is dropped so the unit counts as idle.
     if (unit.currentOrder === null) unit.path = null;
@@ -131,7 +133,9 @@ const SPLIT_Y: readonly number[] = [0, Math.SQRT1_2, 1, Math.SQRT1_2, 0, -Math.S
 export function separateIdleUnits(ctx: SimContext, grid: PathGrid): void {
   const idle: UnitEntity[] = [];
   for (const e of ctx.state.entities) {
-    if (e.kind === 'unit' && (isIdle(e) || isStationaryAttacker(e))) idle.push(e);
+    // A unit winding up is not pushed either (PLAN-M2 4.3). It is left out of the pass entirely, so every pair
+    // still moves apart symmetrically.
+    if (e.kind === 'unit' && e.combat.windup === 0 && (isIdle(e) || isStationaryAttacker(e))) idle.push(e);
   }
   const n = idle.length;
   if (n < 2) return;

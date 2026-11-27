@@ -9,11 +9,17 @@ import { spawnProjectile } from '../projectiles';
 import { applyDamage, distSqToTarget, unitCombat } from './damage';
 import { damageAgainst, engagedTargetId, inReach, targetAnchor, targetFor } from './engage';
 
-/** Release of a wind-up (4.3 step 2): melee damage within reach + slack, or a projectile at a target that exists. */
+/**
+ * Release of a wind-up (4.3 step 2): melee damage within reach + slack, or a projectile at a target that exists and
+ * still has hp > 0.
+ */
 function release(ctx: SimContext, unit: UnitEntity, profile: ResolvedUnitCombat): void {
   const id = unit.combat.swingTargetId;
   const target = id === null ? undefined : findEntity(ctx.state, id);
-  if (target === undefined || target.kind === 'node') return;
+  // A target already at 0 hp (killed earlier in this step) is no longer a target (4.2): the blow or shot is wasted.
+  // It would change nothing anyway (hp is clamped at 0 and a dead target takes no credit), except a pointless
+  // projectile in flight and an UnderAttack alert for a unit that is about to be removed.
+  if (target === undefined || target.kind === 'node' || target.hp <= 0) return;
   if (profile.projectile === null) {
     const r = profile.reach + ctx.data.combat.meleeReleaseSlack;
     if (distSqToTarget(ctx, unit.pos.x, unit.pos.y, target) > r * r) return; // wasted blow

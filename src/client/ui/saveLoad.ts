@@ -3,9 +3,34 @@
  * import, and plain-language errors (notably for an unsupported save version).
  */
 
-import { deserialize, SaveError, SaveVersionError, serialize } from '../../sim';
+import { deserializeSave, SaveError, SaveVersionError, serialize, type ControllerSave } from '../../sim';
 import { TICK_RATE, type Sim } from '../../sim/types';
 import type { SaveMeta, SaveStorage } from '../platform';
+
+/**
+ * Controller memory travels beside the sim without changing the save panel's signatures: a running match registers a
+ * provider for its sim (`registerControllerSaves`), and `saveToSlot`/`exportSim` write whatever it returns into the
+ * file's `controllers` block. A loaded file parks its block here (`parseSave`) until the loading screen takes it
+ * (`takeLoadedControllers`) and rebuilds the controllers.
+ */
+const providers = new WeakMap<Sim, () => ControllerSave[]>();
+const loaded = new WeakMap<Sim, ControllerSave[]>();
+
+export function registerControllerSaves(sim: Sim, provider: () => ControllerSave[]): () => void {
+  providers.set(sim, provider);
+  return () => {
+    if (providers.get(sim) === provider) providers.delete(sim);
+  };
+}
+
+/** The controller block of a loaded save for this sim (removed once taken); empty for v1 saves and new games. */
+export function takeLoadedControllers(sim: Sim): ControllerSave[] {
+  const out = loaded.get(sim) ?? [];
+  loaded.delete(sim);
+  return out;
+}
+
+const controllerSaves = (sim: Sim): ControllerSave[] => providers.get(sim)?.() ?? [];
 
 export type LoadResult =
   | { ok: true; sim: Sim }
@@ -17,7 +42,9 @@ export function parseSave(json: string | null): LoadResult {
     return { ok: false, kind: 'empty', message: 'That save slot is empty.' };
   }
   try {
-    return { ok: true, sim: deserialize(json) };
+    const { sim, controllers } = deserializeSave(json);
+    loaded.set(sim, controllers);
+    return { ok: true, sim };
   } catch (error) {
     if (error instanceof SaveVersionError) {
       const hint =
@@ -44,7 +71,7 @@ export function parseSave(json: string | null): LoadResult {
 
 /** Write the sim's state into a slot. */
 export function saveToSlot(storage: SaveStorage, sim: Sim, slot: string, name: string): Promise<SaveMeta> {
-  return storage.write(slot, serialize(sim), { name, tick: sim.state.tick });
+  return storage.write(slot, serialize(sim, controllerSaves(sim)), { name, tick: sim.state.tick });
 }
 
 export async function loadFromSlot(storage: SaveStorage, slot: string): Promise<LoadResult> {
@@ -64,7 +91,7 @@ export function exportFileName(name: string, tick: number): string {
 }
 
 export function exportSim(storage: SaveStorage, sim: Sim, name: string): Promise<void> {
-  return storage.exportToFile(exportFileName(name, sim.state.tick), serialize(sim));
+  return storage.exportToFile(exportFileName(name, sim.state.tick), serialize(sim, controllerSaves(sim)));
 }
 
 /** Let the player pick a file and load it. Resolves to null if they cancel. */

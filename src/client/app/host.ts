@@ -9,6 +9,7 @@ import type { TeamAssetManifest } from '../art/procedural';
 import { type GameDebugHook, type ScreenName } from '../debug/hook';
 import type { Platform } from '../platform';
 import { perf } from '../debug/perf';
+import { aiStartsEnabled } from './seed';
 import { LOCAL_PLAYER_ID, type Match } from './match';
 import type { Navigate } from './screens/types';
 import type { StressScenario } from '../../sim/stress';
@@ -34,6 +35,10 @@ export class AppHost {
   navigate: Navigate | null = null;
   /** The stress scenario started through the debug hook, if any. */
   stress: StressScenario | null = null;
+  /** Whether AI controllers run in new matches (`?ai=off` starts them off; `__game.ai.setEnabled` toggles it). */
+  aiEnabled: boolean = aiStartsEnabled();
+  /** The setup screen's seed was pinned (typed or from `?seed`): "Play again" keeps it instead of rolling a new one. */
+  seedPinned = false;
 
   constructor(
     readonly platform: Platform,
@@ -202,33 +207,53 @@ function createDebugHook(host: AppHost): GameDebugHook {
       const m = host.match?.sim.state.match;
       return m === undefined ? null : { mode: m.mode, winner: m.winner, endedTick: m.endedTick };
     },
-    // STUB (TODO(WP30)): the members below throw until the AI controllers, battle scene, end screen, alerts and
-    // cursors exist.
     ai: {
-      setEnabled() {
-        throw new Error('__game.ai is not implemented yet');
+      setEnabled(on) {
+        host.aiEnabled = on;
+        if (host.match !== null) host.match.aiEnabled = on;
       },
       enabled() {
-        throw new Error('__game.ai is not implemented yet');
+        return host.match?.aiEnabled ?? host.aiEnabled;
       },
-      memory() {
-        throw new Error('__game.ai is not implemented yet');
+      memory(playerId) {
+        const c = host.match?.controllers.find((x) => x.playerId === playerId);
+        return c?.save()?.memory ?? null;
       },
     },
-    startBattle() {
-      throw new Error('__game.startBattle is not implemented yet');
+    startBattle(seed = 1, perSide = 200) {
+      // Written out (not via DEBUG_HOOKS_ENABLED) so the bundler drops the scene from production builds.
+      if (import.meta.env.DEV || import.meta.env.MODE === 'e2e') {
+        if (host.navigate === null) throw new Error('The app is not mounted');
+        void import('../debug/battle').then(({ createBattleSim }) => {
+          host.navigate?.({ name: 'loading', source: { kind: 'sim', sim: createBattleSim(seed, perSide) } });
+        });
+      }
     },
     endScreen() {
-      throw new Error('__game.endScreen is not implemented yet');
+      return host.match?.endScreen ?? null;
     },
     alerts() {
-      throw new Error('__game.alerts is not implemented yet');
+      return host.match?.alerts() ?? [];
     },
     effects() {
       return host.requireMatch().renderer.effectStats();
     },
     cursor() {
-      throw new Error('__game.cursor is not implemented yet');
+      return host.match === null ? 'default' : canvasCursor(host.match);
     },
   };
+}
+
+const CURSORS = ['default', 'attack', 'attackMove', 'repair'] as const;
+type CursorName = (typeof CURSORS)[number];
+
+/**
+ * The cursor the world canvas shows: attack-move and repair follow the active input mode; the sword over an enemy is
+ * published by the input layer as `data-cursor` on the canvas (next to the CSS cursor it sets). `default` otherwise.
+ */
+function canvasCursor(match: Match): CursorName {
+  const mode: string | null = match.modes.active?.kind ?? null;
+  if (mode === 'attackMove' || mode === 'repair') return mode;
+  const v = match.renderer.canvas.dataset.cursor;
+  return CURSORS.find((c) => c === v) ?? 'default';
 }
