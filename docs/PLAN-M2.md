@@ -789,7 +789,7 @@ Attacks therefore land `windupTicks` after the swing starts and repeat exactly e
 
 Siege uses only tiers 3 and 4 (it is never hardened against, so in practice tier 3).
 
-**Hardened targets** (WP33). A building is *hardened* against a unit when the unit's damage per blow against it (4.1) is at most `rules.minDamage`: its armour of the unit's attack type is at least the unit's attack and the unit has no bonus against it (with the M2 data: infantry, cavalry and archers against production buildings and the Town Center; never siege, Cataphracts or Siphonarioi). Automatic target choice (acquisition, retaliation, retargeting, hold; not commanded `attack` orders) treats it as follows:
+**Hardened targets** (WP33). A building is *hardened* against a unit when the unit's damage per blow against it (4.1) is at most `rules.minDamage`: its armour of the unit's attack type is at least the unit's attack and the unit has no bonus against it (with the M2 data: Villagers, Spearmen, Archers and Horsemen against production buildings and the Town Center, Swordsmen against the Town Center only, since production buildings have melee armour 6 and a Swordsman does 2 a blow; never siege, Cataphracts or Siphonarioi). Automatic target choice (acquisition, retaliation, retargeting, hold; not commanded `attack` orders) treats it as follows:
 
 - it is tier 4, below every unit and every other building, so it is chosen only when nothing else is in the scan radius;
 - it is never the tier-0 last attacker (a unit hit by Town Center arrows does not retaliate against the Town Center);
@@ -920,22 +920,22 @@ Applies when `config.players.length === 2`. One-player maps are unchanged, so M1
 
 ### 5.1 Unit combat stats
 
-Times are in seconds (ticks in brackets). `MA` and `PA` are melee and pierce armour; `Res` is `bonusResist` in percent.
+Times are in seconds (ticks in brackets). `MA` and `PA` are melee and pierce armour; `Res` is `bonusResist` in percent. The table holds the numbers in `src/data` now; the original plan values that WP25, WP32 and the verification fix pass changed are in brackets (reasons in `docs/BALANCE.md`, "Number changes").
 
 | Unit | HP | Atk | Type | MA | PA | Range | Min | Wind-up | Cooldown | Sight | Classes | Bonus | Res | Projectile / splash | Targets |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | Villager | 25 | 3 | melee | 0 | 0 | 0 | 0 | 0.5 (10) | 2.0 (40) | 4 | villager | — | 0 | — | any, autoAcquire false |
 | Spearman | 50 | 5 | melee | 0 | 1 | 0 | 0 | 0.5 (10) | 2.0 (40) | 6 | infantry, spear | cavalry +12 | 0 | — | any |
 | Swordsman | 65 | 8 | melee | 2 | 1 | 0 | 0 | 0.5 (10) | 1.8 (36) | 6 | infantry | spear +4 | 0 | — | any |
-| Archer | 32 | 5 | pierce | 0 | 0 | 5 | 0 | 0.6 (12) | 2.0 (40) | 7 | archer | infantry +4 | 0 | arrow | any |
+| Archer | 32 | 5 | pierce | 0 | 0 | 5 | 0 | 0.6 (12) | 1.6 (32) [2.0] | 7 | archer | infantry +5 [+4] | 0 | arrow | any |
 | Horseman | 70 | 6 | melee | 1 | 2 | 0 | 0 | 0.4 (8) | 1.8 (36) | 7 | cavalry | archer +5, siege +8 | 0 | — | any |
 | Lancer (not Byzantine) | 100 | 10 | melee | 2 | 2 | 0 | 0 | 0.5 (10) | 1.9 (38) | 7 | cavalry | archer +5, siege +10 | 0 | — | any |
-| Cataphract | 120 | 11 | melee | 3 | 3 | 0 | 0 | 0.5 (10) | 2.0 (40) | 7 | cavalry | archer +5, siege +10 | 50 | — | any |
-| Battering Ram | 140 | 4 | melee | 0 | 40 | 0 | 0 | 1.0 (20) | 4.0 (80) | 4 | siege | building +60 | 0 | — | buildings |
+| Cataphract | 120 | 13 [11] | melee | 3 | 3 | 0 | 0 | 0.5 (10) | 2.0 (40) | 7 | cavalry | archer +5, siege +10 | 50 | — | any |
+| Battering Ram | 140 | 4 | melee | 0 | 40 | 0 | 0 | 1.0 (20) | 3.5 (70) [4.0] | 4 | siege | building +60 | 0 | — | buildings |
 | Trebuchet | 110 | 8 | pierce | 0 | 10 | 11 | 3 | 2.0 (40) | 8.0 (160) | 12 | siege | building +150 | 0 | stone | buildings |
-| Siphonarios | 45 | 10 | melee | 0 | 0 | 2 | 0 | 0.6 (12) | 2.5 (50) | 5 | infantry | building +18, siege +12 | 0 | fire, splash r 1.0 at 60% | any |
+| Siphonarios | 45 | 10 | melee | 0 | 0 | 2 | 0 | 0.6 (12) | 2.5 (50) | 5 | infantry | building +18, siege +12 | 0 | fire, splash r 1.25 [1.0] at 60% | any |
 
-Cost, train time, speed and population are unchanged from M1 5.4 and 5.6. All `autoAcquire` values are true except the villager's.
+Cost, train time, speed and population are unchanged from M1 5.4 and 5.6. All `autoAcquire` values are true except the villager's. The Battering Ram is an Age 2 unit since the verification fix pass: the Barracks builds it from the Township Age and the Siege Workshop from the Citadel Age (it was Age 3, Siege Workshop only); cost, speed and stats unchanged.
 
 Rationale:
 
@@ -948,15 +948,17 @@ Rationale:
 
 ### 5.2 Building combat stats
 
-| Building | HP (M1 provisional) | MA | PA | Attack |
+| Building | HP (M1 provisional) | MA [plan] | PA | Attack |
 |---|---|---|---|---|
-| Town Center | 2400 (600) | 3 | 8 | 7 pierce (WP33; was 5), range 7, cooldown 2.0 s, 2 arrows |
+| Town Center | 2400 (600) | 8 [3] | 8 | 7 pierce (WP33; was 5), range 7, cooldown 2.0 s, 2 arrows |
 | House | 550 (150) | 1 | 6 | — |
 | Mill, Lumber Camp, Mining Camp | 600 (200) | 1 | 6 | — |
 | Farm | 300 (100) | 0 | 8 | — |
-| Barracks, Archery Range, Stable | 1200 (350) | 2 | 7 | — |
-| Siege Workshop | 1400 (400) | 2 | 7 | — |
-| Silk Workshop | 1000 (300) | 2 | 7 | — |
+| Barracks, Archery Range, Stable | 1200 (350) | 6 [2] | 7 | — |
+| Siege Workshop | 1400 (400) | 6 [2] | 7 | — |
+| Silk Workshop | 1000 (300) | 6 [2] | 7 | — |
+
+Melee armour: WP32 raised production buildings to 7 and the Town Center to 8 so that siege is needed (at 2, 10 Swordsmen razed a Barracks as fast as 2 Rams); the verification fix pass lowered production buildings to 6, so that an army without siege still razes them in about a minute and a half (a Swordsman does 2 a blow, a Spearman or Horseman 1) while the Town Center stays hard (`docs/BALANCE.md`).
 
 Other existing numbers that change:
 
@@ -981,7 +983,7 @@ Attacker in the row against defender in the column. "W" means the row wins with 
 
 Siege rows:
 
-- 2 Battering Rams destroy a Barracks in under 60 s; 10 Swordsmen need more than 3× as long.
+- 2 Battering Rams destroy a Barracks in under 60 s; 10 Swordsmen need more than 2× as long. (The plan said 3×; with production melee armour 6, chosen so that an army without siege can finish a game, 10 Swordsmen take 118 s against 48 s. Siege stays far better: 2 Rams cost 480, 10 Swordsmen 900.)
 - A Trebuchet destroys a Town Center from outside its range without taking damage.
 - 6 Villagers kill a Battering Ram in under 30 s.
 - 4 Siphonarioi deal at least 2.5× the damage per second of 4 Swordsmen to a clump of 10 stand-ground Spearmen.
@@ -1073,7 +1075,7 @@ export class EconomyBot implements Controller { /* unchanged behaviour; save() r
 | Wave interval after one ends | 4:00 | 3:00 | 1:30 |
 | Composition | Fixed table | 50% fixed, 50% counter | 100% counter |
 | Upgrades | None | Level I of its two most-built lines from Age 3 | All, as affordable, from Age 2 |
-| Siege | Never | Rams from Age 3 against buildings | Rams in Age 3; Trebuchets and Siphonarioi in Age 4 |
+| Siege | Never | Rams from Age 3 against buildings; from the Township Age (Barracks) while finishing | Rams in Age 3 (Township, Barracks, while finishing); Trebuchets and Siphonarioi in Age 4 |
 | Highest age | 3 | 4 | 4 |
 | Target choice | Nearest enemy building | Production > economy > Houses > Town Center; Town Center first only with rams | Army-aware (see 6.5) |
 | Retreat | Never | Below 30% of wave start power | Below 40%; regroups with reinforcements |
@@ -1082,6 +1084,7 @@ export class EconomyBot implements Controller { /* unchanged behaviour; save() r
 | Repair | No | Yes | Yes |
 | Rebuild | Houses and Town Center only | Everything in `desiredBuildings` | Everything |
 | All-in (anti-stall) | — | At 45:00, every unit attacks continuously | At 40:00 |
+| Finishing (all; verification fix pass) | Once a wave has gone out and the enemy's fighting power is under a quarter of the AI's army: continuous reinforcement, no archers in the mix, rams first (Standard, Hard) | Same | Same |
 
 ### 6.4 Economy and army production
 
@@ -1121,6 +1124,7 @@ Rally: new units gather 10 tiles from the AI's Town Center, towards the enemy To
   - Standard: the building with the highest type priority (production 3, economy and drop-off 2, House 1, Town Center 0, or 4 when the wave has rams), then distance.
   - Hard: if enemy fighting power within 15 tiles of the planned target exceeds 1.2× the wave, it picks the largest cluster of enemy villagers more than 8 tiles from any Town Center instead; it focuses an `attack` on the lowest-hp enemy siege or archer in reach each decision.
   - Endgame, all difficulties: when the enemy has no production building, target the nearest enemy villager, then any unit.
+  - Town Center arrows (verification fix pass): a target under the arrows is taken only when a fight model (the wave's summed damage per second against the tower shooting one attacker at a time) says it falls cheaply; the Town Center itself is assaulted only when the gathered units win with a margin of 1.3, otherwise the wave waits out of its reach at a staging point and gathers its reinforcements and rams. No difficulty feeds units into the arrows piecemeal. Buildings are targets when the wave razes them within 120 s.
 
 **Retreating.**
 
@@ -1145,6 +1149,8 @@ Rally: new units gather 10 tiles from the AI's Town Center, towards the enemy To
 ### 6.7 AI performance
 
 Decision cost with a 200-unit army must average under 3 ms and stay under 8 ms worst case. The amortised cost per tick must be under 0.5 ms at standard. The AI uses its own per-decision bucket grid (8-tile cells) for threat and cluster queries.
+
+Measured as built (verification fix pass): the hard, deterministic check is an operation count per decision (entities read, candidates scored, grid cells and footprint tiles tested, and every sim query at the cost of the state scan it makes), under 60,000 on average and 250,000 at most; the economy layer has a budget of 120,000 and leaves what it does not reach to its next decision. The times are asserted as the fastest of three runs of the same deterministic match after a warm-up, so machine load and garbage collection do not count (tests/sim/aiCost.test.ts).
 
 ## 7. Client
 
@@ -1231,8 +1237,8 @@ During a wind-up, frames 0..`hitFrame` are spread over `windupTicks`, using `win
 
 **Health bars** (WP28, pooled in `render/overlays`):
 
-- Shown for selected entities of any owner, and for any drawn entity with hp < max.
-- Units: 30 × 4 px, 6 px above `modelTop`. Buildings: `16 × footprint + 16` px wide, 5 px tall, above the measured art top (as the M1 progress bars). Constant screen size.
+- Shown for selected entities of any owner, and for any drawn entity with hp < max. Once more than 12 units are selected, selection alone no longer shows a unit's bar (the rings show the selection; damage still does), so a large selection is not a slab of bars (verification fix pass).
+- Units: 30 × 4 px, 6 px above `modelTop`; compact 18 × 2 px with more than 24 unit bars on screen or below 0.75 zoom. Buildings: `16 × footprint + 16` px wide, 5 px tall, above the measured art top (as the M1 progress bars). Constant screen size.
 - Fill: own entities green ≥ 50%, yellow 25–50%, red < 25%; enemy entities always red. 1 px dark frame.
 - Construction and production bars move above the health bar when both show.
 
@@ -1242,7 +1248,7 @@ During a wind-up, frames 0..`hitFrame` are spread over `windupTicks`, using `win
 
 **Minimap** (WP28):
 
-- Units are 3 px in owner colour for every player.
+- Units are 3 px in owner colour for every player. Resource nodes are diamonds (units are squares) in colours far from every player colour.
 - `UnderAttack` adds a red expanding ring ping at the location (1.5 s, repeated 2 times), at most 4 live.
 - `minimap.ping(x, y, color)` is the API.
 
@@ -1331,13 +1337,14 @@ AI tests, in `tests/sim/ai.test.ts` with the harness `tests/sim/aiHarness.ts`:
    - Hard vs Easy, seed 1: Hard wins before 35:00.
    - Standard vs Easy, seed 1: Standard wins before 45:00.
 4. Full matches (in `npm run test:long`, which Phase 0 adds, run by the phase gates and nightly CI):
-   - Hard vs Easy and Standard vs Easy on 3 seeds each, with the same limits as item 3.
+   - Hard vs Easy and Standard vs Easy on 3 seeds each, with the same limits as item 3 (as built: 5 seeds each, every one won).
    - Hard vs Standard on 3 seeds: Hard wins at least 2 of 3.
    - Standard vs Standard on 2 seeds: a winner before 75:00 (90,000 ticks).
 5. Command hygiene: AI command rejections are at most 1% of AI commands, and none are `invalidCommand`.
 6. No AI unit with a moving order keeps its position for 30 s (M1 bot rule).
 7. AI save/load: memory restore gives identical commands and hashes for 2,000 ticks.
-8. AI decision cost budget (6.7), with generous thresholds.
+8. AI decision cost budget (6.7): operation counts per decision, and the plan's times as the best of three runs (6.7).
+9. Finishing (verification fix pass): against an idle opponent (a Town Center and six villagers, no input), Hard and Standard win before 18:00 and Easy before 32:00 on 5 seeds.
 
 ### 8.2 End-to-end scenarios (Playwright)
 
@@ -1357,7 +1364,7 @@ Combat specs use `?opponent=standard&ai=off` unless stated. Enemies are spawned 
 5. **Hold position (S):** units do not move when an enemy passes 3 tiles away out of reach, and attack it in reach.
 6. **Health bars and inspection:** a damaged own house shows a bar (`overlayStats().healthBars`); selecting an enemy swordsman shows hp and the combat line in the panel.
 7. **Projectiles:** archers fire; `effects().projectiles` > 0 during flight; the target loses hp.
-8. **Town Center defence:** an enemy horseman next to the human Town Center dies within 15 s of game time without player input.
+8. **Town Center defence:** an enemy horseman next to the human Town Center dies within 15 s of game time without player input. (As built, the human's villagers are removed first, so the horseman attacks the Town Center instead of chasing a villager out of reach.)
 9. **Destruction:** spawned rams destroy an enemy House: rubble count ≥ 1, the enemy popCap drops, fire overlays appear below 66% (`effects().fires`).
 10. **Repair:** card R then click a damaged own Barracks. hp rises, wood falls, and the villager idles at full hp.
 11. **Alerts:** an enemy attacks a villager. Toast, minimap ping (`alerts()`), and Space centres the camera on it.
@@ -1387,7 +1394,7 @@ The existing M1 specs keep passing, driven through the setup screen with the opp
 | Sim tick | Node, ticks 200 to 2,200 of the battle | average < 4 ms, p99 < 12 ms (first 200 ticks excluded) |
 | Sim, economy stress (M1) | Unchanged scenario | average < 2 ms, p99 < 12 ms (still asserted) |
 | AI | 6.7 | Asserted in the AI tests |
-| Frame rate | `scripts/perf-browser.mjs` battle mode, 1080p, health bars and projectiles on | 60 fps at 1×, ≥ 45 at 0.5× (by hand, recorded in DESIGN.md) |
+| Frame rate | `scripts/perf-browser.mjs` battle mode, 1080p, health bars and projectiles on; on real hardware with the in-game readout (F3 or `?fps=1`) | 60 fps at 1×, ≥ 45 at 0.5× (by hand, recorded in DESIGN.md) |
 | Battle determinism | Two runs; save/load every 250 ticks | Identical hashes every 100 ticks |
 
 ## 9. Work breakdown
