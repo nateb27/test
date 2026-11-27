@@ -89,6 +89,8 @@ test('rendered art: buildings show the look of the current age; clicks pick buil
   await placeAt('mill');
 
   // Township: the Town Center changes to its age II look, the House keeps its early look (ages I-II).
+  // The age II looks render in the background after load: wait for them (a condition), or the look falls back to age I.
+  await waitForAllArt(page);
   await page.evaluate((id) => window.__art!.issue({ type: 'research', buildingId: id, techId: 'townshipAge' }), tc.id);
   await step(page, 3);
   expect(await page.evaluate(() => window.__game!.state!.players[1]!.age)).toBe(2);
