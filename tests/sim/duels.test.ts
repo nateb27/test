@@ -172,11 +172,11 @@ describe('siege rows on the real sim (PLAN-M2 5.3)', () => {
     expect(runBuildingKill([{ unit: 'batteringRam', count: 2 }], 'barracks').hash).toBe(rams.hash);
   });
 
-  it('10 Swordsmen need more than 3 times as long as 2 Battering Rams', () => {
+  it('10 Swordsmen need more than 2 times as long as 2 Battering Rams', () => {
     const rams = runBuildingKill([{ unit: 'batteringRam', count: 2 }], 'barracks');
     const swords = runBuildingKill([{ unit: 'swordsman', count: 10 }], 'barracks', { maxSeconds: 600 });
     expect(rams.seconds).not.toBeNull();
-    expect(swords.seconds === null || swords.seconds > 3 * rams.seconds!).toBe(true);
+    expect(swords.seconds === null || swords.seconds > 2 * rams.seconds!).toBe(true);
   });
 
   it('a Trebuchet destroys a Town Center from outside its range without taking damage', () => {

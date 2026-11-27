@@ -267,10 +267,10 @@ describe('the Byzantine tree at each age', () => {
   const age1 = ['villager', 'spearman', 'townCenter', 'house', 'mill', 'lumberCamp', 'miningCamp', 'farm', 'barracks', 'townshipAge'];
   // Military upgrades (M2): level I from Age 2; level II also needs level I researched, so it never shows up here.
   const upgradesI = ['spathionForging', 'paddedKavadion', 'hornSinewBows', 'bambakionCoats', 'kontarionDrill', 'feltHorseBards'];
-  const age2 = [...age1.filter((i) => i !== 'townshipAge'), 'swordsman', 'archer', 'horseman', 'archeryRange', 'stable', 'citadelAge', 'handCarts', 'ironAxes', 'irrigation', 'ironPicks', ...upgradesI];
+  const age2 = [...age1.filter((i) => i !== 'townshipAge'), 'swordsman', 'archer', 'horseman', 'batteringRam', 'archeryRange', 'stable', 'citadelAge', 'handCarts', 'ironAxes', 'irrigation', 'ironPicks', ...upgradesI];
   const age3 = [
     ...age2.filter((i) => i !== 'citadelAge'),
-    'cataphract', 'batteringRam', 'siegeWorkshop', 'silkWorkshop', 'empireAge', 'frameSaws', 'threeFieldSystem', 'timberedShafts',
+    'cataphract', 'siegeWorkshop', 'silkWorkshop', 'empireAge', 'frameSaws', 'threeFieldSystem', 'timberedShafts',
   ];
   const age4 = [...age3.filter((i) => i !== 'empireAge'), 'trebuchet', 'siphonarios', 'guildCharters'];
 

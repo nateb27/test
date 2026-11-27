@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import { registry } from '../../src/data';
 import type { TechId, UnitId } from '../../src/sim/types';
-import { runBuildingKill, runCell } from './duelHarness';
+import { runBuildingKill, runCell, type Group } from './duelHarness';
 import { runGroupVsVillager, runLoneUnitVsTownCenter, runRaid, runRepairFight } from './feelHarness';
 
 const FIGHTERS: UnitId[] = ['spearman', 'swordsman', 'archer', 'horseman', 'cataphract', 'siphonarios'];
@@ -46,6 +46,47 @@ describe('kill times (5 units against one idle target, from 6 tiles)', () => {
     const rams = runBuildingKill([{ unit: 'batteringRam', count: 5 }], 'townCenter', { gap: 2, maxSeconds: 120 });
     expect(rams.seconds).not.toBeNull();
     expect(rams.seconds!).toBeLessThan(60);
+  });
+});
+
+describe('an army without siege (verification fix D2: production melee armour 6, Town Center 8)', () => {
+  const township: Group[] = [
+    { unit: 'spearman', count: 7 },
+    { unit: 'swordsman', count: 7 },
+    { unit: 'horseman', count: 6 },
+  ];
+  const citadel: Group[] = [
+    { unit: 'spearman', count: 5 },
+    { unit: 'swordsman', count: 5 },
+    { unit: 'horseman', count: 5 },
+    { unit: 'cataphract', count: 5 },
+  ];
+  const doubled = (g: Group[]): Group[] => g.map((x) => ({ ...x, count: 2 * x.count }));
+
+  it('20 Township infantry and cavalry raze an undefended Barracks in 45 to 100 s, a House and a Farm far faster', () => {
+    const barracks = runBuildingKill(township, 'barracks', { maxSeconds: 300 }).seconds;
+    const house = runBuildingKill(township, 'house', { maxSeconds: 300 }).seconds;
+    const farm = runBuildingKill(township, 'farm', { maxSeconds: 300 }).seconds;
+    expect(barracks).not.toBeNull();
+    expect(barracks!).toBeGreaterThanOrEqual(45);
+    expect(barracks!).toBeLessThanOrEqual(100);
+    expect(house!).toBeLessThan(barracks! / 3);
+    expect(farm!).toBeLessThan(house!);
+  });
+
+  it('20 Citadel units (with Cataphracts) raze a Barracks in 30 to 75 s', () => {
+    const t = runBuildingKill(citadel, 'barracks', { maxSeconds: 300 }).seconds;
+    expect(t).not.toBeNull();
+    expect(t!).toBeGreaterThanOrEqual(30);
+    expect(t!).toBeLessThanOrEqual(75);
+  });
+
+  it('the Town Center stays hard: 20 Township units lose to its arrows, 40 raze it in under four minutes', () => {
+    expect(runBuildingKill(township, 'townCenter', { maxSeconds: 600 }).seconds).toBeNull();
+    const forty = runBuildingKill(doubled(township), 'townCenter', { maxSeconds: 600 }).seconds;
+    expect(forty).not.toBeNull();
+    expect(forty!).toBeLessThan(240);
+    // Siege is still far better: 5 Rams take it in under a minute (above).
   });
 });
 
