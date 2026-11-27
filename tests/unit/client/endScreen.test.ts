@@ -79,8 +79,10 @@ describe('createControllers', () => {
     expect(fresh.map((c) => c.playerId)).toEqual([2]);
     const save = fresh[0]!.save()!;
     expect(save).toMatchObject({ playerId: 2, kind: 'ai', difficulty: 'hard' });
-    const restored = createControllers(sim.state, [{ ...save, memory: { x: 1 } }]);
-    expect(restored[0]!.save()!.memory).toEqual({ x: 1 });
+    // A real AI memory with a recognisable change (the AI refuses malformed memory as a corrupt save).
+    const memory = { ...(save.memory as Record<string, never>), decisions: 7 };
+    const restored = createControllers(sim.state, [{ ...save, memory }]);
+    expect(restored[0]!.save()!.memory).toEqual(memory);
   });
 
   it('a sandbox match has no controllers', () => {

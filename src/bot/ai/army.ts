@@ -18,6 +18,8 @@ const RALLY_SLACK = 8;
 /** A retreat ends when every unit is this close to the rally point, or after RETREAT_MAX_SECONDS. */
 const RETREAT_ARRIVED = 8;
 const RETREAT_MAX_SECONDS = 45;
+/** A wave waits at most this long past its forced tick for its rams. */
+const BREACH_WAIT_SECONDS = 90;
 /** Reinforcements stream to an active wave in groups of at least this many. */
 const REINFORCE_GROUP = 4;
 /** Re-send the wave when its approach point moved this far. */
@@ -135,10 +137,18 @@ export function runArmy(d: AiDecision, defenceActive: boolean): void {
     if (defenceActive) return;
     const fighters = pool.filter((u) => !u.siege).length;
     const threshold = waveThreshold(p.wave, mem.waveNumber + 1);
+    const half = Math.max(3, Math.ceil(threshold / 2));
+    // Once a Siege Workshop stands, a wave waits for its rams (they raze the armoured production buildings), at most
+    // BREACH_WAIT_SECONDS past the forced tick.
+    const workshop = d.world.buildings.some((b) => b.typeId === 'siegeWorkshop' && b.constructed);
+    const rams = pool.filter((u) => u.typeId === 'batteringRam').length;
+    const breachDeadline = mem.nextWaveForcedTick + BREACH_WAIT_SECONDS * TICK_RATE;
+    const waitBreach = workshop && p.siege.rams > 0 && rams < p.siege.rams && d.tick < breachDeadline;
     const ready =
       (allIn && fighters > 0) ||
-      (d.tick >= mem.nextWaveEarliestTick && fighters >= threshold) ||
-      (d.tick + p.decisionInterval > mem.nextWaveForcedTick && fighters >= Math.max(3, Math.ceil(threshold / 2)));
+      (!waitBreach && d.tick >= mem.nextWaveEarliestTick && fighters >= threshold) ||
+      (!waitBreach && d.tick + p.decisionInterval > mem.nextWaveForcedTick && fighters >= half) ||
+      (d.tick >= breachDeadline && fighters >= half);
     if (!ready || d.world.enemies.length === 0) return;
     const ids = pool.map((u) => u.id).sort((a, b) => a - b);
     mem.wave = {
@@ -184,49 +194,101 @@ export function runArmy(d: AiDecision, defenceActive: boolean): void {
   orderWave(d, units);
 }
 
+/** Units that can raze armoured buildings: siege (`targets: 'buildings'`) and the Siphonarios. */
+export function isBreacher(u: UnitInfo): boolean {
+  return u.siege || u.typeId === 'siphonarios';
+}
+
+/**
+ * A building line infantry can bring down: melee armour at most SOFT_ARMOR (Houses, Mills, camps, farms). Production
+ * buildings and the Town Center are armoured against blows and are left to breachers (WP25 balance results).
+ */
+const SOFT_ARMOR = 4;
+function isSoft(d: AiDecision, b: BuildingInfo): boolean {
+  let armor = d.data.building(b.typeId).combat.meleeArmor;
+  try {
+    armor = d.query.resolvedStat(b.owner, b.typeId, 'meleeArmor');
+  } catch {
+    // keep the base value
+  }
+  return armor <= SOFT_ARMOR;
+}
+/** Escorts stay with breachers until these are this close to the target. */
+const ESCORT_RELEASE = 8;
+/** Line units this close to a soft target (or a unit target) get an explicit `attack` on it. */
+const ATTACK_RADIUS = 10;
+
 /** Pick the target and (re)issue orders to the wave. */
 function orderWave(d: AiDecision, units: UnitInfo[]): void {
   const wave = d.mem.wave!;
   const c = centroid(units);
   const target = chooseTarget(d, units, c);
   if (target === null) return;
-  const point = approach(d, target, c);
+  const breachers = units.filter(isBreacher);
+  const line = units.filter((u) => !isBreacher(u));
+  const building = 'size' in target ? target : null;
+  // Escorts walk with the breachers until they are close to their target.
+  let point = approach(d, target, c);
+  if (breachers.length > 0 && building !== null) {
+    const bc = centroid(breachers);
+    const far = Math.sqrt(distSqTo(bc.x, bc.y, building));
+    if (far > ESCORT_RELEASE) {
+      const ap = approach(d, building, bc);
+      const len = Math.max(1e-6, dist(bc.x, bc.y, ap.x, ap.y));
+      const k = Math.min(2, len) / len;
+      point = { x: bc.x + (ap.x - bc.x) * k, y: bc.y + (ap.y - bc.y) * k };
+    }
+  }
   const changed = wave.targetId !== target.id || dist(point.x, point.y, wave.orderX, wave.orderY) > REORDER_DISTANCE;
   wave.targetId = target.id;
   if (changed) {
     wave.orderX = point.x;
     wave.orderY = point.y;
   }
-  const siegeTarget = 'size' in target ? target : nearestBuilding(d, c);
-  const siegePoint = siegeTarget !== null ? approach(d, siegeTarget, c) : point;
-  const walkers: UnitInfo[] = [];
-  const siege: UnitInfo[] = [];
-  for (const u of units) {
+
+  // Breachers: an explicit `attack` on the target building (or the nearest building when the target is a unit).
+  const breachTarget = building ?? nearestBuilding(d, c);
+  const breachPoint = breachTarget !== null ? approach(d, breachTarget, c) : point;
+  const toBreach: UnitInfo[] = [];
+  for (const u of breachers) {
     d.ops.n++;
-    if (u.siege) {
-      const o = u.order;
-      if (d.combatOrders && siegeTarget !== null) {
-        const onIt = o !== null && o.type === 'attack' && o.targetId === siegeTarget.id;
-        if (!onIt) siege.push(u);
-      } else if (changed || (isIdle(u) && dist(u.x, u.y, siegePoint.x, siegePoint.y) > IDLE_RESEND)) siege.push(u);
+    const o = u.order;
+    if (d.combatOrders && breachTarget !== null) {
+      if (!(o !== null && o.type === 'attack' && o.targetId === breachTarget.id)) toBreach.push(u);
+    } else if (changed || (isIdle(u) && dist(u.x, u.y, breachPoint.x, breachPoint.y) > IDLE_RESEND)) toBreach.push(u);
+  }
+  if (toBreach.length > 0) {
+    if (breachTarget !== null && d.combatOrders) {
+      d.emit({ type: 'attack', unitIds: toBreach.map((u) => u.id).sort((x, y) => x - y), targetId: breachTarget.id, queue: false });
+    } else sendGroup(d, toBreach, breachPoint.x, breachPoint.y, false);
+  }
+
+  // Line units: explicit `attack` near a soft building or a unit target; otherwise attack-move to the point.
+  const explicit = d.combatOrders && (building === null || (isSoft(d, building) && breachers.length === 0));
+  const strikers: UnitInfo[] = [];
+  const walkers: UnitInfo[] = [];
+  for (const u of line) {
+    d.ops.n++;
+    const o = u.order;
+    if (explicit && distSqTo(u.x, u.y, target) <= ATTACK_RADIUS * ATTACK_RADIUS) {
+      const onIt = o !== null && o.type === 'attack' && o.targetId === target.id;
+      const other = o !== null && o.type === 'attack' ? d.world.byId.get(o.targetId) : undefined;
+      const fightingUnit = other !== undefined && !('size' in other);
+      if (!onIt && !fightingUnit) strikers.push(u);
       continue;
     }
     if (isEngaged(u)) continue;
     if (changed || (isIdle(u) && dist(u.x, u.y, wave.orderX, wave.orderY) > IDLE_RESEND)) walkers.push(u);
   }
+  if (strikers.length > 0) d.emit({ type: 'attack', unitIds: strikers.map((u) => u.id).sort((x, y) => x - y), targetId: target.id, queue: false });
   sendGroup(d, walkers, wave.orderX, wave.orderY, true);
-  if (siege.length > 0) {
-    if (siegeTarget !== null && d.combatOrders) {
-      d.emit({ type: 'attack', unitIds: siege.map((u) => u.id).sort((a, b) => a - b), targetId: siegeTarget.id, queue: false });
-    } else sendGroup(d, siege, siegePoint.x, siegePoint.y, false);
-  }
   if (d.profile.target === 'armyAware') focusFire(d, units, c);
 }
 
-function nearestBuilding(d: AiDecision, c: { x: number; y: number }): BuildingInfo | null {
+function nearestBuilding(d: AiDecision, c: { x: number; y: number }, among?: readonly BuildingInfo[]): BuildingInfo | null {
   let best: BuildingInfo | null = null;
   let bestD = Infinity;
-  for (const b of d.world.enemyBuildings) {
+  for (const b of among ?? d.world.enemyBuildings) {
     d.ops.n++;
     const dd = distSqTo(c.x, c.y, b);
     if (dd < bestD) {
@@ -246,10 +308,53 @@ function priorityOf(d: AiDecision, b: BuildingInfo, rams: boolean): number {
   return 2;
 }
 
+/** Nominal hp that turns a defensive building's arrows into a power comparable with units'. */
+const TOWER_NOMINAL_HP = 300;
+
+/** Enemy buildings with an attack (Town Centers): the building, reach (+1 tile margin) and a nominal power. */
+function towersOf(d: AiDecision): { b: BuildingInfo; reach: number; power: number }[] {
+  const towers: { b: BuildingInfo; reach: number; power: number }[] = [];
+  for (const b of d.world.enemyBuildings) {
+    const a = d.data.building(b.typeId).combat.attack;
+    if (a === undefined || !b.constructed) continue;
+    const cooldownTicks = Math.max(1, Math.round(a.cooldown * TICK_RATE));
+    towers.push({ b, reach: a.range + d.data.combat.reach + 1, power: ((a.arrows * a.attack * TICK_RATE) / cooldownTicks) * TOWER_NOMINAL_HP });
+  }
+  return towers;
+}
+
+/** Is the building `t` (or, with `t` null, the point) within any tower's reach of its centre? */
+function covered(towers: readonly { b: BuildingInfo; reach: number }[], x: number, y: number, t: BuildingInfo | null): boolean {
+  for (const tw of towers) {
+    const dd = t !== null ? distSqTo(tw.b.cx, tw.b.cy, t) : (tw.b.cx - x) * (tw.b.cx - x) + (tw.b.cy - y) * (tw.b.cy - y);
+    if (dd <= tw.reach * tw.reach) return true;
+  }
+  return false;
+}
+
+/** Enemy villagers out of every tower's reach and 8+ tiles from Town Centers: the largest cluster's central villager. */
+function raidTarget(d: AiDecision): UnitInfo | null {
+  const w = d.world;
+  const towers = towersOf(d);
+  const centres = w.enemyBuildings.filter((b) => b.typeId === d.data.start.centerBuilding);
+  const exposed = w.enemyUnits.filter(
+    (u) => u.villager && !covered(towers, u.x, u.y, null) && centres.every((t) => distSqTo(u.x, u.y, t) > RAID_TC_DISTANCE * RAID_TC_DISTANCE),
+  );
+  const groups = clusters(exposed, 6, w.mapWidth, w.mapHeight, d.ops);
+  let raid: UnitInfo[] | null = null;
+  for (const g of groups) if (raid === null || g.length > raid.length) raid = g;
+  if (raid === null) return null;
+  return nearestUnit(d, raid, centroid(raid));
+}
+
+/**
+ * Target choice (6.5, adapted to armoured production buildings). Without breachers the wave goes only for soft
+ * buildings (above easy, only those out of Town Center arrow reach), then for exposed villagers; with breachers the
+ * 6.5 priorities apply to every building. Endgame (no completed enemy producer): villagers, any unit, any building.
+ */
 function chooseTarget(d: AiDecision, units: readonly UnitInfo[], c: { x: number; y: number }): BuildingInfo | UnitInfo | null {
   const w = d.world;
   const producers = w.enemyBuildings.filter((b) => b.producer && b.constructed);
-  // Endgame (all difficulties): no production building left -> villagers, then any unit, then any building.
   if (producers.length === 0) {
     const vill = nearestUnit(d, w.enemyUnits.filter((u) => u.villager), c);
     if (vill !== null) return vill;
@@ -257,12 +362,16 @@ function chooseTarget(d: AiDecision, units: readonly UnitInfo[], c: { x: number;
     if (any !== null) return any;
     return nearestBuilding(d, c);
   }
-  if (d.profile.target === 'nearest') return nearestBuilding(d, c);
+  const breach = units.some(isBreacher);
+  const soft = breach ? w.enemyBuildings : w.enemyBuildings.filter((b) => isSoft(d, b));
+  if (d.profile.target === 'nearest') return nearestBuilding(d, c, soft) ?? nearestBuilding(d, c);
+  const towers = towersOf(d);
+  const candidates = breach ? soft : soft.filter((b) => !covered(towers, 0, 0, b));
   const rams = units.some((u) => u.typeId === 'batteringRam');
   let best: BuildingInfo | null = null;
   let bestP = -1;
   let bestD = Infinity;
-  for (const b of w.enemyBuildings) {
+  for (const b of candidates) {
     d.ops.n++;
     const pr = priorityOf(d, b, rams);
     const dd = distSqTo(c.x, c.y, b);
@@ -272,21 +381,20 @@ function chooseTarget(d: AiDecision, units: readonly UnitInfo[], c: { x: number;
       bestD = dd;
     }
   }
-  if (best === null || d.profile.target !== 'armyAware') return best;
-  return armyAware(d, units, best, rams, c);
+  if (best !== null && d.profile.target === 'armyAware') return armyAware(d, units, candidates, best, rams, c);
+  if (best !== null) return best;
+  return raidTarget(d) ?? nearestBuilding(d, c, soft) ?? nearestBuilding(d, c);
 }
 
-/** Nominal hp that turns a defensive building's arrows into a power comparable with units'. */
-const TOWER_NOMINAL_HP = 300;
-
 /**
- * Hard (6.5): the highest-priority building whose defence (enemy fighting power within 15 tiles, plus the arrows of
- * any building with an attack in reach of it) is at most 1.2x the wave; if every building is defended that well, the
- * largest cluster of enemy villagers at least 8 tiles from every enemy Town Center; failing that, the planned target.
+ * Hard (6.5): among the candidates, the highest-priority building whose defence (enemy fighting power within 15
+ * tiles, plus the arrows of any building with an attack in reach of it) is at most 1.2x the wave; if every candidate
+ * is defended that well, the largest exposed villager cluster; failing that, the planned target.
  */
 function armyAware(
   d: AiDecision,
   units: readonly UnitInfo[],
+  candidates: readonly BuildingInfo[],
   planned: BuildingInfo,
   rams: boolean,
   c: { x: number; y: number },
@@ -295,26 +403,17 @@ function armyAware(
   const wavePower = sumPower(units);
   const fighters = w.enemyUnits.filter((e) => e.fighting);
   const grid = new Buckets(w.mapWidth, w.mapHeight, fighters, d.ops);
-  const towers: { b: BuildingInfo; reach: number; power: number }[] = [];
-  for (const b of w.enemyBuildings) {
-    const a = d.data.building(b.typeId).combat.attack;
-    if (a === undefined || !b.constructed) continue;
-    const cooldownTicks = Math.max(1, Math.round(a.cooldown * TICK_RATE));
-    towers.push({ b, reach: a.range + d.data.combat.reach + 1, power: ((a.arrows * a.attack * TICK_RATE) / cooldownTicks) * TOWER_NOMINAL_HP });
-  }
+  const towers = towersOf(d);
   let best: BuildingInfo | null = null;
   let bestP = -1;
   let bestD = Infinity;
-  for (const b of w.enemyBuildings) {
+  for (const b of candidates) {
     d.ops.n++;
     let defence = 0;
     for (const e of grid.near(b.cx, b.cy, ARMY_AWARE_RADIUS + 3, d.ops)) {
       if (distSqTo(e.x, e.y, b) <= ARMY_AWARE_RADIUS * ARMY_AWARE_RADIUS) defence += e.power;
     }
-    for (const t of towers) {
-      // Nearest point of b to the tower's centre within the tower's reach.
-      if (distSqTo(t.b.cx, t.b.cy, b) <= t.reach * t.reach) defence += t.power;
-    }
+    for (const t of towers) if (distSqTo(t.b.cx, t.b.cy, b) <= t.reach * t.reach) defence += t.power;
     if (defence > ARMY_AWARE_RATIO * wavePower) continue;
     const pr = priorityOf(d, b, rams);
     const dd = distSqTo(c.x, c.y, b);
@@ -324,14 +423,7 @@ function armyAware(
       bestD = dd;
     }
   }
-  if (best !== null) return best;
-  const centres = w.enemyBuildings.filter((b) => b.typeId === d.data.start.centerBuilding);
-  const exposed = w.enemyUnits.filter((u) => u.villager && centres.every((t) => distSqTo(u.x, u.y, t) > RAID_TC_DISTANCE * RAID_TC_DISTANCE));
-  const groups = clusters(exposed, 6, w.mapWidth, w.mapHeight, d.ops);
-  let raid: UnitInfo[] | null = null;
-  for (const g of groups) if (raid === null || g.length > raid.length) raid = g;
-  if (raid === null) return planned;
-  return nearestUnit(d, raid, centroid(raid)) ?? planned;
+  return best ?? raidTarget(d) ?? planned;
 }
 
 function nearestUnit(d: AiDecision, units: readonly UnitInfo[], c: { x: number; y: number }): UnitInfo | null {

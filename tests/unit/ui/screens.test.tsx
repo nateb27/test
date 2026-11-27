@@ -12,6 +12,7 @@ import type { Screen } from '../../../src/client/app/screens/types';
 import type { TeamAssetManifest } from '../../../src/client/art/procedural';
 import { LocalSaveStorage, type Platform } from '../../../src/client/platform';
 import { civSummary } from '../../../src/client/ui/civSummary';
+import { AiPlayer } from '../../../src/bot';
 import { registry } from '../../../src/data';
 import { createGame, serialize } from '../../../src/sim';
 import { MAP_SIZE } from '../../../src/sim/types';
@@ -199,7 +200,9 @@ describe('Loading a save with an AI controller', () => {
       mapSize: MAP_SIZE,
       players: [{ civ: 'byzantines' }, { civ: 'byzantines', controller: 'ai', difficulty: 'easy' }],
     });
-    const json = serialize(sim, [{ playerId: 2, kind: 'ai', difficulty: 'easy', memory: { phase: 'boom' } }]);
+    // A real AI memory with a recognisable change (the AI refuses malformed memory as a corrupt save).
+    const memory = { ...(AiPlayer.create(2, 'easy', 6).save().memory as Record<string, never>), decisions: 5 };
+    const json = serialize(sim, [{ playerId: 2, kind: 'ai', difficulty: 'easy', memory }]);
     const parsed = parseSave(json);
     if (!parsed.ok) throw new Error('save should load');
     const nav = vi.fn<(s: Screen) => void>();
@@ -207,7 +210,7 @@ describe('Loading a save with an AI controller', () => {
     await waitFor(() => expect(nav).toHaveBeenCalled(), { timeout: 5000 });
     const arg = nav.mock.calls[0]![0];
     if (arg.name !== 'game') throw new Error('expected the game screen');
-    expect(arg.controllers.map((c) => c.save()!.memory)).toEqual([{ phase: 'boom' }]);
+    expect(arg.controllers.map((c) => c.save()!.memory)).toEqual([memory]);
     expect(arg.config?.players[1]).toMatchObject({ controller: 'ai', difficulty: 'easy' });
   });
 

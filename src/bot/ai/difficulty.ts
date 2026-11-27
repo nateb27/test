@@ -92,12 +92,13 @@ export const BUCKET_CELL = 8;
 
 /**
  * The 5.3 counter matrix as numbers (W = 1.0, w = 0.5, L = -0.5, untested = 0): how well a unit of the row class
- * does against an enemy of the column class.
+ * does against an enemy of the column class. Updated with the duels measured on the real sim (WP25): spears beat
+ * Cataphracts too, archers beat swordsmen outright.
  */
 export const COUNTER: Readonly<Record<UnitClass, Readonly<Partial<Record<UnitClass, number>>>>> = {
-  spear: { sword: -0.5, archer: -0.5, horse: 1, heavyCav: 0.5, siege: 1 },
+  spear: { sword: -0.5, archer: -0.5, horse: 1, heavyCav: 1, siege: 1 },
   sword: { spear: 1, archer: -0.5, horse: 1, siege: 1 },
-  archer: { spear: 1, sword: 0.5, horse: -0.5, heavyCav: -0.5 },
+  archer: { spear: 1, sword: 1, horse: -0.5, heavyCav: -0.5 },
   horse: { sword: -0.5, archer: 1, heavyCav: -0.5, siege: 1 },
   heavyCav: { spear: -0.5, sword: 1, archer: 1, horse: 1, siege: 1 },
   siege: {},

@@ -7,7 +7,8 @@
  * from home. Standard and hard recall the wave when the threat is over twice the defenders' power. Villagers per the
  * difficulty: none (easy), evacuate (standard), or fight small raids of at most 2 units with the 4 nearest villagers
  * and evacuate otherwise (hard). Held villagers go back to the economy once no threat has been seen for
- * THREAT_CLEAR_SECONDS.
+ * THREAT_CLEAR_SECONDS. Enemy siege is answered first: defenders get an explicit `attack` on the siege unit nearest
+ * home, and an unescorted siege unit is also attacked by the 6 nearest villagers (standard and hard).
  */
 
 import { TICK_RATE, type EntityId } from '../../sim';
@@ -21,6 +22,10 @@ const EVACUATE_RADIUS = 10;
 /** Raids of at most this many units are fought by villagers at hard. */
 const SMALL_RAID = 2;
 const RAID_FIGHTERS = 4;
+/** Villagers sent at an unescorted siege unit (6 villagers kill a Ram in about 20 s). */
+const SIEGE_FIGHTERS = 6;
+/** A siege unit with no enemy fighting unit this close is unescorted. */
+const ESCORT_RADIUS = 6;
 /** Re-send defenders when the threat centroid moved this far. */
 const DEFENCE_REORDER = 4;
 
@@ -92,22 +97,76 @@ export function runDefence(d: AiDecision): boolean {
     defenders = [...defenders, ...recallWave(d).filter((u) => u.fighting)];
   }
   const ids = new Set<EntityId>(def.defenderIds);
+  // Siege first (it cannot hurt units, and nothing out-repairs it): explicit `attack` on the enemy siege unit nearest
+  // home for every defender not already on a siege unit.
+  const siege = nearestSiege(threats, home.x, home.y);
   const send: UnitInfo[] = [];
+  const onSiege: UnitInfo[] = [];
   for (const u of defenders) {
     d.ops.n++;
-    const engaged = u.order !== null && (u.order.type === 'attack' || (u.order.type === 'attackMove' && u.order.phase === 'engaging'));
-    if (engaged) {
-      ids.add(u.id);
+    ids.add(u.id);
+    const o = u.order;
+    if (siege !== null && d.combatOrders) {
+      const t = o !== null && o.type === 'attack' ? d.world.byId.get(o.targetId) : undefined;
+      if (!(t !== undefined && 'cls' in t && t.siege)) onSiege.push(u);
       continue;
     }
-    if (moved || !ids.has(u.id) || (u.order === null && sq(u.x - def.x) + sq(u.y - def.y) > 25)) send.push(u);
-    ids.add(u.id);
+    const engaged = o !== null && (o.type === 'attack' || (o.type === 'attackMove' && o.phase === 'engaging'));
+    if (engaged) continue;
+    if (moved || !def.defenderIds.includes(u.id) || (o === null && sq(u.x - def.x) + sq(u.y - def.y) > 25)) send.push(u);
+  }
+  if (siege !== null && onSiege.length > 0) {
+    d.emit({ type: 'attack', unitIds: onSiege.map((u) => u.id).sort((a, b) => a - b), targetId: siege.id, queue: false });
   }
   sendGroup(d, send, def.x, def.y, true);
   def.defenderIds = [...ids].sort((a, b) => a - b);
 
-  villagers(d, threats, main);
+  if (siege !== null && unescorted(siege, threats)) siegeFighters(d, siege);
+  else villagers(d, threats, main);
   return true;
+}
+
+function nearestSiege(threats: readonly UnitInfo[], x: number, y: number): UnitInfo | null {
+  let best: UnitInfo | null = null;
+  let bestD = Infinity;
+  for (const t of threats) {
+    if (!t.siege) continue;
+    const dd = sq(t.x - x) + sq(t.y - y);
+    if (dd < bestD || (dd === bestD && best !== null && t.id < best.id)) {
+      best = t;
+      bestD = dd;
+    }
+  }
+  return best;
+}
+
+/** No enemy fighting unit within ESCORT_RADIUS of the siege unit. */
+function unescorted(siege: UnitInfo, threats: readonly UnitInfo[]): boolean {
+  return !threats.some((t) => t.fighting && sq(t.x - siege.x) + sq(t.y - siege.y) <= ESCORT_RADIUS * ESCORT_RADIUS);
+}
+
+/** Standard and hard: the nearest villagers (up to SIEGE_FIGHTERS) attack an unescorted siege unit. */
+function siegeFighters(d: AiDecision, siege: UnitInfo): void {
+  if (d.profile.villagers === 'none' || !d.combatOrders) return;
+  const def = d.mem.defence;
+  const held = new Set<EntityId>(def.villagerIds);
+  const on = d.world.villagers.filter((v) => v.order !== null && v.order.type === 'attack' && v.order.targetId === siege.id).length;
+  if (on < SIEGE_FIGHTERS) {
+    const pick = d.world.villagers
+      .filter((v) => !d.claimed.has(v.id) && !(v.order !== null && v.order.type === 'attack'))
+      .map((v) => ({ v, dd: sq(v.x - siege.x) + sq(v.y - siege.y) }))
+      .sort((a, b) => a.dd - b.dd || a.v.id - b.v.id)
+      .slice(0, SIEGE_FIGHTERS - on)
+      .map((x) => x.v);
+    if (pick.length > 0) {
+      d.emit({ type: 'attack', unitIds: pick.map((v) => v.id).sort((a, b) => a - b), targetId: siege.id, queue: false });
+      for (const v of pick) {
+        held.add(v.id);
+        d.claim(v.id);
+      }
+    }
+  }
+  def.villagerIds = [...held].sort((a, b) => a - b);
 }
 
 /** End of a threat: defenders walk back to the rally point, villagers return to the economy. */
