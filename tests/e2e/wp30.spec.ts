@@ -99,15 +99,18 @@ test('scenario 13: menu, Resign, Yes: the defeat end screen with stats; Main men
   await startMatch(page, { opponent: 'standard', ai: 'off' });
   await page.keyboard.press('Escape');
   await expect(page.getByTestId('game-menu')).toBeVisible();
-  const resign = page.getByTestId('game-menu').getByRole('button', { name: 'Resign' });
-  test.skip((await resign.count()) === 0, 'The in-match Resign button (WP29) is not merged yet');
-  await resign.click();
+  await page.getByTestId('game-menu').getByRole('button', { name: 'Resign' }).click();
   await expect(page.getByText('Resign this match?')).toBeVisible();
   await page.getByRole('button', { name: 'Yes' }).click();
   await step(page, 3);
   await expect(page.getByTestId('end-screen')).toBeVisible();
   await expect(page.getByTestId('end-title')).toHaveText('Defeat');
   expect(await page.evaluate(() => window.__game!.endScreen()?.reason)).toBe('resigned');
+  // Hotkeys do not reach the game behind the end screen: Pause does not resume it, Esc opens no menu.
+  await page.keyboard.press('Pause');
+  await page.keyboard.press('Escape');
+  expect(await page.evaluate(() => window.__game!.paused)).toBe(true);
+  await expect(page.getByTestId('game-menu')).toHaveCount(0);
   await shot(page, 'wp30-13-resign');
   await page.getByTestId('end-main-menu').click();
   await expect(page.getByTestId('main-menu')).toBeVisible();
@@ -119,8 +122,7 @@ test('scenario 14: the opponent is defeated: the victory screen; View map resume
   await startMatch(page, { opponent: 'standard', ai: 'off' });
   await page.evaluate(() => window.__game!.cheat.defeat(2));
   await step(page, 3);
-  // Victory is decided by the sim's outcome step (WP23); until it is merged the match never ends and this stays skipped.
-  test.skip((await page.evaluate(() => window.__game!.match()!.winner)) === null, 'The outcome system (WP23) is not merged yet');
+  expect(await page.evaluate(() => window.__game!.match()!.winner)).toBe(1);
   await expect(page.getByTestId('end-screen')).toBeVisible();
   await expect(page.getByTestId('end-title')).toHaveText('Victory');
   expect(await page.evaluate(() => window.__game!.endScreen()?.result)).toBe('victory');

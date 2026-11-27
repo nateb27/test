@@ -1,7 +1,9 @@
 import { expect, test, type Page } from '@playwright/test';
 import {
   advanceClock,
+  card,
   clickUnit,
+  entities,
   collectErrors,
   frames,
   openGround,
@@ -18,22 +20,38 @@ import {
 } from './helpers';
 
 /**
- * WP28: health bars (e2e 6, own side), and the attack-move and repair target modes (halves of e2e 3 and 10).
- * Sim combat is not merged yet, so the issued commands are checked through the order markers they raise, not
- * through their effect. The modes are entered through `__game.wp28` (the command card buttons come with WP29).
+ * WP28: health bars (e2e 6, own side), and the attack-move and repair target modes (halves of e2e 3 and 10), entered
+ * through the real command card (Attack-move on the soldier card, Repair on the villager card) and read through the
+ * debug hook's `inputMode()` and `cursor()`. The commands they issue are checked through the order markers they raise;
+ * what the orders then do is covered by `combat.spec.ts`.
  */
 
-type Wp28 = { startMode(kind: 'attackMove' | 'repair'): void; cursor(): string; modeKind(): string | null };
-const wp28 = <T>(page: Page, fn: (api: Wp28) => T): Promise<T> =>
-  page.evaluate(
-    ([code]) => (new Function('api', `return (${code})(api);`) as (a: Wp28) => unknown)((window.__game as unknown as { wp28: Wp28 }).wp28),
-    [fn.toString()],
-  ) as Promise<T>;
+const mode = (page: Page): Promise<string | null> => page.evaluate(() => window.__game!.inputMode());
+const cursor = (page: Page): Promise<string> => page.evaluate(() => window.__game!.cursor());
+/** Click the card button of the mode (the soldiers or villagers must be selected). */
+const enter = (page: Page, kind: 'attackMove' | 'repair'): Promise<void> => card(page, kind === 'attackMove' ? 'Attack-move' : 'Repair').click();
 
-const mode = (page: Page): Promise<string | null> => wp28(page, (a) => a.modeKind());
-const cursor = (page: Page): Promise<string> => wp28(page, (a) => a.cursor());
-const enter = (page: Page, kind: 'attackMove' | 'repair'): Promise<void> =>
-  page.evaluate((k) => (window.__game as unknown as { wp28: Wp28 }).wp28.startMode(k), kind);
+/** Spawn three own spearmen on open ground south of the Town Center (clear of villagers) and select them with a drag box. */
+async function selectSpearmen(page: Page): Promise<number[]> {
+  const tc = await townCenter(page);
+  const g = await openGround(page, tc.x, tc.y + 5, 3);
+  await page.evaluate(([x, y]) => {
+    for (let i = 0; i < 3; i++) window.__game!.cheat.spawnUnit('spearman', x! + i * 0.8, y!);
+  }, [g.x, g.y] as const);
+  await step(page, 2);
+  const units = await entities(page, { type: 'spearman', own: true });
+  const ids = units.map((e) => e.id);
+  const pts = await Promise.all(units.map((u) => toScreen(page, u.x, u.y)));
+  const xs = pts.map((p) => p.x);
+  const ys = pts.map((p) => p.y);
+  await page.mouse.move(Math.min(...xs) - 24, Math.min(...ys) - 40);
+  await page.mouse.down();
+  await page.mouse.move(Math.max(...xs) + 24, Math.max(...ys) + 12, { steps: 4 });
+  await page.mouse.up();
+  expect(await selection(page)).toEqual(ids);
+  return ids;
+}
+
 const markersAdded = async (page: Page): Promise<number> => (await overlayStats(page)).markersAdded!;
 const setHp = (page: Page, id: number, hp: number): Promise<void> => page.evaluate(([i, h]) => window.__game!.cheat.setHp(i!, h!), [id, hp] as const);
 const hpOf = (page: Page, id: number): Promise<number> => page.evaluate((i) => (window.__game!.state!.entities.find((e) => e.id === i) as { hp: number }).hp, id);
@@ -117,7 +135,7 @@ test.describe('WP28 attack-move mode', () => {
   test('cursor is the crosshair, left click issues once and ends the mode; right click and Esc cancel', async ({ page }) => {
     const errors = collectErrors(page);
     await startMatch(page);
-    await selectAllVillagers(page);
+    await selectSpearmen(page);
     expect(await cursor(page)).toBe('default');
 
     await enter(page, 'attackMove');
@@ -138,7 +156,8 @@ test.describe('WP28 attack-move mode', () => {
     expect(await mode(page)).toBeNull();
     expect(await markersAdded(page)).toBe(before + 1);
 
-    await enter(page, 'attackMove');
+    await page.keyboard.press('KeyA'); // the hotkey enters the same mode
+    expect(await mode(page)).toBe('attackMove');
     await page.keyboard.press('Escape');
     expect(await mode(page)).toBeNull();
     expect(await markersAdded(page)).toBe(before + 1);
@@ -147,7 +166,7 @@ test.describe('WP28 attack-move mode', () => {
 
   test('shift keeps the mode active for more clicks', async ({ page }) => {
     await startMatch(page);
-    await selectAllVillagers(page);
+    await selectSpearmen(page);
     const tc = await townCenter(page);
     const g = await openGround(page, tc.x, tc.y + 6);
     await enter(page, 'attackMove');
