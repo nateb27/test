@@ -86,6 +86,27 @@ function mark(g: CanvasRenderingContext2D, cx: number, cy: number, size: number,
   g.fillRect(x, y, size, size);
 }
 
+/**
+ * A resource node: a diamond (rotated square) with a dark outline, never the unit's square, so ore and berries cannot
+ * read as units of any player (the node colours are also kept far from every player colour, see `src/data/nodes.ts`).
+ */
+function nodeMark(g: CanvasRenderingContext2D, cx: number, cy: number, size: number, fill: string): void {
+  const r = size / 2 + 1;
+  const x = Math.round(cx) + 0.5;
+  const y = Math.round(cy) + 0.5;
+  g.beginPath();
+  g.moveTo(x, y - r);
+  g.lineTo(x + r, y);
+  g.lineTo(x, y + r);
+  g.lineTo(x - r, y);
+  g.closePath();
+  g.fillStyle = fill;
+  g.fill();
+  g.lineWidth = 1;
+  g.strokeStyle = 'rgba(8,10,6,0.85)';
+  g.stroke();
+}
+
 function diamondPath(g: CanvasRenderingContext2D, v: MinimapView, x0: number, y0: number, x1: number, y1: number): void {
   const a = worldToMinimap(v, x0, y0);
   const b = worldToMinimap(v, x1, y0);
@@ -212,8 +233,8 @@ export function mountMinimap(deps: MinimapDeps): Minimap {
           g.fillRect(Math.round(c.x - 0.5), Math.round(c.y - 0.5), 1, 1);
         }
       } else {
-        // Ore and food stand out: a pixel-aligned square of at least 3 px with a dark rim.
-        mark(g, c.x, c.y, Math.max(3, Math.round(size * view.k * 1.2)), css(def.minimapColor));
+        // Ore and food stand out: a diamond of at least 3 px (units are squares).
+        nodeMark(g, c.x, c.y, Math.max(3, Math.round(size * view.k * 1.2)), css(def.minimapColor));
       }
     }
     for (const e of state.entities) {

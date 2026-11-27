@@ -24,7 +24,9 @@ import {
   buildingBarCentres,
   healthBarColor,
   healthBarFill,
+  compactUnitBars,
   healthBarShown,
+  selectionShowsBar,
   healthBarSize,
   HP_FRAME,
   HP_UNIT_GAP,
@@ -105,7 +107,7 @@ export class WorldOverlays {
   private readonly markers = new MarkerRing();
   private readonly now: () => number;
   /** Sprites drawn on the last update, per kind (tests and debugging). */
-  readonly stats = { rings: 0, outlines: 0, bars: 0, healthBars: 0, carry: 0, flags: 0, markers: 0, ghostTiles: 0, markersAdded: 0 };
+  readonly stats = { rings: 0, outlines: 0, bars: 0, healthBars: 0, carry: 0, flags: 0, markers: 0, ghostTiles: 0, markersAdded: 0, compactBars: 0 };
   private ghostSprite: { type: string; asset: SpriteAsset } | null = null;
   private labelText = '';
   private boxKey = '';
@@ -168,6 +170,22 @@ export class WorldOverlays {
     this.flagPool.begin();
     const players = this.deps.sim.state.players;
 
+    // Unit bars in a crowd (PLAN-M2 7.2 as amended by the verification fix pass): past HP_CROWD_SELECTION selected
+    // units only damaged units show a bar, and with many bars on screen (or zoomed out) they are compact.
+    let selectedUnits = 0;
+    for (const d of renderer.lastDrawn) if (d.kind === 'unit' && selection.length > 0 && sortedHas(selection, d.id)) selectedUnits++;
+    const selectionBars = selectionShowsBar(selectedUnits);
+    let unitBars = 0;
+    for (const d of renderer.lastDrawn) {
+      if (d.kind !== 'unit') continue;
+      const e = this.deps.sim.query.entityById(d.id);
+      if (e === undefined || e.kind !== 'unit') continue;
+      const max = this.maxHp.get(e.owner, e.typeId, players[e.owner]?.researched.length ?? 0);
+      if (healthBarShown(e.hp, max, selectionBars && selection.length > 0 && sortedHas(selection, d.id))) unitBars++;
+    }
+    const compact = compactUnitBars(zoom, unitBars);
+    this.stats.compactBars = compact ? 1 : 0;
+
     for (const d of renderer.lastDrawn) {
       const selected = selection.length > 0 && sortedHas(selection, d.id);
       if (d.kind === 'node') {
@@ -192,8 +210,8 @@ export class WorldOverlays {
         let carryX = sx;
         let carryY = d.hit.minY - 4;
         const max = this.maxHp.get(e.owner, e.typeId, players[e.owner]?.researched.length ?? 0);
-        if (healthBarShown(e.hp, max, selected)) {
-          const sz = healthBarSize('unit', 0);
+        if (healthBarShown(e.hp, max, selected && selectionBars)) {
+          const sz = healthBarSize('unit', 0, compact);
           this.healthBar(sx, top - (HP_UNIT_GAP + sz.h / 2) * inv, e.hp, max, own, sz.w, sz.h, inv);
           carryX = sx + (sz.w / 2 + 6) * inv;
           carryY = top - (HP_UNIT_GAP + sz.h / 2) * inv;

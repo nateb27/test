@@ -13,7 +13,6 @@ import {
   type BuildingId,
   type EntityId,
   type PlayerId,
-  type ReadonlyEntity,
   type ResourceAmounts,
   type ResourceType,
   type Sim,
@@ -119,8 +118,6 @@ export function readView(sim: Sim, playerId: PlayerId, data: DataRegistry = regi
   const buildings: BuildingView[] = [];
   const nodes: NodeView[] = [];
   const farmWorkers = new Map<EntityId, number>();
-  const entityById = new Map<EntityId, ReadonlyEntity>();
-  for (const e of state.entities) entityById.set(e.id, e);
 
   for (const e of state.entities) {
     if (e.kind === 'unit') {
@@ -129,7 +126,7 @@ export function readView(sim: Sim, playerId: PlayerId, data: DataRegistry = regi
       let task: VillagerTask;
       if (o === null && e.orderQueue.length === 0) task = { kind: 'idle' };
       else if (o !== null && o.type === 'gather') {
-        const target = entityById.get(o.targetId);
+        const target = sim.query.entityById(o.targetId);
         let slot: GatherSlot = 'wood';
         if (target !== undefined && target.kind === 'node') slot = SLOT_BY_KIND[data.node(target.typeId).gatherKind] ?? 'wood';
         else if (target !== undefined && target.kind === 'building') slot = 'farm';

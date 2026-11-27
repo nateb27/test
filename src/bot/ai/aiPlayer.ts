@@ -26,7 +26,7 @@ import { runDefence } from './defence';
 import { DIFFICULTY } from './difficulty';
 import { economyDue, feedTownCenter, runEconomy } from './economy';
 import { initialMemory, memoryToJson, parseMemory, type AiMemory } from './memory';
-import { buildMilitary, research, setRallies, trainArmy } from './military';
+import { buildMilitary, research, saveForRam, setRallies, trainArmy } from './military';
 import { PowerTable } from './power';
 import { readWorld } from './world';
 import { houses, noteBuildings, rebuild, rebuildCenter, repair, staffFoundations } from './upkeep';
@@ -105,6 +105,7 @@ export class AiPlayer implements Controller {
     // Age food is the bottleneck and every coin goes to villagers and the advance (BALANCE.md).
     const advancing = world.tc !== null && world.tc.queuedTechs.length > 0;
     const armyStarted = (world.age >= 2 || advancing) && world.buildings.some((b) => b.typeId === 'barracks' && b.constructed);
+    d.finishing = isFinishing(d);
     d.ageCost = boomCost(d, advancing);
     d.creditBank(player.stats.resourcesGathered, armyStarted);
 
@@ -118,6 +119,7 @@ export class AiPlayer implements Controller {
     feedTownCenter(d);
     houses(d);
     buildMilitary(d);
+    saveForRam(d);
     if (economyDue(d)) runEconomy(d);
     trainArmy(d);
     research(d);
@@ -136,6 +138,17 @@ export class AiPlayer implements Controller {
   save(): ControllerSave {
     return { playerId: this.playerId, kind: 'ai', difficulty: this.difficulty, memory: memoryToJson(this.mem) };
   }
+}
+
+/** A wave has gone out and the enemy's fighting power is under a quarter of the AI's army (`AiDecision.finishing`). */
+function isFinishing(d: AiDecision): boolean {
+  if (d.mem.waveNumber === 0 || d.world.army.length === 0) return false;
+  let enemy = 0;
+  for (const e of d.world.enemyUnits) if (e.fighting) enemy += e.power;
+  let own = 0;
+  for (const u of d.world.army) own += u.power;
+  d.ops.n += d.world.enemyUnits.length + d.world.army.length;
+  return enemy * 4 < own;
 }
 
 /**

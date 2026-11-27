@@ -15,6 +15,7 @@ import {
 import { makeBuilding, makeUnit } from '../../../src/client/render/dev/fixtureState';
 import {
   buildingBarCentres,
+  compactUnitBars,
   healthBarColor,
   healthBarFill,
   healthBarShown,
@@ -24,6 +25,7 @@ import {
   HP_YELLOW,
   markerForCommand,
   MaxHpCache,
+  selectionShowsBar,
 } from '../../../src/client/render/overlays';
 import { animationPad } from '../../../src/client/render/overlays/unitTop';
 import { MAX_PINGS, PING_CYCLE_TICKS, PING_LIFE_TICKS, PingSet, pingLook } from '../../../src/client/ui/minimap';
@@ -57,10 +59,20 @@ describe('health bar rules', () => {
     expect(healthBarColor(100, 100, false)).toBe(HP_RED);
   });
 
-  it('sizes follow the plan: units 30 x 4, buildings 16 * footprint + 16 x 5', () => {
+  it('sizes follow the plan: units 30 x 4 (compact 18 x 2), buildings 16 * footprint + 16 x 5', () => {
     expect(healthBarSize('unit', 0)).toEqual({ w: 30, h: 4 });
+    expect(healthBarSize('unit', 0, true)).toEqual({ w: 18, h: 2 });
     expect(healthBarSize('building', 2)).toEqual({ w: 48, h: 5 });
-    expect(healthBarSize('building', 4)).toEqual({ w: 80, h: 5 });
+    expect(healthBarSize('building', 4, true)).toEqual({ w: 80, h: 5 });
+  });
+
+  it('crowds (verification fix D9): past 12 selected units only damage shows a bar; many bars or zooming out makes them compact', () => {
+    expect(selectionShowsBar(12)).toBe(true);
+    expect(selectionShowsBar(13)).toBe(false);
+    expect(compactUnitBars(1, 24)).toBe(false);
+    expect(compactUnitBars(1, 25)).toBe(true);
+    expect(compactUnitBars(0.7, 1)).toBe(true);
+    expect(compactUnitBars(0.75, 1)).toBe(false);
   });
 
   it('the fill is whole pixels, at least 1 while alive, and never beyond the bar', () => {

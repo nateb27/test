@@ -87,24 +87,28 @@ describe('siege rows on paper (PLAN-M2 5.3)', () => {
 
   it('2 Battering Rams destroy a Barracks in under 60 s', () => {
     expect(buildingKillSeconds('batteringRam', 2, 'barracks', GAP)).toBeLessThan(60);
-    // 4 attack against melee armour 7 is floored at 1 damage, then the +60 against buildings.
+    // 4 attack against melee armour 6 is floored at 1 damage, then the +60 against buildings.
     expect(hitBuilding(baseProfile('batteringRam'), barracks)).toBe(1 + 60);
   });
 
-  // Production buildings have melee armour 7 (Town Center 8): a Swordsman does 1 damage a blow, so infantry cannot raze
-  // them (docs/BALANCE.md, "Building armour"). With the plan's armour of 2 the row failed: 10 Swordsmen were about as fast
-  // as 2 rams.
-  it('10 Swordsmen need more than 3 times as long as 2 rams for a Barracks', () => {
+  // Production buildings have melee armour 6 (Town Center 8): a Swordsman does 2 damage a blow, a Spearman or Horseman 1,
+  // so infantry and cavalry raze them slowly and siege is strongly preferred (docs/BALANCE.md, "Building armour"). With
+  // the original armour of 2 the row failed: 10 Swordsmen were about as fast as 2 rams. The row asks for more than 2x
+  // since the verification fix pass (was 3x at armour 7, where a Township army needed two minutes for a Barracks).
+  it('10 Swordsmen need more than 2 times as long as 2 rams for a Barracks', () => {
     const rams = buildingKillSeconds('batteringRam', 2, 'barracks', GAP);
     const swords = buildingKillSeconds('swordsman', 10, 'barracks', GAP);
-    expect(swords).toBeGreaterThan(3 * rams);
+    expect(swords).toBeGreaterThan(2 * rams);
+    expect(hitBuilding(baseProfile('swordsman'), barracks)).toBe(2);
+    expect(hitBuilding(baseProfile('spearman'), barracks)).toBe(1);
+    expect(hitBuilding(baseProfile('horseman'), barracks)).toBe(1);
   });
 
-  it('the row would fail with the plan 5.2 armour (melee armour 2): the reason for armour 7', () => {
+  it('the row would fail with the original 5.2 armour (melee armour 2): the reason for armour 6', () => {
     const old = { meleeArmor: 2 };
     const rams = buildingKillSeconds('batteringRam', 2, 'barracks', GAP, old);
     const swords = buildingKillSeconds('swordsman', 10, 'barracks', GAP, old);
-    expect(swords).toBeLessThan(3 * rams);
+    expect(swords).toBeLessThan(2 * rams);
   });
 
   it('a Trebuchet outranges the Town Center arrows by at least 3 tiles', () => {

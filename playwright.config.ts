@@ -47,7 +47,7 @@ export default defineConfig({
   ],
   // E2E runs against the built output, built in 'e2e' mode so window.__game exists.
   webServer: {
-    command: `npx vite build --mode e2e --outDir ${DIST} && npx vite preview --outDir ${DIST} --port ${PORT} --strictPort`,
+    command: `npx vite build --mode e2e --sourcemap --outDir ${DIST} && npx vite preview --outDir ${DIST} --port ${PORT} --strictPort`,
     url: `http://localhost:${PORT}`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

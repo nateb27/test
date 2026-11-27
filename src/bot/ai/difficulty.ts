@@ -79,6 +79,8 @@ export interface DifficultyProfile {
   ageUpVillagers: Readonly<Record<number, number>> | null;
   /** While a threat is answered, the military may spend the whole stockpile (hard). */
   allOutDefence: boolean;
+  /** While finishing a beaten enemy (`AiDecision.finishing`), the military may spend the whole stockpile (hard). */
+  finishAllOut: boolean;
   /**
    * Commit only when stronger (hard): a wave launches (and a forced launch happens) only while the massed army's
    * power is at least this multiple of the enemy's whole fighting power (null: launch by the schedule alone).
@@ -133,6 +135,12 @@ export const COUNTER: Readonly<Record<UnitClass, Readonly<Partial<Record<UnitCla
   siege: {},
   villager: {},
 };
+
+/**
+ * Composition while finishing a beaten enemy that has no fighting units at all (standard, hard): the units that raze
+ * buildings and outlast Town Center arrows. Archers do 1 damage a shot to every building and die to the arrows first.
+ */
+export const FINISH_FIXED: Readonly<Partial<Record<UnitClass, number>>> = { sword: 0.5, horse: 0.5 };
 
 /** Class of each unit def the AI knows. Unknown ids count as swords (generalists). */
 export const UNIT_CLASS: Readonly<Record<string, UnitClass>> = {
@@ -213,6 +221,7 @@ export const DIFFICULTY: Readonly<Record<AiDifficulty, DifficultyProfile>> = {
     surplusAbove: SURPLUS_ABOVE,
     ageUpVillagers: null,
     allOutDefence: false,
+    finishAllOut: false,
     commitRatio: null,
     raidFirstWave: false,
     localRetreat: null,
@@ -254,6 +263,7 @@ export const DIFFICULTY: Readonly<Record<AiDifficulty, DifficultyProfile>> = {
     surplusAbove: SURPLUS_ABOVE,
     ageUpVillagers: null,
     allOutDefence: false,
+    finishAllOut: false,
     commitRatio: null,
     raidFirstWave: false,
     localRetreat: null,
@@ -297,6 +307,7 @@ export const DIFFICULTY: Readonly<Record<AiDifficulty, DifficultyProfile>> = {
     surplusAbove: 150,
     ageUpVillagers: { 2: 36, 3: 58 },
     allOutDefence: true,
+    finishAllOut: false,
     commitRatio: 1.3,
     raidFirstWave: true,
     localRetreat: 1.2,

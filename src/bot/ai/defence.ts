@@ -26,6 +26,8 @@ const RAID_FIGHTERS = 4;
 const SIEGE_FIGHTERS = 6;
 /** A siege unit with no enemy fighting unit this close is unescorted. */
 const ESCORT_RADIUS = 6;
+/** Enemy fighting units this close to a siege unit count as its escort when deciding whether to go for the siege. */
+const ESCORT_POWER_RADIUS = 10;
 /** Re-send defenders when the threat centroid moved this far. */
 const DEFENCE_REORDER = 4;
 
@@ -98,8 +100,17 @@ export function runDefence(d: AiDecision): boolean {
   }
   const ids = new Set<EntityId>(def.defenderIds);
   // Siege first (it cannot hurt units, and nothing out-repairs it): explicit `attack` on the enemy siege unit nearest
-  // home for every defender not already on a siege unit.
-  const siege = nearestSiege(threats, home.x, home.y);
+  // home for every defender not already on a siege unit, unless the escort out-powers the defenders (then chasing the
+  // rams through the escort only feeds it: the defenders attack-move and fight the escort first).
+  const nearestRam = nearestSiege(threats, home.x, home.y);
+  let escort = 0;
+  if (nearestRam !== null) {
+    for (const e of d.world.enemyUnits) {
+      d.ops.n++;
+      if (e.fighting && sq(e.x - nearestRam.x) + sq(e.y - nearestRam.y) <= ESCORT_POWER_RADIUS * ESCORT_POWER_RADIUS) escort += e.power;
+    }
+  }
+  const siege = nearestRam !== null && escort <= sumPower(defenders) ? nearestRam : null;
   const send: UnitInfo[] = [];
   const onSiege: UnitInfo[] = [];
   for (const u of defenders) {
@@ -121,7 +132,7 @@ export function runDefence(d: AiDecision): boolean {
   sendGroup(d, send, def.x, def.y, true);
   def.defenderIds = [...ids].sort((a, b) => a - b);
 
-  if (siege !== null && unescorted(siege, threats)) siegeFighters(d, siege);
+  if (nearestRam !== null && unescorted(nearestRam, threats)) siegeFighters(d, nearestRam);
   else villagers(d, threats, main);
   return true;
 }

@@ -10,6 +10,7 @@ import { HudController } from '../../ui/hudController';
 import type { DebugController } from '../../debug/controller';
 import type { DebugPanel } from '../../debug/DebugPanel';
 import type { AppHost } from '../host';
+import { FpsMeter, fpsFromUrl } from '../fpsMeter';
 import { LOCAL_PLAYER_ID, Match } from '../match';
 import type { TargetModeKind } from '../../ui/text';
 import type { EndScreenVM } from '../../ui/viewModel';
@@ -71,6 +72,7 @@ export function GameScreen({
     let cleanupHook: (() => void) | void;
     let debugController: DebugController | null = null;
     let offUi: (() => void) | null = null;
+    let offFps: (() => void) | null = null;
     let offEnd: (() => void) | null = null;
     let offMode: (() => void) | null = null;
     let disposed = false;
@@ -123,6 +125,12 @@ export function GameScreen({
       }
       // Dev and e2e builds only: `?paused=1` starts every match paused, so tests can compare a loaded save tick for tick.
       if (DEBUG_HOOKS_ENABLED && new URLSearchParams(window.location.search).has('paused')) match.loop.paused = true;
+      // The frame-rate readout (every build): F3 toggles it, `?fps=1` shows it from the start.
+      const meter = new FpsMeter(parent, fpsFromUrl(window.location.search));
+      m.fpsMeter = meter;
+      offFps = m.input.onUiAction((action) => {
+        if (action === 'toggleDebug') meter.toggle();
+      });
       match.start();
       setHud(controller);
       // Written out (not via DEBUG_HOOKS_ENABLED) so the bundler drops the debug chunk from production builds.
@@ -151,6 +159,8 @@ export function GameScreen({
       offEnd?.();
       offMode?.();
       offUi?.();
+      offFps?.();
+      match?.fpsMeter?.destroy();
       debugController?.destroy();
       host.setMatch(null);
       if (typeof cleanupHook === 'function') cleanupHook();

@@ -2,7 +2,7 @@
  * `npm run test:long` (PLAN-M2 8.1 AI item 4, 11 item 8): the AI ladder on 5 seeds. Hard vs Easy and the timing
  * table are in `ai.long.test.ts`.
  *
- * - Standard beats Easy on at least 4 of 5 seeds, each win before 45:00.
+ * - Standard beats Easy on every seed, each before 45:00 (PLAN-M2 8.1 item 4).
  * - Hard beats Standard on at least 4 of 5 seeds; every match has a winner before 75:00 (90,000 ticks).
  * - Mirror matches (Standard vs Standard, Hard vs Hard) on 3 seeds each: a winner before 75:00.
  *
@@ -13,10 +13,8 @@ import { describe, expect, it } from 'vitest';
 import { LADDER_SEEDS, LONG, ladderMatch } from './aiHarness';
 
 describe('AI ladder', () => {
-  it('Standard beats Easy on at least 4 of 5 seeds, before 45:00', () => {
-    let wins = 0;
-    for (const seed of LADDER_SEEDS) if (ladderMatch(['standard', 'easy'], seed, 45).winner === 1) wins++;
-    expect(wins).toBeGreaterThanOrEqual(4);
+  it.each(LADDER_SEEDS)('seed %i: Standard beats Easy before 45:00', (seed) => {
+    expect(ladderMatch(['standard', 'easy'], seed, 45).winner).toBe(1);
   }, LONG);
 
   it('Hard beats Standard on at least 4 of 5 seeds; every match ends before 75:00', () => {

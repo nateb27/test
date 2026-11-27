@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { registry } from '../../../src/data/index';
+import { PLAYER_COLORS } from '../../../src/sim/types';
 import type { BuildingDef, ProducibleDef, ResourceAmounts } from '../../../src/data/schema';
 
 const CIV = 'byzantines';
@@ -139,7 +140,12 @@ describe('data validation: trees and orphans', () => {
 
   it('item ages are consistent with the age of their producer and requirements', () => {
     for (const b of r.buildings) {
-      for (const id of b.trains) expect(r.unit(id).age, id).toBeGreaterThanOrEqual(b.age);
+      // A unit trained in several buildings (the Battering Ram: Barracks from the Township Age, Siege Workshop) must not
+      // be of an earlier age than the earliest of them, and is never available before one of them is.
+      for (const id of b.trains) {
+        const earliest = Math.min(...r.buildings.filter((x) => x.trains.includes(id)).map((x) => x.age));
+        expect(r.unit(id).age, id).toBeGreaterThanOrEqual(earliest);
+      }
       for (const id of b.researches) {
         const t = r.tech(id);
         if (t.advancesTo === undefined) expect(t.age, id).toBeGreaterThanOrEqual(b.age);
@@ -226,7 +232,7 @@ describe('key numbers from plan section 5', () => {
     expect(r.building('mill').dropOff).toEqual(['food']);
     expect(r.building('lumberCamp').dropOff).toEqual(['wood']);
     expect(r.building('miningCamp').dropOff.sort()).toEqual(['gold', 'stone']);
-    expect(r.building('barracks').trains).toEqual(['spearman', 'swordsman']);
+    expect(r.building('barracks').trains).toEqual(['spearman', 'swordsman', 'batteringRam']);
     expect(r.building('archeryRange').trains).toEqual(['archer']);
     expect(r.building('stable').trains).toEqual(['horseman', 'lancer', 'cataphract']);
     expect(r.building('siegeWorkshop').trains).toEqual(['batteringRam', 'trebuchet', 'siphonarios']);
@@ -248,7 +254,7 @@ describe('key numbers from plan section 5', () => {
     ['archer', 2, { wood: 30, gold: 45 }, 26, 1.0, 1],
     ['horseman', 2, { food: 80 }, 30, 1.5, 1],
     ['lancer', 3, { food: 80, gold: 70 }, 32, 1.4, 1],
-    ['batteringRam', 3, { wood: 160, gold: 80 }, 40, 0.6, 3],
+    ['batteringRam', 2, { wood: 160, gold: 80 }, 40, 0.6, 3],
     ['trebuchet', 4, { wood: 200, gold: 200 }, 50, 0.5, 3],
     ['cataphract', 3, { food: 90, gold: 80 }, 34, 1.3, 1],
     ['siphonarios', 4, { food: 50, gold: 90 }, 30, 0.9, 1],
@@ -319,5 +325,19 @@ describe('key numbers from plan section 5', () => {
   it('start conditions', () => {
     expect(r.start.resources).toEqual({ food: 200, wood: 200, gold: 100, stone: 0 });
     expect(r.start.units).toEqual([{ unitType: 'villager', count: 6 }]);
+  });
+});
+
+describe('minimap colours (verification fix D6)', () => {
+  it('no resource node can be mistaken for a player on the minimap: every node colour is far from every player colour', () => {
+    const rgb = (c: number): [number, number, number] => [(c >> 16) & 255, (c >> 8) & 255, c & 255];
+    const distance = (a: number, b: number): number => {
+      const [r1, g1, b1] = rgb(a);
+      const [r2, g2, b2] = rgb(b);
+      return Math.sqrt((r1 - r2) * (r1 - r2) + (g1 - g2) * (g1 - g2) + (b1 - b2) * (b1 - b2));
+    };
+    for (const n of r.nodes) {
+      for (const p of PLAYER_COLORS) expect(distance(n.minimapColor, p.value), `${n.id} against ${p.id}`).toBeGreaterThanOrEqual(100);
+    }
   });
 });

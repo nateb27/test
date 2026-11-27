@@ -153,7 +153,16 @@ test('scenario 6: health bars and inspection: a damaged own building shows a bar
   await expect(page.getByTestId('sel-hp')).toContainText('65');
   await expect(page.getByTestId('sel-attack')).toContainText('8');
   await expect(page.getByTestId('sel-armor')).toHaveText(/M 2\s*\/\s*P 1/);
-  await expect(page.getByTestId('sel-owner')).toContainText('Computer');
+  await expect(page.getByTestId('sel-owner')).toHaveText('Computer (Standard)');
+  // The owner tag (with the difficulty) is never cut, also in the narrow panel at 800x600.
+  await page.setViewportSize({ width: 800, height: 600 });
+  await step(page, 1);
+  const tag = await page.getByTestId('sel-owner').evaluate((el) => ({ sw: el.scrollWidth, cw: el.clientWidth, sh: el.scrollHeight, ch: el.clientHeight }));
+  expect(tag.sw).toBeLessThanOrEqual(tag.cw);
+  expect(tag.sh).toBeLessThanOrEqual(tag.ch);
+  await shot(page, 'm2-06-inspect-enemy-800x600');
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await step(page, 1);
   // Read-only: no command card for an enemy.
   await expect(page.locator('[data-testid="command-card"] button[aria-label^="Stop ("]')).toHaveCount(0);
   expect((await overlayStats(page)).healthBars).toBeGreaterThanOrEqual(2); // selected enemy + damaged Town Center
@@ -178,15 +187,23 @@ test('scenario 8: an enemy horseman next to the Town Center is shot down by its 
   const errors = collectErrors(page);
   await startMatch(page, OPPONENT);
   const tc = await townCenter(page);
+  // The scenario is the Town Center against a horseman beside it: the human's starting villagers are taken off the map
+  // first, so the horseman has nobody to chase out of the arrows' reach (it would otherwise ride after a villager and
+  // the time would measure the chase). With nothing else in sight it attacks the Town Center itself (1 damage a blow).
+  const own = (await villagers(page)).map((v) => v.id);
+  await page.evaluate((ids) => ids.forEach((id) => window.__game!.cheat.setHp(id, 0)), own);
+  await step(page, 2);
+  expect(await villagers(page)).toEqual([]);
   const spot = await clearSpot(page, tc.x, tc.y, 3, 0);
   const [horse] = await spawn(page, [['horseman', spot.x, spot.y]], ENEMY);
   // The Town Center shoots (its own projectiles appear) and the horseman dies; nobody gives an order.
-  await stepUntil(page, `g.state.projectiles.some((p) => p.sourceId === ${tc.id})`, 100, 1);
-  // Plan 8.2 says within 15 s (300 ticks). With 2 arrows of 7 pierce every 2 s (WP33) against pierce armour 2 and 70 hp
-  // a lone idle horseman dies in about 250 ticks on the sim (tests/sim/feel.test.ts asserts <= 320); 400 leaves room for
-  // the horseman chasing a villager out of reach for a while.
-  const ticks = await stepUntil(page, gone(horse!), 400, 10);
-  test.info().annotations.push({ type: 'info', description: `horseman died after ${ticks} ticks` });
+  const first = await stepUntil(page, `g.state.projectiles.some((p) => p.sourceId === ${tc.id})`, 100, 1);
+  expect(first, 'the Town Center opens fire').toBeGreaterThanOrEqual(0);
+  // Plan 8.2: within 15 s (300 ticks) of the spawn. 2 arrows of 7 pierce every 2 s (WP33) against pierce armour 2 and
+  // 70 hp: about 250 ticks on the sim (tests/sim/feel.test.ts asserts <= 320 for an idle one).
+  const rest = await stepUntil(page, gone(horse!), 300 - first, 1);
+  expect(rest, 'the horseman dies within 300 ticks').toBeGreaterThanOrEqual(0);
+  test.info().annotations.push({ type: 'info', description: `horseman died after ${first + rest} ticks` });
   expect(errors).toEqual([]);
 });
 

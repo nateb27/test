@@ -17,6 +17,7 @@
 import { registry } from '../data';
 import type { DataRegistry } from '../data';
 import type { BuildingId, Command, CommandInput, EntityId, PlayerId, ResourceAmounts, ResourceType, Sim, SimQuery } from '../sim';
+import { CachedQuery, type OpCounter } from './cachedQuery';
 import { blockedFromView, findSpot, floodReach, ringReachable, solidFromView } from './placement';
 import type { Blocked } from './placement';
 import { PLAN, type BotPlan } from './plan';
@@ -65,7 +66,8 @@ export class EconomyBot implements Controller {
  *
  * `plan` (default `PLAN`) is the build order to follow. `reserve` (default none) is held back from the stockpile: the
  * decision sees `resources - reserve` (never below 0) and cannot spend it (the AI's army share, PLAN-M2 6.4). The
- * defaults reproduce the M1 economy bot exactly.
+ * defaults reproduce the M1 economy bot exactly. `ops` counts the decision's operations (PLAN-M2 6.7); a
+ * `CachedQuery` passed as `query` brings its own counter and memo.
  */
 export function decide(
   view: BotView,
@@ -73,6 +75,7 @@ export function decide(
   data: DataRegistry = registry,
   plan: BotPlan = PLAN,
   reserve?: ResourceAmounts,
+  ops?: OpCounter,
 ): CommandInput[] {
   let v = view;
   if (reserve !== undefined) {
@@ -80,7 +83,8 @@ export function decide(
     for (const r of RESOURCES) resources[r] = Math.max(0, resources[r] - Math.max(0, reserve[r]));
     v = { ...view, resources };
   }
-  return new Decision(v, query, data, plan).run();
+  const q = query instanceof CachedQuery ? query : new CachedQuery(query, view.nodes.length + view.buildings.length + view.villagers.length, ops ?? { n: 0 });
+  return new Decision(v, q, data, plan).run();
 }
 
 class Decision {
@@ -98,15 +102,25 @@ class Decision {
   /** Gatherer counts per resource, kept current as villagers are assigned. */
   private readonly counts: Record<ResourceType, number> = { food: 0, wood: 0, gold: 0, stone: 0 };
 
+  /** Drop-offs per resource (built on first use; cleared when the decision orders a building). */
+  private dropCache: Partial<Record<ResourceType, BuildingView[]>> = {};
+  /** Nodes by id (built on first use). */
+  private nodeById: Map<EntityId, NodeView> | null = null;
+  private readonly ops: OpCounter;
+  private readonly opsStart: number;
+
   constructor(
     private readonly view: BotView,
-    private readonly query: SimQuery,
+    private readonly query: CachedQuery,
     private readonly data: DataRegistry,
     private readonly plan: BotPlan,
   ) {
+    this.ops = query.ops;
+    this.opsStart = query.ops.n;
     this.budget = { ...view.resources };
     this.blocked = blockedFromView(view);
     this.solid = solidFromView(view);
+    this.ops.n += 2 * (view.nodes.length + view.buildings.length) + view.villagers.length;
     this.popUsed = view.popUsed;
     this.tc = view.buildings.find((b) => b.typeId === 'townCenter' && b.constructed);
     this.tcCentre = this.tc !== undefined ? { x: this.tc.cx, y: this.tc.cy } : { x: view.mapWidth / 2, y: view.mapHeight / 2 };
@@ -118,16 +132,28 @@ class Decision {
 
   run(): CommandInput[] {
     if (this.tc === undefined) return this.cmds;
-    this.houses();
-    this.ageUp();
-    this.production();
-    this.ageBuildings();
-    this.assignIdle();
-    this.retargetFar();
-    this.rebalance();
-    this.techs();
-    this.extraSilkWorkshops();
+    const rules = [
+      () => this.houses(),
+      () => this.ageUp(),
+      () => this.production(),
+      () => this.ageBuildings(),
+      () => this.assignIdle(),
+      () => this.retargetFar(),
+      () => this.rebalance(),
+      () => this.techs(),
+      () => this.extraSilkWorkshops(),
+    ];
+    for (const rule of rules) {
+      // Past the operation budget (AI only), the remaining rules wait for the next decision.
+      if (this.over()) break;
+      rule();
+    }
     return this.cmds;
+  }
+
+  /** Has this decision spent its operation budget (`plan.opBudget`)? Never for the M1 bot (no budget). */
+  private over(): boolean {
+    return this.plan.opBudget !== undefined && this.ops.n - this.opsStart > this.plan.opBudget;
   }
 
   // -------------------------------------------------------------------------
@@ -187,7 +213,14 @@ class Decision {
 
   /** Foundation or completed drop-offs for a resource (the Town Center takes everything). */
   private dropOffs(resource: ResourceType): BuildingView[] {
-    return this.view.buildings.filter((b) => b.dropOff.includes(resource));
+    let list = this.dropCache[resource];
+    if (list === undefined) {
+      list = this.view.buildings.filter((b) => b.dropOff.includes(resource));
+      this.dropCache[resource] = list;
+      this.ops.n += this.view.buildings.length;
+    }
+    this.ops.n += list.length;
+    return list;
   }
 
   /** Walking gap between a node and the nearest drop-off for it, planned ones included. */
@@ -207,6 +240,7 @@ class Decision {
       this.solid.mark(tx, ty, size);
       this.reach = null;
     }
+    this.dropCache = {};
     this.view.buildings.push({
       id: -1,
       typeId: type,
@@ -261,7 +295,17 @@ class Decision {
   }
 
   private env() {
-    return { view: this.view, query: this.query, data: this.data, playerId: this.view.playerId, blocked: this.blocked };
+    return { view: this.view, query: this.query, data: this.data, playerId: this.view.playerId, blocked: this.blocked, ops: this.ops };
+  }
+
+  private node(id: EntityId): NodeView | undefined {
+    if (this.nodeById === null) {
+      this.nodeById = new Map();
+      for (const n of this.view.nodes) this.nodeById.set(n.id, n);
+      this.ops.n += this.view.nodes.length;
+    }
+    this.ops.n++;
+    return this.nodeById.get(id);
   }
 
   /** A site for a large building or House: near the Town Center, outside the farm ring, with a free lane around it. */
@@ -430,6 +474,7 @@ class Decision {
   private assignIdle(): void {
     const idle = this.view.villagers.filter((v) => v.task.kind === 'idle' && !v.claimed);
     for (const v of idle) {
+      if (this.over()) return;
       const order = this.deficits()
         .filter((d) => this.hasNodes(d.resource))
         .sort((a, b) => b.deficit - a.deficit || RESOURCES.indexOf(a.resource) - RESOURCES.indexOf(b.resource));
@@ -446,10 +491,10 @@ class Decision {
   private retargetFar(): void {
     let budget = 2;
     for (const v of this.view.villagers) {
-      if (budget === 0) return;
+      if (budget === 0 || this.over()) return;
       if (v.claimed || v.task.kind !== 'gather' || v.task.slot === 'farm') continue;
       const task = v.task;
-      const cur = this.view.nodes.find((n) => n.id === task.targetId);
+      const cur = this.node(task.targetId);
       if (cur === undefined) continue;
       const dd = this.dropDistance(cur);
       if (dd <= this.plan.campMaxDropDistance + 1.5) continue;
@@ -496,7 +541,7 @@ class Decision {
           }
         }
       }
-      this.reach = floodReach(this.solid, seed[0], seed[1]);
+      this.reach = floodReach(this.solid, seed[0], seed[1], this.ops);
     }
     return ringReachable(this.reach, this.view.mapWidth, this.view.mapHeight, n.tx, n.ty, n.size);
   }
@@ -504,6 +549,7 @@ class Decision {
   private pickNode(v: VillagerView, nodes: NodeView[]): NodeView | null {
     let best: NodeView | null = null;
     let bestScore = Infinity;
+    this.ops.n += nodes.length;
     for (const n of nodes) {
       if (dist(n.cx, n.cy, this.tcCentre.x, this.tcCentre.y) > this.plan.workRadius || !this.reachable(n)) continue;
       const score = this.dropDistance(n) + 0.3 * dist(v.x, v.y, n.cx, n.cy);
@@ -551,7 +597,6 @@ class Decision {
 
   /** A camp site next to the densest group of free nodes nearest the base. */
   private campSpot(camp: BuildingId, resource: ResourceType, slots: string[], free: NodeView[]): { tx: number; ty: number } | null {
-    const all = this.view.nodes.filter((n) => n.resource === resource && slots.includes(n.slot));
     let seed: NodeView | null = null;
     let seedD = Infinity;
     for (const n of free) {
@@ -563,11 +608,19 @@ class Decision {
     }
     if (seed === null) return null;
     const s = seed;
+    // Only nodes that can be within 3.2 of a candidate centre can score (candidates lie within 6 + the camp's size of
+    // the seed): the same score as over every node, without scanning the whole map per candidate.
+    const reachOf = 6 + 3.2 + this.data.building(camp).footprint + 1;
+    const all = this.view.nodes.filter(
+      (n) => n.resource === resource && slots.includes(n.slot) && Math.abs(n.cx - s.cx) <= reachOf && Math.abs(n.cy - s.cy) <= reachOf,
+    );
+    this.ops.n += this.view.nodes.length + free.length;
     return findSpot(this.env(), {
       type: camp,
       near: { x: s.cx, y: s.cy },
       maxDist: 6,
       gap: 0,
+      scoreCost: all.length,
       score: (cx, cy) => {
         let count = 0;
         for (const n of all) if (dist(cx, cy, n.cx, n.cy) <= 3.2) count += Math.min(1, n.amount / 100);

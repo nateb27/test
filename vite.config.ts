@@ -31,7 +31,9 @@ export default defineConfig({
   },
   build: {
     target: 'es2022',
-    sourcemap: true,
+    // No source maps in the shipped build (they were 5 MB of 8.1 MB). The e2e build passes --sourcemap for readable
+    // stack traces; the dev server always has them.
+    sourcemap: false,
   },
   test: {
     include: ['tests/unit/**/*.test.{ts,tsx}', 'tests/sim/**/*.test.{ts,tsx}'],

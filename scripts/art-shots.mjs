@@ -5,6 +5,9 @@
  *   npx vite build --mode e2e --outDir dist-e2e-art
  *   node scripts/art-shots.mjs [outDir] [scene,...]
  *
+ * It refuses to run (exit 1) when SHOT_PORT (default 5497) is already taken, the build is missing, or its own preview
+ * server exits or reports an error while starting, so it can never photograph another (older) server's build.
+ *
  * Scenes: start, ages (a developed town in each age), work (forest, gold, stone with villagers), army (every unit),
  * construction, zoom (0.5x / 1x / 2x); for the pre-rendered unit and tree sheets: lineup (all ten units in blue and
  * red, on open grass and by the Town Center, 1x, 1.5x and 2x), jobs (villagers on every job and carrying every resource), forest
@@ -25,20 +28,54 @@ const DIST = process.env.ART_DIST ?? 'dist-e2e-art';
 const LOCAL_CHROMIUM = '/opt/pw-browsers/chromium';
 mkdirSync(OUT, { recursive: true });
 
-const server = spawn('npx', ['vite', 'preview', '--outDir', DIST, '--port', String(PORT), '--strictPort'], { stdio: 'ignore' });
 const want = (s) => ONLY.length === 0 || ONLY.includes(s);
 
+/** Is anything answering on the port? */
+async function answers() {
+  try {
+    await fetch(`http://localhost:${PORT}/`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Fail loudly rather than photograph the wrong build: the port must be free before our own preview server starts (a
+// server already there, perhaps of an older build, would answer the requests instead), the build must exist, and the
+// server must not exit or report an error while starting.
+if (!existsSync(`${DIST}/index.html`)) {
+  console.error(`art-shots: no build in ${DIST}; run: npx vite build --mode e2e --outDir ${DIST}`);
+  process.exit(1);
+}
+if (await answers()) {
+  console.error(`art-shots: port ${PORT} is already in use by another server; free it or set SHOT_PORT`);
+  process.exit(1);
+}
+// Its own process group, so stopping it also stops the vite process npx starts (else that one kept the port).
+const server = spawn('npx', ['vite', 'preview', '--outDir', DIST, '--port', String(PORT), '--strictPort'], { stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+const stopServer = () => {
+  try {
+    process.kill(-server.pid, 'SIGTERM');
+  } catch {
+    // already gone
+  }
+};
+process.on('exit', stopServer);
+let serverLog = '';
+let serverExit = null;
+server.stdout.on('data', (d) => (serverLog += d));
+server.stderr.on('data', (d) => (serverLog += d));
+server.on('exit', (code, signal) => (serverExit = { code, signal }));
+
 async function waitServer() {
-  for (let i = 0; i < 100; i++) {
-    try {
-      const r = await fetch(`http://localhost:${PORT}/`);
-      if (r.ok) return;
-    } catch {
-      // not up yet
-    }
+  for (let i = 0; i < 150; i++) {
+    if (serverExit !== null) throw new Error(`preview server exited while starting (${JSON.stringify(serverExit)}):\n${serverLog}`);
+    if (/error/i.test(serverLog)) throw new Error(`preview server reported an error:\n${serverLog}`);
+    // Ours is up once it says so on its own output and the port answers (a stranger on the port was ruled out above).
+    if (serverLog.includes(`:${PORT}`) && (await answers())) return;
     await new Promise((r) => setTimeout(r, 200));
   }
-  throw new Error('preview server did not start');
+  throw new Error(`preview server did not start on port ${PORT}:\n${serverLog}`);
 }
 
 const errors = [];
@@ -467,7 +504,10 @@ try {
   }
   console.log('total ms', Date.now() - t0);
   await browser.close();
+} catch (e) {
+  process.exitCode = 1;
+  throw e;
 } finally {
-  server.kill();
+  stopServer();
   console.log(errors.length ? `console errors:\n${errors.join('\n')}` : 'no console errors');
 }

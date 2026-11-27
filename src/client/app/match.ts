@@ -12,6 +12,7 @@ import type { AssetManifest } from '../art/manifest';
 import { GameInput } from '../input';
 import { createModeController, type ActiveMode, type ModeController } from '../input/placement';
 import type { FrameProfiler } from '../debug/profiler';
+import type { FpsMeter } from './fpsMeter';
 import { WorldOverlays } from '../render/overlays';
 import type { WorldRendererApi } from '../render/renderer';
 import type { Minimap } from '../ui/minimap';
@@ -43,6 +44,8 @@ export class Match {
   readonly overlays: WorldOverlays;
   /** Debug overlay hooks (F3, dev and e2e builds): both stay null, and cost nothing, while the overlay is closed. */
   profiler: FrameProfiler | null = null;
+  /** The player's frame-rate readout (F3, `?fps=1`), fed while it is visible (fpsMeter.ts). */
+  fpsMeter: FpsMeter | null = null;
   debugFrame: (() => void) | null = null;
   /** The mounted minimap, set by the game screen once the HUD slot exists (null before). */
   minimap: Minimap | null = null;
@@ -163,7 +166,8 @@ export class Match {
   /** Run one tick with the buffered commands. */
   tick(): void {
     const profiler = this.profiler;
-    const wall0 = profiler === null ? 0 : performance.now();
+    const meter = this.fpsMeter !== null && this.fpsMeter.visible ? this.fpsMeter.profiler : null;
+    const wall0 = profiler === null && meter === null ? 0 : performance.now();
     const t0 = perf.start();
     this.beforeTick?.(this.sim.state.tick);
     const commands = this.commands.drain();
@@ -176,7 +180,11 @@ export class Match {
     }
     const events = this.sim.step(commands);
     perf.end('sim.step', t0);
-    if (profiler !== null) profiler.recordTick(performance.now() - wall0);
+    if (profiler !== null || meter !== null) {
+      const ms = performance.now() - wall0;
+      profiler?.recordTick(ms);
+      meter?.recordTick(ms);
+    }
     if (events.length > 0) {
       const t1 = perf.start();
       this.renderer.pushEvents(events); // decals and effects (WP27)
@@ -218,6 +226,10 @@ export class Match {
       const dt = this.lastFrameMs === null ? 0 : nowMs - this.lastFrameMs;
       this.lastFrameMs = nowMs;
       this.profiler?.recordFrame(dt);
+      if (this.fpsMeter !== null && this.fpsMeter.visible) {
+        this.fpsMeter.profiler.recordFrame(dt);
+        this.fpsMeter.frame(nowMs);
+      }
       const { ticks, alpha } = this.loop.advance(dt);
       for (let i = 0; i < ticks; i++) this.tick();
       this.alpha = alpha;
