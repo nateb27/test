@@ -8,6 +8,8 @@ import { buildingCombat } from './combat/damage';
 import { emit, reject, type CommandHandler } from './common';
 import { recordStat } from './matchStats';
 import { assignOrder, endCurrentOrder, validateOwnUnits } from './orders';
+import { isRepairingNow } from './orders/repair';
+import { resolvedCost } from '../rules/stats';
 import { RESOURCE_TYPES, TICK_RATE } from '../types';
 import type {
   BuildingEntity,
@@ -61,6 +63,11 @@ function isBuildingNow(unit: UnitEntity, buildingId: EntityId): boolean {
  * this foundation, so it stays correct whatever happened to them.
  */
 export function runConstruction(ctx: SimContext): void {
+  advanceConstruction(ctx);
+  runRepair(ctx);
+}
+
+function advanceConstruction(ctx: SimContext): void {
   for (const e of ctx.state.entities) {
     if (e.kind !== 'building' || e.constructed) continue;
     const def = ctx.data.def(e.typeId);
@@ -90,6 +97,68 @@ export function runConstruction(ctx: SimContext): void {
       updateConstructionHp(ctx, e);
     }
   }
+}
+
+/** Accumulators are snapped to this grid after every add (as for income) so binary drift cannot lose a whole unit. */
+const GRID = 1e9;
+const snap = (v: number): number => Math.round(v * GRID) / GRID;
+
+/**
+ * Repair (PLAN-M2 4.12), after construction, per completed building in ascending id. `n` = units in `repairing` on
+ * it (the list is pruned first). `hpPerSecond = max(min, factor * maxHp / buildTime) * (1 + 0.5 * (n - 1))`; whole hp
+ * is bought at `repairCostPercent` of the cost, pro rata; an unaffordable tick changes nothing (stall, resume).
+ * Reaching max hp resets both accumulators.
+ */
+function runRepair(ctx: SimContext): void {
+  const { combat } = ctx.data;
+  for (const e of ctx.state.entities) {
+    if (e.kind !== 'building' || !e.constructed) continue;
+    e.repairerIds = e.repairerIds.filter((id) => {
+      const u = findEntity(ctx.state, id);
+      return u !== undefined && u.kind === 'unit' && isRepairingNow(u, e.id);
+    });
+    const maxHp = buildingCombat(ctx, e.owner, e.typeId).maxHp;
+    if (e.hp >= maxHp) {
+      resetRepair(e);
+      continue;
+    }
+    const n = e.repairerIds.length;
+    if (n === 0 || e.hp <= 0) continue;
+    const def = ctx.data.def(e.typeId);
+    const player = ctx.state.players[e.owner];
+    if (def === undefined || def.kind !== 'building' || player === undefined) continue;
+    const buildSeconds = buildTicks(ctx, e, def) / TICK_RATE;
+    const hpPerSecond =
+      Math.max(combat.repairMinHpPerSecond, (combat.repairRateFactor * maxHp) / buildSeconds) * builderSpeedMultiplier(n);
+    const acc = snap(e.repairAccumulator + hpPerSecond / TICK_RATE);
+    const whole = Math.min(Math.floor(acc), maxHp - e.hp);
+    if (whole <= 0) {
+      e.repairAccumulator = acc;
+      continue;
+    }
+    const cost = resolvedCost(ctx, e.owner, e.typeId);
+    const costAcc = { ...e.repairCostAccumulator };
+    const need = { ...costAcc };
+    let affordable = true;
+    for (const r of RESOURCE_TYPES) {
+      costAcc[r] = snap(costAcc[r] + (whole * cost[r] * combat.repairCostPercent) / 100 / maxHp);
+      need[r] = Math.floor(costAcc[r]);
+      if (player.resources[r] < need[r]) affordable = false;
+    }
+    if (!affordable) continue;
+    for (const r of RESOURCE_TYPES) {
+      player.resources[r] -= need[r];
+      e.repairCostAccumulator[r] = snap(costAcc[r] - need[r]);
+    }
+    e.hp += whole;
+    e.repairAccumulator = snap(acc - whole);
+    if (e.hp >= maxHp) resetRepair(e);
+  }
+}
+
+function resetRepair(e: BuildingEntity): void {
+  e.repairAccumulator = 0;
+  e.repairCostAccumulator = { food: 0, wood: 0, gold: 0, stone: 0 };
 }
 
 /**

@@ -2,7 +2,7 @@
 
 import { segmentWalkable } from '../path/follow';
 import { gridOf, isWalkable, type PathGrid } from '../path/grid';
-import { SEPARATION_RADIUS, TICK_RATE, type Facing, type SimContext, type UnitEntity } from '../types';
+import { COMBAT_SEPARATION_RADIUS, SEPARATION_RADIUS, TICK_RATE, type Facing, type SimContext, type UnitEntity } from '../types';
 
 /** Speed (tiles per second) used when neither the stat cache nor the data know the unit type. */
 export const FALLBACK_UNIT_SPEED = 1;
@@ -44,6 +44,26 @@ export function isIdle(unit: UnitEntity): boolean {
     unit.path === null &&
     unit.pendingPathRequestId === null
   );
+}
+
+/**
+ * A stationary engaged unit (PLAN-M2 4.7): standing and attacking (phase `attacking`/`engaging`, or a hold with a
+ * target), no path and no pending request. These join the separation pass at COMBAT_SEPARATION_RADIUS.
+ */
+export function isStationaryAttacker(unit: UnitEntity): boolean {
+  if (unit.path !== null || unit.pendingPathRequestId !== null) return false;
+  const o = unit.currentOrder;
+  if (o === null) return false;
+  switch (o.type) {
+    case 'attack':
+      return o.phase === 'attacking';
+    case 'attackMove':
+      return o.phase === 'engaging';
+    case 'hold':
+      return o.targetId !== null;
+    default:
+      return false;
+  }
 }
 
 /** Remove -0 (positions must never store it). */
@@ -94,13 +114,15 @@ let bucketHead = new Int32Array(0);
 let bucketNext = new Int32Array(0);
 let pushX = new Float64Array(0);
 let pushY = new Float64Array(0);
+let engaged = new Uint8Array(0);
 
 /** Unit vectors used to split exactly coincident units, picked by the higher id. */
 const SPLIT_X: readonly number[] = [1, Math.SQRT1_2, 0, -Math.SQRT1_2, -1, -Math.SQRT1_2, 0, Math.SQRT1_2];
 const SPLIT_Y: readonly number[] = [0, Math.SQRT1_2, 1, Math.SQRT1_2, 0, -Math.SQRT1_2, -1, -Math.SQRT1_2];
 
 /**
- * Push apart idle units closer than SEPARATION_RADIUS. Each close pair moves
+ * Push apart idle units closer than SEPARATION_RADIUS, and stationary attackers (see `isStationaryAttacker`)
+ * closer than COMBAT_SEPARATION_RADIUS from each other and from idle units. Each close pair moves
  * apart by half the overlap each, along the line between them (coincident
  * units split along a direction chosen by the higher id). All pushes are
  * summed first and then applied, so the result does not depend on pair
@@ -109,7 +131,7 @@ const SPLIT_Y: readonly number[] = [0, Math.SQRT1_2, 1, Math.SQRT1_2, 0, -Math.S
 export function separateIdleUnits(ctx: SimContext, grid: PathGrid): void {
   const idle: UnitEntity[] = [];
   for (const e of ctx.state.entities) {
-    if (e.kind === 'unit' && isIdle(e)) idle.push(e);
+    if (e.kind === 'unit' && (isIdle(e) || isStationaryAttacker(e))) idle.push(e);
   }
   const n = idle.length;
   if (n < 2) return;
@@ -119,10 +141,12 @@ export function separateIdleUnits(ctx: SimContext, grid: PathGrid): void {
     bucketNext = new Int32Array(n);
     pushX = new Float64Array(n);
     pushY = new Float64Array(n);
+    engaged = new Uint8Array(n);
   }
   bucketHead.fill(-1, 0, cells);
   pushX.fill(0, 0, n);
   pushY.fill(0, 0, n);
+  for (let i = 0; i < n; i++) engaged[i] = isIdle(idle[i]!) ? 0 : 1;
   const cellOf = (u: UnitEntity): number => {
     const tx = Math.min(grid.width - 1, Math.max(0, Math.floor(u.pos.x)));
     const ty = Math.min(grid.height - 1, Math.max(0, Math.floor(u.pos.y)));
@@ -134,7 +158,6 @@ export function separateIdleUnits(ctx: SimContext, grid: PathGrid): void {
     bucketNext[i] = bucketHead[c]!;
     bucketHead[c] = i;
   }
-  const r = SEPARATION_RADIUS;
   for (let i = 0; i < n; i++) {
     const a = idle[i]!;
     const ax = Math.min(grid.width - 1, Math.max(0, Math.floor(a.pos.x)));
@@ -149,6 +172,7 @@ export function separateIdleUnits(ctx: SimContext, grid: PathGrid): void {
           let dx = b.pos.x - a.pos.x;
           let dy = b.pos.y - a.pos.y;
           const d2 = dx * dx + dy * dy;
+          const r = engaged[i] === 1 || engaged[j] === 1 ? COMBAT_SEPARATION_RADIUS : SEPARATION_RADIUS;
           if (d2 >= r * r) continue;
           let d = Math.sqrt(d2);
           if (d === 0) {
@@ -185,7 +209,7 @@ export function separateIdleUnits(ctx: SimContext, grid: PathGrid): void {
  * First set `prevPos = pos` for EVERY unit (so the renderer can interpolate),
  * then move units along their paths at their resolved speed / TICK_RATE
  * (possibly past several waypoints in one tick), update facing from the
- * tick's movement, then push apart idle units closer than SEPARATION_RADIUS.
+ * tick's movement, then push apart idle units and stationary attackers (see `separateIdleUnits`).
  * Units with a pending path request stand still.
  */
 export function runMovement(ctx: SimContext): void {
