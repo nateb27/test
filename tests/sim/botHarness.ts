@@ -87,6 +87,14 @@ function isMoving(u: UnitEntity): boolean {
     case 'move':
     case 'dropOff':
       return o.phase === 'walking';
+    case 'attackMove':
+      return o.phase === 'walking';
+    case 'attack':
+      return o.phase === 'chasing';
+    case 'repair':
+      return o.phase === 'toSite';
+    case 'hold':
+      return false;
   }
 }
 

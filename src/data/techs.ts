@@ -7,6 +7,70 @@ function rateMul(kinds: GatherKind[], value: number): Modifier[] {
   return kinds.map((k) => ({ select: villagers, stat: `gatherRate.${k}` as const, op: 'mul' as const, value }));
 }
 
+/** Shorthand for a military upgrade (PLAN-M2 5.4): tag `militaryTech`, icon `icon.tech.<id>`. */
+function upgrade(
+  id: string,
+  name: string,
+  description: string,
+  age: 2 | 3,
+  cost: TechDef['cost'],
+  researchTime: number,
+  effects: Modifier[],
+  requires?: string,
+): TechDef {
+  return {
+    kind: 'tech',
+    id,
+    name,
+    description,
+    age,
+    tags: ['militaryTech'],
+    cost,
+    researchTime,
+    effects,
+    ...(requires === undefined ? {} : { requiresTechs: [requires] }),
+    icon: `icon.tech.${id}`,
+  };
+}
+
+const add = (select: Modifier['select'], stat: Modifier['stat'], value: number): Modifier => ({ select, stat, op: 'add', value });
+const lineInfantry = { ids: ['spearman', 'swordsman'] };
+const infantry = { tags: ['infantry' as const] };
+const archers = { tags: ['archer' as const] };
+const cavalry = { tags: ['cavalry' as const] };
+
+/**
+ * The 12 military upgrades (PLAN-M2 5.4), researched at the Barracks, Archery Range and Stable. Level II requires
+ * level I. Infantry attack upgrades select Spearman and Swordsman by id (the Siphonarios does not gain them); armour
+ * upgrades select by tag.
+ */
+export const militaryTechs: TechDef[] = [
+  upgrade('spathionForging', 'Spathion Forging', 'Better-forged blades: Spearmen and Swordsmen +1 attack.', 2,
+    { food: 100, gold: 50 }, 35, [add(lineInfantry, 'attack', 1)]),
+  upgrade('strategikonDrill', 'Strategikon Drill', 'Drill from the military manuals: Spearmen and Swordsmen +1 attack.', 3,
+    { food: 200, gold: 125 }, 50, [add(lineInfantry, 'attack', 1)], 'spathionForging'),
+  upgrade('paddedKavadion', 'Padded Kavadion', 'Quilted coats for the foot: infantry +1 melee and +1 pierce armour.', 2,
+    { food: 75, gold: 75 }, 35, [add(infantry, 'meleeArmor', 1), add(infantry, 'pierceArmor', 1)]),
+  upgrade('lamellarKlibanion', 'Lamellar Klibanion', 'Lamellar cuirasses: infantry +1 melee and +1 pierce armour.', 3,
+    { food: 175, gold: 150 }, 50, [add(infantry, 'meleeArmor', 1), add(infantry, 'pierceArmor', 1)], 'paddedKavadion'),
+  upgrade('hornSinewBows', 'Horn-and-Sinew Bows', 'Composite bows that pull harder: Archers +1 attack.', 2,
+    { wood: 75, gold: 75 }, 35, [add(archers, 'attack', 1)]),
+  upgrade('solenarionGuides', 'Solenarion Guides', 'Arrow guides for longer, stronger shots: Archers +1 attack and +1 range.', 3,
+    { wood: 150, gold: 175 }, 50, [add(archers, 'attack', 1), add(archers, 'range', 1)], 'hornSinewBows'),
+  upgrade('bambakionCoats', 'Bambakion Coats', 'Padded cotton coats: Archers +1 melee and +1 pierce armour.', 2,
+    { food: 100, gold: 50 }, 35, [add(archers, 'meleeArmor', 1), add(archers, 'pierceArmor', 1)]),
+  upgrade('mailLorikion', 'Mail Lorikion', 'Mail shirts: Archers +1 melee and +1 pierce armour.', 3,
+    { food: 200, gold: 125 }, 50, [add(archers, 'meleeArmor', 1), add(archers, 'pierceArmor', 1)], 'bambakionCoats'),
+  upgrade('kontarionDrill', 'Kontarion Drill', 'Lance drill for the riders: cavalry +1 attack.', 2,
+    { food: 125, gold: 50 }, 35, [add(cavalry, 'attack', 1)]),
+  upgrade('taktikaWedge', 'Taktika Wedge', 'The wedge charge of the Taktika: cavalry +2 attack.', 3,
+    { food: 250, gold: 125 }, 50, [add(cavalry, 'attack', 2)], 'kontarionDrill'),
+  upgrade('feltHorseBards', 'Felt Horse Bards', 'Felt barding for the horses: cavalry +1 melee and +1 pierce armour.', 2,
+    { food: 125, gold: 50 }, 35, [add(cavalry, 'meleeArmor', 1), add(cavalry, 'pierceArmor', 1)]),
+  upgrade('ironHorseBards', 'Iron Horse Bards', 'Iron scale barding: cavalry +1 melee and +2 pierce armour.', 3,
+    { food: 250, gold: 150 }, 50, [add(cavalry, 'meleeArmor', 1), add(cavalry, 'pierceArmor', 2)], 'feltHorseBards'),
+];
+
 /**
  * Shared technologies and age advances (plan 5.1, 5.5).
  * For age advances `age` is the age the player must currently be in
@@ -154,4 +218,5 @@ export const techs: TechDef[] = [
     effects: rateMul(['wood', 'berries', 'farm', 'gold', 'stone'], 1.1),
     icon: 'icon.tech.guildCharters',
   },
+  ...militaryTechs,
 ];

@@ -1,9 +1,18 @@
 /**
  * Entity store helpers. `GameState.entities` is always sorted by ascending id;
- * because ids only grow, appending keeps it sorted.
+ * because ids only grow, appending keeps it sorted. Owned by WP20 in M2, then the orchestrator.
+ *
+ * Creation defaults (PLAN-M2 3.5): a new unit has full hp, stance `aggressive`, a ready combat state whose first
+ * scan is staggered by id (`tick + id % ACQUIRE_INTERVAL_TICKS`) and no attacker. A new foundation starts at
+ * `max(1, floor(maxHp * constructionStartPercent / 100))` hp; a completed building at max hp. `attack` is non-null
+ * exactly for defs with `combat.attack`. `maxHp` defaults to the def's base hp; systems pass the resolved value
+ * (`unitCombat(ctx, ...).maxHp`). `data` defaults to the game registry.
  */
 
+import { registry } from '../data/index';
+import type { DataRegistry } from '../data/schema';
 import {
+  ACQUIRE_INTERVAL_TICKS,
   NEUTRAL_PLAYER_ID,
   type BuildingEntity,
   type BuildingId,
@@ -62,7 +71,23 @@ export function removeEntities(state: GameState, ids: readonly EntityId[]): void
   state.entities = state.entities.filter((e) => !doomed.has(e.id));
 }
 
-/** Create a unit at (x, y) with no orders and append it. */
+/** First acquisition scan tick of a new unit or attacking building: staggered by id. */
+export function initialScanTick(state: GameState, id: EntityId): number {
+  return state.tick + (id % ACQUIRE_INTERVAL_TICKS);
+}
+
+/** HP of a foundation that has just been placed: `max(1, floor(maxHp * startPercent / 100))`. */
+export function foundationHp(maxHp: number, startPercent: number): number {
+  return Math.max(1, Math.floor((maxHp * startPercent) / 100));
+}
+
+/** Base (unmodified) hp of a unit or building def, 1 for an unknown id. */
+function baseHp(data: DataRegistry, typeId: string): number {
+  const def = data.def(typeId);
+  return def !== undefined && (def.kind === 'unit' || def.kind === 'building') ? def.combat.hp : 1;
+}
+
+/** Create a unit at (x, y) with no orders and full hp, and append it. */
 export function createUnit(
   state: GameState,
   typeId: UnitId,
@@ -70,9 +95,11 @@ export function createUnit(
   x: number,
   y: number,
   facing: Facing = 1,
+  maxHp: number = baseHp(registry, typeId),
 ): UnitEntity {
+  const id = allocateEntityId(state);
   const unit: UnitEntity = {
-    id: allocateEntityId(state),
+    id,
     kind: 'unit',
     owner,
     typeId,
@@ -84,6 +111,11 @@ export function createUnit(
     path: null,
     pendingPathRequestId: null,
     carried: null,
+    hp: maxHp,
+    stance: 'aggressive',
+    combat: { cooldown: 0, windup: 0, swingTargetId: null, nextScanTick: initialScanTick(state, id), lastAttackTick: null },
+    lastAttackerId: null,
+    lastDamagedTick: null,
   };
   addEntity(state, unit);
   return unit;
@@ -98,9 +130,15 @@ export function createBuilding(
   ty: number,
   constructed: boolean,
   costPaid: ResourceAmounts = { food: 0, wood: 0, gold: 0, stone: 0 },
+  data: DataRegistry = registry,
+  maxHp: number = baseHp(data, typeId),
 ): BuildingEntity {
+  const id = allocateEntityId(state);
+  const def = data.def(typeId);
+  const hasAttack = def !== undefined && def.kind === 'building' && def.combat.attack !== undefined;
+  const hp = constructed ? maxHp : foundationHp(maxHp, data.combat.constructionStartPercent);
   const building: BuildingEntity = {
-    id: allocateEntityId(state),
+    id,
     kind: 'building',
     owner,
     typeId,
@@ -113,6 +151,14 @@ export function createBuilding(
     rally: null,
     incomeAccumulator: 0,
     gathererIds: [],
+    hp,
+    builtHp: hp,
+    attack: hasAttack ? { cooldown: 0, targetId: null, nextScanTick: initialScanTick(state, id), lastAttackTick: null } : null,
+    lastAttackerId: null,
+    lastDamagedTick: null,
+    repairerIds: [],
+    repairAccumulator: 0,
+    repairCostAccumulator: { food: 0, wood: 0, gold: 0, stone: 0 },
   };
   addEntity(state, building);
   return building;

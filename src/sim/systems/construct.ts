@@ -4,7 +4,9 @@ import type { BuildingDef } from '../../data/schema';
 import { createBuilding, findEntity, removeEntities } from '../entities';
 import { setFootprint } from '../map/occupancy';
 import { canPlace } from '../rules/placement';
+import { buildingCombat } from './combat/damage';
 import { emit, reject, type CommandHandler } from './common';
+import { recordStat } from './matchStats';
 import { assignOrder, endCurrentOrder, validateOwnUnits } from './orders';
 import { RESOURCE_TYPES, TICK_RATE } from '../types';
 import type {
@@ -79,9 +81,29 @@ export function runConstruction(ctx: SimContext): void {
       e.progress = 1;
       e.constructed = true;
       e.builderIds = [];
+      updateConstructionHp(ctx, e);
+      recordStat(ctx, e.owner, (s) => {
+        s.buildingsBuilt += 1;
+      });
       emit(ctx, { type: 'BuildingCompleted', playerId: e.owner, buildingId: e.id, buildingType: e.typeId });
+    } else {
+      updateConstructionHp(ctx, e);
     }
   }
+}
+
+/**
+ * Construction HP (PLAN-M2 4.11), after each progress update: `g = constructed ? maxHp :
+ * max(1, floor(maxHp * (s + (100 - s) * progress) / 100))`; if `hp > 0`, `hp += g - builtHp` (clamped to maxHp);
+ * then `builtHp = g`. Damage taken during construction is kept and finishing does not heal it.
+ * Implemented in Phase 0 (WP20) so completed buildings reach max hp; WP24 owns it (and its tests) from here.
+ */
+export function updateConstructionHp(ctx: SimContext, b: BuildingEntity): void {
+  const maxHp = buildingCombat(ctx, b.owner, b.typeId).maxHp;
+  const s = ctx.data.combat.constructionStartPercent;
+  const g = b.constructed ? maxHp : Math.max(1, Math.floor((maxHp * (s + (100 - s) * b.progress)) / 100));
+  if (b.hp > 0) b.hp = Math.min(maxHp, b.hp + g - b.builtHp);
+  b.builtHp = g;
 }
 
 /**
@@ -168,7 +190,8 @@ export const applyBuildCommand: CommandHandler<'build'> = (ctx, cmd) => {
 
   const cost = result.availability.cost;
   for (const r of RESOURCE_TYPES) player.resources[r] -= cost[r];
-  const building = createBuilding(ctx.state, def.id, cmd.playerId, cmd.tx, cmd.ty, false, cost);
+  const maxHp = buildingCombat(ctx, cmd.playerId, def.id).maxHp;
+  const building = createBuilding(ctx.state, def.id, cmd.playerId, cmd.tx, cmd.ty, false, cost, ctx.data, maxHp);
   if (def.blocking) {
     setFootprint(ctx.runtime.occupancy, ctx.state.map.width, ctx.state.map.height, building.tile, def.footprint, 1);
     ctx.state.occupancyVersion += 1;

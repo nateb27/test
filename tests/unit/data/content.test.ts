@@ -219,7 +219,7 @@ describe('key numbers from plan section 5', () => {
 
   it('building functions', () => {
     const tc = r.building('townCenter');
-    expect([tc.footprint, tc.popProvided, tc.buildable]).toEqual([4, 10, false]);
+    expect([tc.footprint, tc.popProvided, tc.buildable]).toEqual([4, 10, true]); // buildable in M2 (PLAN-M2 5.2)
     expect(tc.dropOff.sort()).toEqual(['food', 'gold', 'stone', 'wood']);
     expect(tc.trains).toEqual(['villager']);
     expect(r.building('house').popProvided).toBe(10);

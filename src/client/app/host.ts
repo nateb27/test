@@ -9,7 +9,7 @@ import type { TeamAssetManifest } from '../art/procedural';
 import { type GameDebugHook, type ScreenName } from '../debug/hook';
 import type { Platform } from '../platform';
 import { perf } from '../debug/perf';
-import type { Match } from './match';
+import { LOCAL_PLAYER_ID, type Match } from './match';
 import type { Navigate } from './screens/types';
 import type { StressScenario } from '../../sim/stress';
 import type { CommandInput } from '../../sim/types';
@@ -186,6 +186,49 @@ function createDebugHook(host: AppHost): GameDebugHook {
       instantResearch(enabled) {
         host.requireMatch().commands.issue({ type: 'cheat', cheat: { kind: 'instantResearch', enabled } });
       },
+      spawnUnit(unitType, x, y, owner) {
+        const cheat = owner === undefined ? { kind: 'spawnUnit' as const, unitType, x, y } : { kind: 'spawnUnit' as const, unitType, x, y, owner };
+        host.requireMatch().commands.issue({ type: 'cheat', cheat });
+      },
+      setHp(entityId, hp) {
+        host.requireMatch().commands.issue({ type: 'cheat', cheat: { kind: 'setHp', entityId, hp } });
+      },
+      defeat(playerId) {
+        host.requireMatch().commands.issue({ type: 'cheat', cheat: { kind: 'defeat', playerId } });
+      },
+    },
+    localPlayerId: LOCAL_PLAYER_ID,
+    match() {
+      const m = host.match?.sim.state.match;
+      return m === undefined ? null : { mode: m.mode, winner: m.winner, endedTick: m.endedTick };
+    },
+    // STUB (TODO(WP30)): the members below throw until the AI controllers, battle scene, end screen, alerts and
+    // cursors exist.
+    ai: {
+      setEnabled() {
+        throw new Error('__game.ai is not implemented yet');
+      },
+      enabled() {
+        throw new Error('__game.ai is not implemented yet');
+      },
+      memory() {
+        throw new Error('__game.ai is not implemented yet');
+      },
+    },
+    startBattle() {
+      throw new Error('__game.startBattle is not implemented yet');
+    },
+    endScreen() {
+      throw new Error('__game.endScreen is not implemented yet');
+    },
+    alerts() {
+      throw new Error('__game.alerts is not implemented yet');
+    },
+    effects() {
+      return host.requireMatch().renderer.effectStats();
+    },
+    cursor() {
+      throw new Error('__game.cursor is not implemented yet');
     },
   };
 }

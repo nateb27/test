@@ -12,7 +12,8 @@ export class ClientClock {
 
   /** Stop following real time; the clock stays where it is now until `advance`. */
   freeze(): void {
-    this.frozen ??= performance.now();
+    // Whole milliseconds, so `now + window - now` is exact (a fractional start made the window test flaky).
+    this.frozen ??= Math.floor(performance.now());
   }
 
   /** Move a frozen clock forward by `ms`. Throws while the clock is running on real time. */

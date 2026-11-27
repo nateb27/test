@@ -10,7 +10,7 @@ const ALLOWED_MATH = [
   'PI', 'E', 'SQRT2', 'SQRT1_2', 'LN2', 'LN10', 'LOG2E', 'LOG10E',
 ];
 
-const DETERMINISM_MSG = 'Banned in src/sim (plan 2.2 determinism rules).';
+const DETERMINISM_MSG = 'Banned in src/sim and src/bot (plan 2.2 determinism rules).';
 
 /** Globals that are non-deterministic or do I/O. */
 const BANNED_SIM_GLOBALS = [
@@ -79,9 +79,9 @@ export default tseslint.config(
       ],
     },
   },
-  // ---- Determinism rules for the simulation (plan 2.2, 9.2) ----
+  // ---- Determinism rules for the simulation and the bots/AI (plan 2.2, 9.2; PLAN-M2 2.1) ----
   {
-    files: ['src/sim/**/*.{ts,tsx}'],
+    files: ['src/sim/**/*.{ts,tsx}', 'src/bot/**/*.{ts,tsx}'],
     rules: {
       'no-restricted-globals': ['error', ...BANNED_SIM_GLOBALS],
       'no-restricted-properties': [

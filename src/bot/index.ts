@@ -3,3 +3,5 @@ export { EconomyBot, decide } from './economyBot';
 export { PLAN } from './plan';
 export { readView } from './view';
 export type { BotView, BuildingView, NodeView, VillagerView, VillagerTask, FarmView, GatherSlot } from './view';
+export type { Controller } from './controller';
+export { AiPlayer } from './ai/aiPlayer';

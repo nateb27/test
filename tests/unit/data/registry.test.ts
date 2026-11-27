@@ -26,7 +26,7 @@ describe('registry', () => {
     expect(() =>
       createRegistry({
         units: [
-          { ...base, kind: 'unit', id: 'dup', trainTime: 1, popCost: 1, speed: 1, sprite: 's', combat: { hp: 1, attack: 0, armor: 0, range: 0 } },
+          { ...base, kind: 'unit', id: 'dup', trainTime: 1, popCost: 1, speed: 1, sprite: 's', combat: registry.unit('villager').combat },
         ],
         buildings: [],
         techs: [{ ...base, kind: 'tech', id: 'dup', researchTime: 1, effects: [] }],
@@ -35,6 +35,7 @@ describe('registry', () => {
         nodes: [],
         terrains: registry.terrains,
         start: registry.start,
+        combat: registry.combat,
       }),
     ).toThrow(/two kinds/);
   });

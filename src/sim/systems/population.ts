@@ -1,6 +1,7 @@
 /** Population (plan 4.6). Owned by WP8. */
 
 import { resolvedStat } from '../rules/stats';
+import { recordStat } from './matchStats';
 import { POP_HARD_CAP, type PlayerId, type SimContext } from '../types';
 
 /** Sum of `popCost` of the player's living units (not units in production). */
@@ -34,7 +35,13 @@ export function recomputePopulation(ctx: SimContext): void {
   }
   for (const p of state.players) {
     if (p.id === 0) continue;
-    p.popUsed = used[p.id]!;
+    const popUsed = used[p.id]!;
+    p.popUsed = popUsed;
     p.popCap = Math.min(POP_HARD_CAP, cap[p.id]!);
+    if (popUsed > p.stats.peakPopulation) {
+      recordStat(ctx, p.id, (s) => {
+        s.peakPopulation = popUsed;
+      });
+    }
   }
 }

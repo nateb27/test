@@ -1,6 +1,9 @@
-import type { UnitDef } from './schema';
+import type { UnitCombatStats, UnitDef } from './schema';
 
-/** Shared unit roster (plan 5.4) plus the Byzantine uniques. Combat stats are provisional and unused in M1. */
+/** Fields most units share; each unit spells out the numbers of PLAN-M2 5.1. */
+const melee = { attackType: 'melee', range: 0, minRange: 0, bonusResist: 0, projectile: null, splash: null, targets: 'any', autoAcquire: true } as const;
+
+/** Shared unit roster (plan 5.4) plus the Byzantine uniques. Combat stats: PLAN-M2 5.1. */
 export const units: UnitDef[] = [
   {
     kind: 'unit',
@@ -28,8 +31,13 @@ export const units: UnitDef[] = [
       'stable',
       'siegeWorkshop',
       'silkWorkshop',
+      'townCenter',
     ],
-    combat: { hp: 25, attack: 2, armor: 0, range: 0 },
+    combat: {
+      ...melee,
+      hp: 25, attack: 3, meleeArmor: 0, pierceArmor: 0, windup: 0.5, cooldown: 2.0, sight: 4,
+      classes: ['villager'], bonus: {}, autoAcquire: false,
+    } satisfies UnitCombatStats,
     icon: 'icon.unit.villager',
     sprite: 'unit.villager',
   },
@@ -44,7 +52,11 @@ export const units: UnitDef[] = [
     trainTime: 22,
     popCost: 1,
     speed: 1.0,
-    combat: { hp: 45, attack: 4, armor: 1, range: 0 },
+    combat: {
+      ...melee,
+      hp: 50, attack: 5, meleeArmor: 0, pierceArmor: 1, windup: 0.5, cooldown: 2.0, sight: 6,
+      classes: ['infantry', 'spear'], bonus: { cavalry: 12 },
+    },
     icon: 'icon.unit.spearman',
     sprite: 'unit.spearman',
   },
@@ -59,7 +71,11 @@ export const units: UnitDef[] = [
     trainTime: 24,
     popCost: 1,
     speed: 0.95,
-    combat: { hp: 60, attack: 7, armor: 2, range: 0 },
+    combat: {
+      ...melee,
+      hp: 65, attack: 8, meleeArmor: 2, pierceArmor: 1, windup: 0.5, cooldown: 1.8, sight: 6,
+      classes: ['infantry'], bonus: { spear: 4 },
+    },
     icon: 'icon.unit.swordsman',
     sprite: 'unit.swordsman',
   },
@@ -74,7 +90,11 @@ export const units: UnitDef[] = [
     trainTime: 26,
     popCost: 1,
     speed: 1.0,
-    combat: { hp: 30, attack: 5, armor: 0, range: 5 },
+    combat: {
+      ...melee,
+      hp: 32, attack: 5, attackType: 'pierce', meleeArmor: 0, pierceArmor: 0, range: 5, windup: 0.6, cooldown: 2.0, sight: 7,
+      classes: ['archer'], bonus: { infantry: 4 }, projectile: 'arrow',
+    },
     icon: 'icon.unit.archer',
     sprite: 'unit.archer',
   },
@@ -89,7 +109,11 @@ export const units: UnitDef[] = [
     trainTime: 30,
     popCost: 1,
     speed: 1.5,
-    combat: { hp: 55, attack: 5, armor: 1, range: 0 },
+    combat: {
+      ...melee,
+      hp: 70, attack: 6, meleeArmor: 1, pierceArmor: 2, windup: 0.4, cooldown: 1.8, sight: 7,
+      classes: ['cavalry'], bonus: { archer: 5, siege: 8 },
+    },
     icon: 'icon.unit.horseman',
     sprite: 'unit.horseman',
   },
@@ -104,7 +128,11 @@ export const units: UnitDef[] = [
     trainTime: 32,
     popCost: 1,
     speed: 1.4,
-    combat: { hp: 80, attack: 9, armor: 2, range: 0 },
+    combat: {
+      ...melee,
+      hp: 100, attack: 10, meleeArmor: 2, pierceArmor: 2, windup: 0.5, cooldown: 1.9, sight: 7,
+      classes: ['cavalry'], bonus: { archer: 5, siege: 10 },
+    },
     icon: 'icon.unit.lancer',
     sprite: 'unit.lancer',
   },
@@ -119,7 +147,11 @@ export const units: UnitDef[] = [
     trainTime: 40,
     popCost: 3,
     speed: 0.6,
-    combat: { hp: 150, attack: 30, armor: 3, range: 0 },
+    combat: {
+      ...melee,
+      hp: 140, attack: 4, meleeArmor: 0, pierceArmor: 40, windup: 1.0, cooldown: 4.0, sight: 4,
+      classes: ['siege'], bonus: { building: 60 }, targets: 'buildings',
+    },
     icon: 'icon.unit.batteringRam',
     sprite: 'unit.batteringRam',
   },
@@ -134,7 +166,11 @@ export const units: UnitDef[] = [
     trainTime: 50,
     popCost: 3,
     speed: 0.5,
-    combat: { hp: 90, attack: 45, armor: 1, range: 10 },
+    combat: {
+      ...melee,
+      hp: 110, attack: 8, attackType: 'pierce', meleeArmor: 0, pierceArmor: 10, range: 11, minRange: 3, windup: 2.0, cooldown: 8.0,
+      sight: 12, classes: ['siege'], bonus: { building: 150 }, projectile: 'stone', targets: 'buildings',
+    },
     icon: 'icon.unit.trebuchet',
     sprite: 'unit.trebuchet',
   },
@@ -151,7 +187,11 @@ export const units: UnitDef[] = [
     speed: 1.3,
     civs: ['byzantines'],
     replaces: 'lancer',
-    combat: { hp: 100, attack: 10, armor: 4, range: 0 },
+    combat: {
+      ...melee,
+      hp: 120, attack: 11, meleeArmor: 3, pierceArmor: 3, windup: 0.5, cooldown: 2.0, sight: 7,
+      classes: ['cavalry'], bonus: { archer: 5, siege: 10 }, bonusResist: 50,
+    },
     icon: 'icon.unit.cataphract',
     sprite: 'unit.cataphract',
   },
@@ -167,7 +207,11 @@ export const units: UnitDef[] = [
     popCost: 1,
     speed: 0.9,
     civs: ['byzantines'],
-    combat: { hp: 50, attack: 12, armor: 1, range: 2 },
+    combat: {
+      ...melee,
+      hp: 45, attack: 10, meleeArmor: 0, pierceArmor: 0, range: 2, windup: 0.6, cooldown: 2.5, sight: 5,
+      classes: ['infantry'], bonus: { building: 18, siege: 12 }, projectile: 'fire', splash: { radius: 1.0, percent: 60 },
+    },
     icon: 'icon.unit.siphonarios',
     sprite: 'unit.siphonarios',
   },

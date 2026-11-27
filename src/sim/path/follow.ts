@@ -70,3 +70,13 @@ export function followPath(ctx: SimContext, unit: UnitEntity, goal: PathGoal): F
   }
   return 'moving';
 }
+
+/**
+ * Chase helper (PLAN-M2 4.6): if the straight segment from the unit to (x, y) is walkable, set a one-waypoint path
+ * to it (no A*) and return true; otherwise change nothing and return false (callers then use `followPath`).
+ *
+ * STUB (TODO(WP24)): always returns false.
+ */
+export function directPath(_ctx: SimContext, _unit: UnitEntity, _x: number, _y: number): boolean {
+  return false;
+}

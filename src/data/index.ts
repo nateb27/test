@@ -6,12 +6,14 @@
 import { ages } from './ages';
 import { buildings } from './buildings';
 import { byzantines } from './civs/byzantines';
+import { combat } from './combat';
 import { nodes } from './nodes';
 import type {
   AgeDef,
   AnyDef,
   BuildingDef,
   CivDef,
+  CombatRules,
   DataRegistry,
   NodeDef,
   ProducibleDef,
@@ -37,6 +39,7 @@ export interface RegistryTables {
   nodes: readonly NodeDef[];
   terrains: readonly TerrainDef[];
   start: StartingConditions;
+  combat: CombatRules;
 }
 
 function indexById<T extends { id: string }>(kind: string, list: readonly T[]): Map<string, T> {
@@ -79,6 +82,7 @@ export function createRegistry(tables: RegistryTables): DataRegistry {
     nodes: tables.nodes,
     terrains: tables.terrains,
     start: tables.start,
+    combat: tables.combat,
     unit: (id) => getOrThrow(unitMap, 'unit', id),
     building: (id) => getOrThrow(buildingMap, 'building', id),
     tech: (id) => getOrThrow(techMap, 'tech', id),
@@ -108,4 +112,5 @@ export const registry: DataRegistry = createRegistry({
   nodes,
   terrains,
   start,
+  combat,
 });

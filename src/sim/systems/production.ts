@@ -1,6 +1,8 @@
 /** Tick step 2 (production and research queues), train/cancelQueue/setRally. Owned by WP8. */
 
 import { createUnit, findEntity } from '../entities';
+import { unitCombat } from './combat/damage';
+import { recordStat } from './matchStats';
 import { availability } from '../rules/availability';
 import { resolvedCost, resolvedStat } from '../rules/stats';
 import { reject, emit, type CommandHandler } from './common';
@@ -236,7 +238,11 @@ function spawnUnit(ctx: SimContext, b: BuildingEntity, unitType: string): boolea
   const target = rallyPoint(ctx, b) ?? { x: b.tile.tx + size / 2, y: b.tile.ty + size + 1 };
   const tile = findSpawnTile(ctx, b, target);
   if (tile === null) return false;
-  const unit = createUnit(ctx.state, unitType, b.owner, tile.tx + 0.5, tile.ty + 0.5);
+  const hp = unitCombat(ctx, b.owner, unitType).maxHp;
+  const unit = createUnit(ctx.state, unitType, b.owner, tile.tx + 0.5, tile.ty + 0.5, 1, hp);
+  recordStat(ctx, b.owner, (s) => {
+    s.unitsTrained += 1;
+  });
   emit(ctx, { type: 'UnitTrained', playerId: b.owner, unitId: unit.id, unitType, buildingId: b.id });
   const { order, idle } = rallyOrder(ctx, b, unit);
   if (order !== null) assignOrder(ctx, unit, order, false);

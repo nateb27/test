@@ -8,23 +8,36 @@
  *
  * Stats other systems should request (`StatKey`):
  * - units: `speed`, `carryCapacity`, `gatherRate.<wood|berries|farm|gold|stone>`
- *   (only the kinds the unit can gather), `trainTime`, `popCost`, hp/attack/armor/range
- * - buildings: `buildTime`, `popProvided`, `incomeRate` (only with `income`), hp, armor
+ *   (only the kinds the unit can gather), `trainTime`, `popCost`, hp/attack/meleeArmor/pierceArmor/range
+ * - buildings: `buildTime`, `popProvided`, `incomeRate` (only with `income`), hp, meleeArmor, pierceArmor
+ *   (+ attack, range with `combat.attack`)
  * - techs: `researchTime`
  * - units, buildings and techs: `cost.food|wood|gold|stone` (integers, min 0)
+ *
+ * Combat stats (hp, attack, meleeArmor, pierceArmor, range) are rounded with Math.round after resolution, like costs
+ * (PLAN-M2 3.5). The combat profiles (`runtime.combat`, PLAN-M2 3.5) are rebuilt together with the stat table.
+ * Owned by WP20 in M2, then the orchestrator.
  */
 
-import type { AnyDef, Modifier, ProducibleDef } from '../../data/schema';
+import type { AnyDef, BuildingDef, Modifier, ProducibleDef, UnitDef } from '../../data/schema';
 import {
   RESOURCE_TYPES,
+  TICK_RATE,
   type DefId,
   type PlayerId,
+  type ResolvedBuildingCombat,
+  type ResolvedUnitCombat,
   type ResourceAmounts,
   type SimContext,
   type StatKey,
 } from '../types';
 
 type StatTable = Partial<Record<StatKey, number>>;
+
+/** Stats rounded with Math.round after resolution (besides costs). */
+const ROUNDED_COMBAT_STATS: ReadonlySet<StatKey> = new Set<StatKey>(['hp', 'attack', 'meleeArmor', 'pierceArmor', 'range']);
+
+const BUILDING_CLASSES = ['building'] as const;
 
 const GATHER_KINDS = ['wood', 'berries', 'farm', 'gold', 'stone'] as const;
 
@@ -34,7 +47,8 @@ function baseStats(def: ProducibleDef): StatTable {
   if (def.kind === 'unit') {
     t.hp = def.combat.hp;
     t.attack = def.combat.attack;
-    t.armor = def.combat.armor;
+    t.meleeArmor = def.combat.meleeArmor;
+    t.pierceArmor = def.combat.pierceArmor;
     t.range = def.combat.range;
     t.speed = def.speed;
     t.popCost = def.popCost;
@@ -48,7 +62,12 @@ function baseStats(def: ProducibleDef): StatTable {
     }
   } else if (def.kind === 'building') {
     t.hp = def.combat.hp;
-    t.armor = def.combat.armor;
+    t.meleeArmor = def.combat.meleeArmor;
+    t.pierceArmor = def.combat.pierceArmor;
+    if (def.combat.attack !== undefined) {
+      t.attack = def.combat.attack.attack;
+      t.range = def.combat.attack.range;
+    }
     t.buildTime = def.buildTime;
     t.popProvided = def.popProvided;
     if (def.income !== undefined) t.incomeRate = def.income.perSecond;
@@ -95,6 +114,7 @@ function resolveDef(def: ProducibleDef, mods: readonly Modifier[]): StatTable {
     }
     let v = ((base[key] as number) + add) * mul;
     if (key.startsWith('cost.')) v = Math.max(0, Math.round(v));
+    else if (ROUNDED_COMBAT_STATS.has(key)) v = Math.round(v);
     out[key] = v;
   }
   return out;
@@ -126,14 +146,84 @@ export function resolvedCost(ctx: SimContext, playerId: PlayerId, defId: DefId):
   };
 }
 
-/** Rebuild the resolved-stat cache for one player. */
+/** Combat profile of a unit def from its resolved stat table (PLAN-M2 3.5). */
+export function resolveUnitCombat(ctx: SimContext, def: UnitDef, stats: StatTable): ResolvedUnitCombat {
+  const c = def.combat;
+  const range = stats.range ?? c.range;
+  const windupTicks = Math.max(1, Math.round(c.windup * TICK_RATE));
+  return {
+    kind: 'unit',
+    maxHp: stats.hp ?? c.hp,
+    attack: stats.attack ?? c.attack,
+    attackType: c.attackType,
+    meleeArmor: stats.meleeArmor ?? c.meleeArmor,
+    pierceArmor: stats.pierceArmor ?? c.pierceArmor,
+    range,
+    minRange: c.minRange,
+    reach: range + ctx.data.combat.reach,
+    windupTicks,
+    cooldownTicks: Math.max(windupTicks + 1, Math.round(c.cooldown * TICK_RATE)),
+    sight: c.sight,
+    classes: c.classes,
+    bonus: c.bonus,
+    bonusResist: c.bonusResist,
+    projectile: c.projectile,
+    splash: c.splash,
+    targets: c.targets,
+    autoAcquire: c.autoAcquire,
+  };
+}
+
+/** Combat profile of a building def from its resolved stat table (PLAN-M2 3.5). */
+export function resolveBuildingCombat(ctx: SimContext, def: BuildingDef, stats: StatTable): ResolvedBuildingCombat {
+  const c = def.combat;
+  const a = c.attack;
+  const range = a === undefined ? 0 : (stats.range ?? a.range);
+  return {
+    kind: 'building',
+    maxHp: stats.hp ?? c.hp,
+    meleeArmor: stats.meleeArmor ?? c.meleeArmor,
+    pierceArmor: stats.pierceArmor ?? c.pierceArmor,
+    bonusResist: 0,
+    classes: BUILDING_CLASSES,
+    attack:
+      a === undefined
+        ? null
+        : {
+            attack: stats.attack ?? a.attack,
+            attackType: a.attackType,
+            range,
+            reach: range + ctx.data.combat.reach,
+            cooldownTicks: Math.max(1, Math.round(a.cooldown * TICK_RATE)),
+            arrows: a.arrows,
+            projectile: a.projectile,
+          },
+  };
+}
+
+/** Rebuild the resolved-stat cache (and the combat profiles) for one player. */
 export function rebuildResolvedStats(ctx: SimContext, playerId: PlayerId): void {
   const mods = modifiersFor(ctx, playerId);
   const table: Record<DefId, StatTable> = {};
-  for (const def of ctx.data.units) table[def.id] = resolveDef(def, mods);
-  for (const def of ctx.data.buildings) table[def.id] = resolveDef(def, mods);
+  const combat: Record<DefId, ResolvedUnitCombat | ResolvedBuildingCombat> = {};
+  for (const def of ctx.data.units) {
+    const t = resolveDef(def, mods);
+    table[def.id] = t;
+    combat[def.id] = resolveUnitCombat(ctx, def, t);
+  }
+  for (const def of ctx.data.buildings) {
+    const t = resolveDef(def, mods);
+    table[def.id] = t;
+    combat[def.id] = resolveBuildingCombat(ctx, def, t);
+  }
   for (const def of ctx.data.techs) table[def.id] = resolveDef(def, mods);
   ctx.runtime.resolvedStats[playerId] = table;
+  ctx.runtime.combat[playerId] = combat;
+}
+
+/** Resolved stat table of a def for a player, from the cache or computed on the fly (not cached). */
+export function resolvedStatTable(ctx: SimContext, playerId: PlayerId, def: ProducibleDef): StatTable {
+  return ctx.runtime.resolvedStats[playerId]?.[def.id] ?? resolveDef(def, modifiersFor(ctx, playerId));
 }
 
 /** Rebuild the resolved-stat cache for every player. */

@@ -375,6 +375,12 @@ export class HudController {
         // Same path (and confirmation) as the Delete key.
         this.match.input.perform({ type: 'deleteSelection' });
         return;
+      case 'attackMove':
+      case 'hold':
+      case 'stance':
+      case 'repair':
+        // STUB (TODO(WP29)): the M2 military and repair card actions; no button offers them yet.
+        return;
     }
   }
 }

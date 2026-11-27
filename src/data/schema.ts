@@ -16,12 +16,15 @@
 
 import type {
   AgeNumber,
+  ArmorClass,
+  AttackType,
   BuildingId,
   CivId,
   DefId,
   GatherKind,
   NodeTypeId,
   ProducibleId,
+  ProjectileKind,
   ResourceAmounts,
   ResourceType,
   StatKey,
@@ -29,6 +32,8 @@ import type {
   TerrainId,
   UnitId,
 } from '../sim/types';
+
+export type { ArmorClass, AttackType, ProjectileKind, Stance } from '../sim/types';
 
 export type {
   AgeNumber,
@@ -84,6 +89,7 @@ export type Tag =
   // techs
   | 'ageAdvance'
   | 'gatherTech'
+  | 'militaryTech'
   // any
   | 'unique';
 
@@ -101,18 +107,76 @@ export interface Modifier {
   value: number;
 }
 
-/** Provisional combat stats. Present in data, unused by every M1 system. */
+/** A unit's combat stats (PLAN-M2 5.1). Times in seconds, distances in tiles. */
 export interface UnitCombatStats {
   hp: number;
   attack: number;
-  armor: number;
-  /** Tiles. 0 for melee. */
+  attackType: AttackType;
+  meleeArmor: number;
+  pierceArmor: number;
+  /** Tiles; 0 = melee. */
   range: number;
+  /** Tiles; 0 = none. */
+  minRange: number;
+  /** Seconds from starting an attack to its release. */
+  windup: number;
+  /** Seconds between the starts of two attacks; > windup. */
+  cooldown: number;
+  /** Acquisition radius in tiles. */
+  sight: number;
+  classes: ArmorClass[];
+  bonus: Partial<Record<ArmorClass, number>>;
+  /** Percent (0-100) of incoming bonus damage ignored. */
+  bonusResist: number;
+  projectile: ProjectileKind | null;
+  splash: { radius: number; percent: number } | null;
+  targets: 'any' | 'buildings';
+  /** Acquires targets on its own (military). Villagers: false. */
+  autoAcquire: boolean;
 }
 
+/** A building's own attack (the Town Center's arrows). No wind-up. */
+export interface BuildingAttackStats {
+  attack: number;
+  attackType: AttackType;
+  range: number;
+  /** Seconds between volleys. */
+  cooldown: number;
+  /** Projectiles per volley, all at the same target. */
+  arrows: number;
+  projectile: ProjectileKind;
+}
+
+/** A building's combat stats (PLAN-M2 5.2). Its armour class is always `building`. */
 export interface BuildingCombatStats {
   hp: number;
-  armor: number;
+  meleeArmor: number;
+  pierceArmor: number;
+  attack?: BuildingAttackStats;
+}
+
+/** Engine-wide combat tunables (balance numbers live in data: `src/data/combat.ts`). */
+export interface CombatRules {
+  /** Added to every range: centre-to-target-edge distance at which attacks connect (0.75). */
+  reach: number;
+  /** Extra distance a melee target may have moved by the release tick and still be hit (0.5). */
+  meleeReleaseSlack: number;
+  /** Floor of `attack - armor` (1). */
+  minDamage: number;
+  /** Auto and attack-move engagements end beyond this distance from their anchor (10). */
+  leashRadius: number;
+  /** Idle aggressive units retaliate against attackers within this distance (10). */
+  retaliateRadius: number;
+  /** Tiles per second. */
+  projectileSpeed: Record<ProjectileKind, number>;
+  /** HP percent a new foundation starts with (10). */
+  constructionStartPercent: number;
+  /** Repair hp per second = max(repairMinHpPerSecond, repairRateFactor * maxHp / buildTime) (0.25). */
+  repairRateFactor: number;
+  /** (2) */
+  repairMinHpPerSecond: number;
+  /** A full repair costs this percent of the building's cost (50). */
+  repairCostPercent: number;
 }
 
 /** Fields shared by every producible def (units, buildings, techs). */
@@ -183,7 +247,7 @@ export interface BuildingDef extends ProducibleDefBase {
   footprint: number;
   /** Blocks pathing (from foundation placement onward). Farms do not. */
   blocking: boolean;
-  /** `false` for buildings that cannot be placed by players (the Town Center in M1). */
+  /** `false` for buildings that cannot be placed by players (none in M2; the Town Center became buildable). */
   buildable: boolean;
   /** Seconds for one builder. */
   buildTime: number;
@@ -305,6 +369,8 @@ export interface DataRegistry {
   readonly nodes: readonly NodeDef[];
   readonly terrains: readonly TerrainDef[];
   readonly start: StartingConditions;
+  /** Engine-wide combat tunables. */
+  readonly combat: CombatRules;
 
   unit(id: UnitId): UnitDef;
   building(id: BuildingId): BuildingDef;

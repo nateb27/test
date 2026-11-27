@@ -98,6 +98,7 @@ export const REJECT_TEXT: Readonly<Record<RejectReason, string>> = {
   queueFull: 'Production queue is full',
   invalidIndex: 'Nothing to cancel there',
   unknownDef: 'Unknown item',
+  playerDefeated: 'You have been defeated',
 };
 
 /** Toast shown when a queue item is cancelled while the game is paused. */

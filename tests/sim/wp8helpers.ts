@@ -114,5 +114,6 @@ export function extendedData(extraTechs: TechDef[] = []): DataRegistry {
     nodes: registry.nodes,
     terrains: registry.terrains,
     start: registry.start,
+    combat: registry.combat,
   });
 }

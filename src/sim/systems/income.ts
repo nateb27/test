@@ -1,6 +1,7 @@
 /** Tick step 3: passive income (plan 4.8). Owned by WP8. */
 
 import { resolvedStat } from '../rules/stats';
+import { recordStat } from './matchStats';
 import { TICK_RATE, type SimContext } from '../types';
 
 /**
@@ -25,7 +26,11 @@ export function runIncome(ctx: SimContext): void {
     let acc = Math.round((e.incomeAccumulator + perTick) * GRID) / GRID;
     const whole = Math.floor(acc);
     if (whole > 0) {
-      player.resources[def.income.resource] += whole;
+      const resource = def.income.resource;
+      player.resources[resource] += whole;
+      recordStat(ctx, e.owner, (s) => {
+        s.resourcesGathered[resource] += whole;
+      });
       acc = Math.round((acc - whole) * GRID) / GRID;
     }
     e.incomeAccumulator = acc;

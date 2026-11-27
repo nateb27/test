@@ -47,7 +47,7 @@ export const silkWorkshop: BuildingDef = {
   civs: ['byzantines'],
   countsTowardAge: true,
   buildMenu: 'economy',
-  combat: { hp: 300, armor: 1 },
+  combat: { hp: 1000, meleeArmor: 2, pierceArmor: 7 },
   icon: 'icon.building.silkWorkshop',
   sprite: 'building.silkWorkshop',
 };

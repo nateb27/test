@@ -10,12 +10,22 @@ import type { Facing } from '../../sim/types';
 
 export type { IconId, SpriteId } from '../../data/schema';
 
-/** Animation states for units. */
-export type UnitAnimState = 'idle' | 'walk' | 'work' | 'carry';
+/** Animation states for units. `attack` and `death` are M2 (PLAN-M2 3.8). */
+export type UnitAnimState = 'idle' | 'walk' | 'work' | 'carry' | 'attack' | 'death';
 /** Visual construction stages for buildings. */
 export type BuildingStage = 'foundation' | 'scaffold' | 'complete';
 /** Any sprite state. Nodes and other static sprites use 'default'. */
 export type SpriteState = UnitAnimState | BuildingStage | 'default';
+
+/** Fallback when an asset lacks a state (applied by the renderer, not the asset). */
+export const UNIT_STATE_FALLBACK: Readonly<Record<UnitAnimState, UnitAnimState | null>> = {
+  idle: null,
+  walk: 'idle',
+  work: 'idle',
+  carry: 'walk',
+  attack: 'idle',
+  death: null,
+};
 
 /** One looping animation for a state and facing. */
 export interface SpriteAnimation {
@@ -33,6 +43,10 @@ export interface SpriteAnimation {
    * sit on top of a sprite use it instead of scanning the texture.
    */
   readonly modelTop?: readonly number[];
+  /** false = play once and hold the last frame (death). Default true. */
+  readonly loop?: boolean;
+  /** For `attack`: index of the frame on which the blow lands (synchronised with the release tick). */
+  readonly hitFrame?: number;
 }
 
 /**
@@ -86,6 +100,11 @@ export interface AssetManifest {
   has(id: SpriteId): boolean;
   /** World sprite. Throws for unknown ids (data validation guarantees coverage). */
   sprite(id: SpriteId): SpriteAsset;
+  /**
+   * World sprite recoloured through the player-colour ramp (`primary` = the owner's slot colour, `secondary` = the
+   * civ's palette secondary). Promoted from `TeamAssetManifest` in M2. Never throws.
+   */
+  teamSprite(id: SpriteId, primary: number, secondary: number): SpriteAsset;
   /** HUD icon as a texture (for in-canvas use, e.g. the carried-resource marker). */
   iconTexture(id: IconId): Texture;
   /** HUD icon as an image URL (data: or blob:) for the Preact DOM HUD. */
@@ -99,18 +118,20 @@ export interface AssetManifest {
 /** Placeholder manifest used until WP3 provides the procedural one: everything is blank. */
 export function createStubManifest(): AssetManifest {
   const blank: SpriteAnimation = { frames: [Texture.EMPTY], frameMs: 0, mirrorX: false };
+  const sprite = (id: SpriteId): SpriteAsset => ({
+    id,
+    anchor: { x: 0.5, y: 1 },
+    states: ['default'],
+    animation: () => blank,
+  });
   return {
     load: (onProgress) => {
       onProgress?.(1);
       return Promise.resolve();
     },
     has: () => false,
-    sprite: (id) => ({
-      id,
-      anchor: { x: 0.5, y: 1 },
-      states: ['default'],
-      animation: () => blank,
-    }),
+    sprite,
+    teamSprite: (id) => sprite(id),
     iconTexture: () => Texture.EMPTY,
     iconUrl: () => '',
     destroy: () => {},

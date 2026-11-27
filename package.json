@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "eslint . --max-warnings 0",
     "test": "vitest run",
+    "test:long": "vitest run --config vitest.long.config.ts",
     "e2e": "playwright test --trace off",
     "art:palette": "node scripts/art-tool.mjs palette"
   },

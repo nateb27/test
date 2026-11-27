@@ -39,7 +39,11 @@ describe('art covers the real data registry', () => {
   });
 
   it('every gather/economy tech has a dedicated icon (only age advances may be generic)', () => {
-    const generic = registry.techs.filter((t) => classifyIcon(t.icon) === 'generic').map((t) => t.id);
+    // TODO(WP27): the 12 military upgrades (tag militaryTech, PLAN-M2 3.8) get dedicated icons; until then they may be
+    // generic and are left out here.
+    const generic = registry.techs
+      .filter((t) => classifyIcon(t.icon) === 'generic' && !t.tags.includes('militaryTech'))
+      .map((t) => t.id);
     for (const id of generic) expect(registry.tech(id).advancesTo, id).toBeDefined();
   });
 

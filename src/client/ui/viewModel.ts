@@ -7,12 +7,17 @@
 import type { IconId } from '../../data/schema';
 import type {
   AgeNumber,
+  AttackType,
   BuildingId,
   EntityId,
   EntityKind,
+  PlayerId,
+  PlayerOutcome,
+  PlayerStats,
   ProducibleId,
   ResourceAmounts,
   ResourceType,
+  Stance,
   TechId,
   UnavailableReason,
   UnitId,
@@ -41,6 +46,23 @@ export interface TopBarVM {
   clockSeconds: number;
   speed: GameSpeed;
   paused: boolean;
+  /** M2: own military units with no order, no queue and no path (units on hold do not count). */
+  idleMilitary: number;
+  /** M2: the local player's slot colour 0xRRGGBB (top-bar swatch; the HUD itself stays purple). */
+  playerColor: number;
+}
+
+/** M2: the combat line of the selection panel (PLAN-M2 7.3). */
+export interface CombatStatsVM {
+  attack: number;
+  attackType: AttackType;
+  range: number;
+  meleeArmor: number;
+  pierceArmor: number;
+  /** e.g. ['+12 vs cavalry']. */
+  bonuses: string[];
+  /** Town Center: 'Fires 2 arrows'. */
+  note: string | null;
 }
 
 export interface QueueItemVM {
@@ -82,7 +104,7 @@ export interface SingleSelectionVM {
   ownerColor: number;
   /** True if the local player owns it (commands available). */
   own: boolean;
-  /** Provisional, from data; current HP equals max in M1 (no combat). */
+  /** Units and buildings. M1 values until WP29 makes them real: `{ current: entity.hp, max: resolved max hp }`. */
   hp: { current: number; max: number } | null;
   carrying: { resource: ResourceType; amount: number } | null;
   /** Resource nodes: amount left. Farms: null (infinite). */
@@ -93,6 +115,14 @@ export interface SingleSelectionVM {
   queue: QueueItemVM[];
   /** Extra facts about the entity (WP13), in display order. Empty when there are none. */
   facts: SelectionFactVM[];
+  /** M2: owner's display name (shown in the owner colour for other players' entities). */
+  ownerName: string;
+  /** M2: combat line for units and buildings that fight, else null. */
+  combat: CombatStatsVM | null;
+  /** M2: stance of own units with `autoAcquire`, else null. */
+  stance: Stance | null;
+  /** M2: the building has repairers. */
+  repairing: boolean;
 }
 
 export interface MultiSelectionEntryVM {
@@ -123,7 +153,15 @@ export type CardAction =
   /** Enter "click to set rally point" mode. */
   | { type: 'setRally' }
   | { type: 'cancelConstruction' }
-  | { type: 'delete' };
+  | { type: 'delete' }
+  /** M2: enter attack-move target mode. */
+  | { type: 'attackMove' }
+  /** M2: hold position. */
+  | { type: 'hold' }
+  /** M2: set the stance of the selected units. */
+  | { type: 'stance'; stance: Stance }
+  /** M2: enter repair target mode. */
+  | { type: 'repair' };
 
 export interface CardButtonVM {
   /** 0..14, row-major in the 3x5 grid. */
@@ -145,6 +183,8 @@ export interface CardButtonVM {
   reasons: UnavailableReason[];
   /** Resources currently short (render those costs red). All zero when affordable. */
   shortfall: ResourceAmounts | null;
+  /** M2: highlighted (the current stance). */
+  active?: boolean;
 }
 
 export interface CommandCardVM {
@@ -175,9 +215,24 @@ export interface ToastVM {
 export interface BannerVM {
   /** WP9 addition: unique, increasing; used as a key so a new banner replays its animation. */
   id: number;
-  kind: 'ageAdvanced' | 'objective';
+  kind: 'ageAdvanced' | 'objective' | 'defeated';
   title: string;
   subtitle: string;
+}
+
+/** M2: the end screen (PLAN-M2 7.3). */
+export interface EndScreenVM {
+  result: 'victory' | 'defeat' | 'draw';
+  reason: 'conquest' | 'resigned' | 'opponentResigned';
+  clockSeconds: number;
+  players: {
+    playerId: PlayerId;
+    name: string;
+    color: number;
+    you: boolean;
+    outcome: PlayerOutcome;
+    stats: PlayerStats;
+  }[];
 }
 
 export interface HudViewModel {
@@ -191,4 +246,8 @@ export interface HudViewModel {
   menuOpen: boolean;
   /** Placement mode: the building being placed, or null. */
   placing: BuildingId | null;
+  /** M2: the end screen, or null while the match is on. */
+  endScreen: EndScreenVM | null;
+  /** M2: the "Resign this match?" confirmation is open. */
+  resignConfirmOpen: boolean;
 }

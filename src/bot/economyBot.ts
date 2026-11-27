@@ -21,6 +21,7 @@ import { blockedFromView, findSpot, floodReach, ringReachable, solidFromView } f
 import type { Blocked } from './placement';
 import { PLAN } from './plan';
 import { readView, type BotView, type BuildingView, type NodeView, type VillagerView } from './view';
+import type { Controller } from './controller';
 
 const RESOURCES: readonly ResourceType[] = ['food', 'wood', 'gold', 'stone'];
 
@@ -34,7 +35,7 @@ const CAMP_FOR: Record<ResourceType, BuildingId> = {
 
 const dist = (ax: number, ay: number, bx: number, by: number): number => Math.sqrt((ax - bx) * (ax - bx) + (ay - by) * (ay - by));
 
-export class EconomyBot {
+export class EconomyBot implements Controller {
   private seq = 1;
   /** Decisions made so far (for tests and debugging). */
   decisions = 0;
@@ -51,6 +52,11 @@ export class EconomyBot {
     const view = readView(sim, this.playerId, this.data);
     const inputs = decide(view, sim.query, this.data);
     return inputs.map((input) => ({ ...input, playerId: this.playerId, seq: this.seq++ }) as Command);
+  }
+
+  /** The economy bot keeps nothing worth saving. */
+  save(): null {
+    return null;
   }
 }
 

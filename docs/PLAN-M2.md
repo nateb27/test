@@ -391,7 +391,7 @@ repair: applyRepairCommand,         // orders/repair.ts (WP24)
 resign: applyResignCommand,         // outcome.ts (WP23)
 ```
 
-`applyCommands` (Phase 0, real): before dispatch, any command from a player whose `outcome !== 'playing'` is rejected with `playerDefeated`, except `cheat`.
+`applyCommands` (Phase 0, real): before dispatch, any command from a player whose `outcome === 'defeated'` is rejected with `playerDefeated`, except `cheat`. (Corrected in Phase 0: the winner, `outcome: 'won'`, keeps playing per 2.6.)
 
 ### 3.5 Config, runtime, public API, shared signatures
 
@@ -402,8 +402,9 @@ export interface PlayerConfig {
   color?: number;
   /** Default 'human' for slot 0, 'ai' for others if difficulty is set, else 'human'. */
   controller?: 'human' | 'ai';
+  /** An AI slot without one plays 'standard'; ignored (null in PlayerState) for human slots. */
   difficulty?: AiDifficulty;
-  /** Default 'Player' / 'Computer (Standard)' etc. */
+  /** Default 'Player' (slot 0), 'Player N' (other human slots), 'Computer (Standard)' etc. (AI slots). */
   name?: string;
 }
 export interface GameConfig {
@@ -447,6 +448,7 @@ export interface ResolvedUnitCombat {
 export interface ResolvedBuildingCombat {
   kind: 'building';
   maxHp: number; meleeArmor: number; pierceArmor: number;
+  bonusResist: number;              // always 0 (added in Phase 0 so a building profile can be passed to computeDamage)
   classes: readonly ArmorClass[];   // always ['building']
   attack: { attack: number; attackType: AttackType; range: number; reach: number;
             cooldownTicks: number; arrows: number; projectile: ProjectileKind } | null;
@@ -491,7 +493,7 @@ Other stubs Phase 0 creates (signature fixed, body `STUB`):
 - `directPath(ctx, unit, x, y): boolean` in `path/follow.ts`. It sets a one-waypoint path if the straight segment is walkable.
 - `recordStat(ctx, playerId, mutate)` in `systems/matchStats.ts`. Phase 0 implements it for real and calls it from the existing systems: production spawn (unitsTrained), construction complete (buildingsBuilt), drop-off deposit and income (resourcesGathered), research complete (techsResearched, ageReachedTick), population recompute (peakPopulation).
 
-Entity creation (`entities.ts`, Phase 0):
+Entity creation (`entities.ts`, Phase 0). `createUnit(state, typeId, owner, x, y, facing?, maxHp?)` and `createBuilding(state, typeId, owner, tx, ty, constructed, costPaid?, data?, maxHp?)` keep their M1 leading parameters; `maxHp` defaults to the def's base hp and `data` to the game registry, and systems pass the resolved max (`unitCombat(ctx, ...).maxHp`):
 
 - **New unit:** `hp` = resolved max. `stance: 'aggressive'`. `combat = { cooldown: 0, windup: 0, swingTargetId: null, nextScanTick: tick + id % ACQUIRE_INTERVAL_TICKS, lastAttackTick: null }`. Attacker fields are null.
 - **New foundation:** `hp = builtHp = max(1, floor(maxHp * constructionStartPercent / 100))`.
@@ -538,7 +540,7 @@ On each unit:
 
 On each building:
 
-- `builtHp = hp`. For completed buildings this is max hp. For unfinished ones it is `max(1, floor(maxHp * (s + (100 − s) * progress) / 100))` with `s = constructionStartPercent`.
+- `hp = builtHp` (v1 buildings have no hp field). For completed buildings this is max hp. For unfinished ones it is `max(1, floor(maxHp * (s + (100 − s) * progress) / 100))` with `s = constructionStartPercent`.
 - `attack`: `{ cooldown: 0, targetId: null, nextScanTick: tick + id % 10, lastAttackTick: null }` for Town Centers, null otherwise.
 - `repairerIds: []`, accumulators 0.
 
@@ -1419,7 +1421,7 @@ Deliverables:
 2. Data migrated to the new schema shape, **with the section 5 numbers** (including the Town Center changes, `combat.ts` and the 12 upgrades). WP25 owns tuning afterwards.
 3. Shape validation and the defeated-player rejection in `applyCommands`; handler table entries with `STUB` bodies.
 4. The tick order of 2.2 in `sim.ts`, with `STUB` no-op systems (`runAcquisition`, `runUnitAttacks`, `runBuildingAttacks`, `runProjectiles` (decrement and drop only), `runDeath`, `runOutcome`).
-5. Real implementations of: `computeDamage`, `applyDamage`, `isEnemy`, `distSqToTarget`, `unitCombat`/`buildingCombat` with the runtime cache, `spawnProjectile`, `recordStat` and its calls in existing systems, entity creation defaults, `GameConfig` defaults (colours, controllers, names, mode, objectives).
+5. Real implementations of: `computeDamage`, `applyDamage`, `isEnemy`, `distSqToTarget`, `unitCombat`/`buildingCombat` with the runtime cache, `spawnProjectile`, `recordStat` and its calls in existing systems, entity creation defaults, `GameConfig` defaults (colours, controllers, names, mode, objectives). (Phase 0 also implemented the 4.11 construction-hp update, `updateConstructionHp` in `construct.ts`, so completed buildings reach max hp; WP24 owns it and its tests. It also added the `Controller` interface, `src/bot/controller.ts`, and an `AiPlayer` stub for WP30 to build against.)
 6. Save v2: `serialize`/`deserialize`/`deserializeSave`, `MIGRATIONS[1]`, the extended structural check, the three fixtures (3.6).
 7. Client contract additions (3.8) with stub implementations so everything compiles and runs:
    - `teamSprite` promoted into the contract (the procedural, rendered and composite manifests already implement it);

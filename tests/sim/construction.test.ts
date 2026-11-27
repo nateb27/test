@@ -134,6 +134,7 @@ describe('canPlace reason codes', () => {
     nodes: registry.nodes,
     terrains: [...registry.terrains, { id: 'rock', name: 'Rock', walkable: true, buildable: false, minimapColor: 0, variants: 1 }],
     start: registry.start,
+    combat: registry.combat,
   });
 
   it('ok on free ground', () => {
@@ -212,9 +213,9 @@ describe('canPlace reason codes', () => {
     expect(w.sim.query.canPlace(P1, 'house', 25, 20).ok).toBe(true);
   });
 
-  it('never ok for the Town Center or an unknown def', () => {
+  it('never ok for an unknown def; the Town Center is buildable (M2)', () => {
     const w = world();
-    expect(w.sim.query.canPlace(P1, 'townCenter', 10, 10).ok).toBe(false);
+    expect(w.sim.query.canPlace(P1, 'townCenter', 10, 10).availability.available).toBe(true);
     expect(w.sim.query.canPlace(P1, 'nope', 10, 10).ok).toBe(false);
   });
 });
@@ -242,7 +243,7 @@ describe('build command', () => {
     const spear = w.state.entities.find((e) => e.kind === 'unit' && e.typeId === 'spearman')!;
     expect(rejected(step(w, { type: 'build', unitIds: [spear.id], buildingType: 'house', tx: 10, ty: 10, queue: false }))).toBe('cannotPerform');
     expect(rejected(place(w, 'nope', 10, 10))).toBe('unknownDef');
-    expect(rejected(place(w, 'townCenter', 10, 10))).toBe('invalidTarget');
+    expect(rejected(place(w, 'villager', 10, 10))).toBe('invalidTarget'); // not a building (the Town Center is buildable in M2)
     const bad = place(w, 'house', -1, 10);
     expect(bad.find((e) => e.type === 'CommandRejected')).toMatchObject({ reason: 'cannotPlace', placement: ['outOfBounds', 'outOfBounds'] });
     mock.unavailable = [{ code: 'requiresAge', age: 2 }];
