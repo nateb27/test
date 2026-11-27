@@ -354,7 +354,7 @@ describe('command intake (PLAN-M2 3.4)', () => {
     for (const c of bad) expect(d.rejections(d.step([c])), JSON.stringify(c)).toEqual(['invalidCommand']);
   });
 
-  it('the combat command handlers are stubs that reject (until WP21/WP23/WP24 land)', () => {
+  it('the combat command handlers are stubs that reject (until WP21/WP23 land)', () => {
     const d = new Driver();
     const id = d.units(1)[0]!.id;
     const enemy = d.units(2)[0]!.id;
@@ -363,7 +363,6 @@ describe('command intake (PLAN-M2 3.4)', () => {
       { type: 'attackMove', unitIds: [id], x: 30, y: 30, queue: false },
       { type: 'hold', unitIds: [id] },
       { type: 'setStance', unitIds: [id], stance: 'standGround' },
-      { type: 'repair', unitIds: [id], buildingId: 1, queue: false },
       { type: 'resign' },
     ];
     for (const c of stubbed) expect(d.rejections(d.step([c])), c.type).toEqual(['invalidCommand']);

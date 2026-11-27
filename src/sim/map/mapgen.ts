@@ -18,6 +18,7 @@ import { buildingCombat, unitCombat } from '../systems/combat/damage';
 import { createRng, rngInt, rngRange } from '../rng';
 import type {
   EntityId,
+  Facing,
   GameConfig,
   GameState,
   GatherKind,
@@ -62,6 +63,8 @@ export interface StartReport {
   /** Footprint centre of the Town Center. */
   anchor: Vec2;
   townCenterId: EntityId | null;
+  /** Top-left tile of the Town Center footprint. */
+  townCenterTile: TilePos;
   unitIds: EntityId[];
   /** Every guaranteed node, one entry per cluster. */
   guaranteed: { kind: GuaranteedKind; nodeIds: EntityId[] }[];
@@ -336,6 +339,28 @@ function ringAround(tile: TilePos, size: number): TilePos[] {
   return ring;
 }
 
+/**
+ * Two-player maps: create the point mirror of every node (after all originals, so player 1's nodes have the lower
+ * ids) and give player 2 the mirrored guaranteed clusters.
+ */
+function mirrorNodes(g: Grid, starts: StartReport[]): void {
+  const { state, runtime, data } = g.ctx;
+  const mirrorOf = new Map<EntityId, EntityId>();
+  const originals = state.entities.filter((e) => e.kind === 'node');
+  for (const n of originals) {
+    if (n.kind !== 'node') continue;
+    const def = data.node(n.typeId);
+    const t: TilePos = { tx: g.width - n.tile.tx - def.footprint, ty: g.height - n.tile.ty - def.footprint };
+    mirrorOf.set(n.id, createNode(state, n.typeId, t.tx, t.ty, n.amount).id);
+    if (def.blocking) setFootprint(runtime.occupancy, g.width, g.height, t, def.footprint, 1);
+  }
+  const second = starts[1];
+  if (second === undefined) return;
+  for (const grp of starts[0]!.guaranteed) {
+    second.guaranteed.push({ kind: grp.kind, nodeIds: grp.nodeIds.map((id) => mirrorOf.get(id) as EntityId) });
+  }
+}
+
 function attempt(ctx: SimContext, config: GameConfig, seed: number): { starts: StartReport[]; grid: Grid } {
   const { state, data } = ctx;
   const width = state.map.width;
@@ -367,13 +392,27 @@ function attempt(ctx: SimContext, config: GameConfig, seed: number): { starts: S
   const centerDef = data.buildings.find((b) => b.id === data.start.centerBuilding);
   const fp = centerDef?.footprint ?? 1;
   const starts: StartReport[] = [];
-  const startTilesList = startTiles(state, config.players.length);
+  // Two players (PLAN-M2 4.15): player 1 is chosen exactly as in M1 (same rng draws), player 2 is its point mirror.
+  const mirrored = config.players.length === 2;
+  const startTilesList = startTiles(state, mirrored ? 1 : config.players.length);
+  const playerCount = mirrored ? 2 : startTilesList.length;
+  /** Tiles with `tx + ty` above this are the mirrored half (two-player maps; the 3 anti-diagonals between stay empty). */
+  const halfLimit = Math.floor((width + height) / 2) - 3;
+  const inHalf = (tx: number, ty: number, size: number): boolean => !mirrored || tx + ty + 2 * (size - 1) <= halfLimit;
+  /** Point mirror of a square footprint's top-left tile. */
+  const mirrorTile = (t: TilePos, size: number): TilePos => ({ tx: width - t.tx - size, ty: height - t.ty - size });
+  const mirroredUnits: { typeId: string; x: number; y: number; facing: number }[] = [];
 
   // Town Centers, start zones and starting units.
-  for (let p = 0; p < startTilesList.length; p++) {
+  for (let p = 0; p < playerCount; p++) {
     const playerId = p + 1;
-    const s = startTilesList[p] as TilePos;
-    const tcTile: TilePos = { tx: s.tx - Math.floor(fp / 2), ty: s.ty - Math.floor(fp / 2) };
+    let tcTile: TilePos;
+    if (mirrored && p === 1) {
+      tcTile = mirrorTile(starts[0]!.townCenterTile, fp);
+    } else {
+      const s = startTilesList[p] as TilePos;
+      tcTile = { tx: s.tx - Math.floor(fp / 2), ty: s.ty - Math.floor(fp / 2) };
+    }
     const anchor: Vec2 = { x: tcTile.tx + fp / 2, y: tcTile.ty + fp / 2 };
     g.anchors.push(anchor);
     for (let y = 0; y < height; y++) {
@@ -390,22 +429,30 @@ function attempt(ctx: SimContext, config: GameConfig, seed: number): { starts: S
       if (centerDef.blocking) setFootprint(ctx.runtime.occupancy, width, height, tcTile, fp, 1);
     }
     const unitIds: EntityId[] = [];
-    const total = data.start.units.reduce((n, u) => n + u.count, 0);
-    const ring = ringAround(tcTile, fp);
-    const offset = rngInt(rng, ring.length);
-    let k = 0;
-    for (const u of data.start.units) {
-      for (let i = 0; i < u.count; i++, k++) {
-        const t = ring[(offset + Math.floor((k * ring.length) / total)) % ring.length] as TilePos;
-        const hp = unitCombat(ctx, playerId, u.unitType).maxHp;
-        unitIds.push(createUnit(state, u.unitType, playerId, t.tx + 0.5, t.ty + 0.5, 1, hp).id);
+    if (mirrored && p === 1) {
+      for (const u of mirroredUnits) {
+        const hp = unitCombat(ctx, playerId, u.typeId).maxHp;
+        unitIds.push(createUnit(state, u.typeId, playerId, width - u.x, height - u.y, ((u.facing + 4) % 8) as Facing, hp).id);
+      }
+    } else {
+      const total = data.start.units.reduce((n, u) => n + u.count, 0);
+      const ring = ringAround(tcTile, fp);
+      const offset = rngInt(rng, ring.length);
+      let k = 0;
+      for (const u of data.start.units) {
+        for (let i = 0; i < u.count; i++, k++) {
+          const t = ring[(offset + Math.floor((k * ring.length) / total)) % ring.length] as TilePos;
+          const hp = unitCombat(ctx, playerId, u.unitType).maxHp;
+          unitIds.push(createUnit(state, u.unitType, playerId, t.tx + 0.5, t.ty + 0.5, 1, hp).id);
+          if (mirrored) mirroredUnits.push({ typeId: u.unitType, x: t.tx + 0.5, y: t.ty + 0.5, facing: 1 });
+        }
       }
     }
-    starts.push({ playerId, anchor, townCenterId, unitIds, guaranteed: [] });
+    starts.push({ playerId, anchor, townCenterId, townCenterTile: tcTile, unitIds, guaranteed: [] });
   }
 
   // Guaranteed resources near each start.
-  for (const start of starts) {
+  for (const start of mirrored ? starts.slice(0, 1) : starts) {
     for (const spec of GUARANTEED) {
       const def = nodeDefFor(data, spec.kind);
       if (def === undefined) continue;
@@ -431,6 +478,19 @@ function attempt(ctx: SimContext, config: GameConfig, seed: number): { starts: S
       }
     }
   }
+  // Reserve the mirrored guaranteed clusters (entities are created at the end) so nothing else lands on them.
+  if (mirrored) {
+    for (const grp of starts[0]!.guaranteed) {
+      const group = g.nextGroup++;
+      for (const id of grp.nodeIds) {
+        const n = state.entities.find((e) => e.id === id);
+        if (n === undefined || n.kind !== 'node') continue;
+        const size = data.node(n.typeId).footprint;
+        const m = mirrorTile(n.tile, size);
+        markTiles(g, m.tx, m.ty, size, group);
+      }
+    }
+  }
 
   // Scattered extra clusters, spaced apart and away from every start.
   const area = (width * height) / 14400;
@@ -443,7 +503,8 @@ function attempt(ctx: SimContext, config: GameConfig, seed: number): { starts: S
   for (const spec of scatter) {
     const def = nodeDefFor(data, spec.kind);
     if (def === undefined) continue;
-    for (let c = 0; c < spec.count; c++) {
+    const count = mirrored ? Math.ceil(spec.count / 2) : spec.count;
+    for (let c = 0; c < count; c++) {
       const chosen: { tile: TilePos | null } = { tile: null };
       const ids = placeCluster(g, {
         kind: spec.kind,
@@ -458,7 +519,7 @@ function attempt(ctx: SimContext, config: GameConfig, seed: number): { starts: S
           chosen.tile = { tx, ty };
           return chosen.tile;
         },
-        nodeOk: () => true,
+        nodeOk: (tx, ty) => inHalf(tx, ty, def.footprint),
       });
       if (ids !== null && chosen.tile !== null) scatterCenters.push(chosen.tile);
     }
@@ -467,24 +528,33 @@ function attempt(ctx: SimContext, config: GameConfig, seed: number): { starts: S
   // Forests: seeded blobs until trees cover roughly FOREST_COVERAGE of the map.
   const treeDef = nodeDefFor(data, 'tree');
   if (treeDef !== undefined) {
-    let trees = state.entities.filter((e) => e.kind === 'node' && e.typeId === treeDef.id).length;
+    const treeWeight = mirrored ? 2 : 1;
+    let trees = state.entities.filter((e) => e.kind === 'node' && e.typeId === treeDef.id).length * treeWeight;
     const target = Math.floor(width * height * FOREST_COVERAGE);
     for (let i = 0; i < 900 && trees < target; i++) {
       const cx = rngRange(rng, 2, width - 3);
       const cy = rngRange(rng, 2, height - 3);
       const group = g.nextGroup++;
       const count = rngRange(rng, 20, 80);
-      const tiles = growBlob(g, cx, cy, count, group, 0, (tx, ty) =>
-        g.anchors.every((a) => dist(tx + 0.5, ty + 0.5, a.x, a.y) >= 15),
+      const tiles = growBlob(
+        g,
+        cx,
+        cy,
+        count,
+        group,
+        0,
+        (tx, ty) => inHalf(tx, ty, 1) && g.anchors.every((a) => dist(tx + 0.5, ty + 0.5, a.x, a.y) >= 15),
       );
       if (tiles.length < 10) {
         unmark(g, tiles, 1);
         continue;
       }
       commitNodes(g, treeDef, tiles);
-      trees += tiles.length;
+      trees += tiles.length * treeWeight;
     }
   }
+
+  if (mirrored) mirrorNodes(g, starts);
   return { starts, grid: g };
 }
 
