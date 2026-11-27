@@ -7,7 +7,7 @@
  *
  * Scenes: start, ages (a developed town in each age), work (forest, gold, stone with villagers), army (every unit),
  * construction, zoom (0.5x / 1x / 2x); for the pre-rendered unit and tree sheets: lineup (all ten units in blue and
- * red, on grass and on worn earth, 1x and 2x), jobs (villagers on every job and carrying every resource), forest
+ * red, on open grass and by the Town Center, 1x, 1.5x and 2x), jobs (villagers on every job and carrying every resource), forest
  * (woodcutters at a forest edge), anims (attack / death / corpse previews of every unit), scale (units by buildings). Time only moves through `__game.step`; cheats and `__art.issue` stage the
  * town (instant build and research, spawned units).
  */
@@ -257,7 +257,7 @@ try {
       // apron (before the town is built up around it).
       const strip = await openStrip(16, 3);
       const spots = { grass: strip === null ? null : { x: strip.x + 4.5, y: strip.y - 4.5 }, dirt: { x: tc.x + 1.0, y: tc.y + 4.6 } };
-      for (const [tag, at] of [['grass', spots.grass], ['dirt', spots.dirt]]) {
+      for (const [tag, at] of [['grass', spots.grass], ['town', spots.dirt]]) {
         if (at === null) continue;
         const items = [];
         let k = 0;

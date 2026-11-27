@@ -9,7 +9,7 @@
  *
  * The in-match images come from the e2e scenarios (real UI, real sim); this script only adds the two menu
  * screens, which no scenario photographs. The unit line-up (13) comes from `node scripts/art-shots.mjs <dir> lineup`
- * (`LINEUP_SRC`, default test-results/art-shots/lineup-grass-2x.png). It serves dist-e2e/ itself on a free port (build it first with
+ * (`LINEUP_SRC`, default test-results/art-shots/lineup-town-1.5x.png). It serves dist-e2e/ itself on a free port (build it first with
  * `npx vite build --mode e2e --outDir dist-e2e`, which the e2e run does).
  */
 
@@ -38,7 +38,7 @@ const PLAN = [
   ['11-minimap', 'wp10-04-minimap-full-view'],
   ['12-debug-overlay', 'wp13-3-debug-overlay'],
 ];
-const LINEUP = process.env.LINEUP_SRC ?? 'test-results/art-shots/lineup-grass-2x.png';
+const LINEUP = process.env.LINEUP_SRC ?? 'test-results/art-shots/lineup-town-1.5x.png';
 
 const files = existsSync(SRC) ? readdirSync(SRC) : [];
 const find = (stem) => files.find((f) => f === `${stem}.png`);

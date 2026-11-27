@@ -34,9 +34,14 @@ Rendering is incremental: every animation's scene (evaluated geometry of every p
 render and post settings) is hashed, and an animation whose hash matches the cache is skipped. Changing one unit's
 model re-renders only that unit.
 
-Times on 4 CPU threads: a foot unit's 8-frame animation (64 frames with all facings) takes about 70 s, a cavalry
-animation about 2.5 min, a siege one about 4 min; the whole roster about 1.5-2 hours; trees about 1 min each.
-Packing all sheets takes about 2 minutes.
+Measured on 4 CPU threads of an otherwise idle machine: a foot unit's 8-frame animation (64 frames with all facings,
+3x supersampling, 20 samples) takes 70-110 s (the siphonarios, with its bronze, about 3 min); cavalry and siege
+(2x supersampling, 10 samples) 80-130 s and 150-300 s; a tree 10-40 s; so the whole roster (about 2,750 frames)
+takes about 1.5 hours, much longer when the machine is shared. Packing all sheets takes about a minute,
+`npm run art:palette` about 20 s. `ART_VERBOSE=1` prints a time split per animation.
+
+`--adopt` (`python pipeline/render.py --adopt`) records the current scene digests for the cached frames without
+rendering, for use after changing the digest code itself.
 
 ## Palette
 
