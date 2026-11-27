@@ -25,7 +25,7 @@ export const buildings: BuildingDef[] = [
       hp: 2400,
       meleeArmor: 8,
       pierceArmor: 8,
-      attack: { attack: 5, attackType: 'pierce', range: 7, cooldown: 2.0, arrows: 2, projectile: 'arrow' },
+      attack: { attack: 7, attackType: 'pierce', range: 7, cooldown: 2.0, arrows: 2, projectile: 'arrow' },
     },
     icon: 'icon.building.townCenter',
     sprite: 'building.townCenter',

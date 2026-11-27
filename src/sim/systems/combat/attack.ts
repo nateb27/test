@@ -8,6 +8,7 @@ import { facingFromDelta } from '../movement';
 import { spawnProjectile } from '../projectiles';
 import { applyDamage, distSqToTarget, unitCombat } from './damage';
 import { damageAgainst, engagedTargetId, inReach, targetAnchor, targetFor } from './engage';
+import { unitsThisTick } from './spatial';
 
 /**
  * Release of a wind-up (4.3 step 2): melee damage within reach + slack, or a projectile at a target that exists and
@@ -56,7 +57,7 @@ function release(ctx: SimContext, unit: UnitEntity, profile: ResolvedUnitCombat)
  * A unit with hp 0 (dies in step 11) still completes a release but starts no new swing.
  */
 export function runUnitAttacks(ctx: SimContext): void {
-  for (const unit of ctx.state.entities) {
+  for (const unit of unitsThisTick(ctx) ?? ctx.state.entities) {
     if (unit.kind !== 'unit') continue;
     const c = unit.combat;
     if (c.cooldown > 0) c.cooldown -= 1;

@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { registry } from '../../src/data';
 import type { TechId, UnitId } from '../../src/sim/types';
 import { runBuildingKill, runCell } from './duelHarness';
-import { runGroupVsVillager, runRaid, runRepairFight } from './feelHarness';
+import { runGroupVsVillager, runLoneUnitVsTownCenter, runRaid, runRepairFight } from './feelHarness';
 
 const FIGHTERS: UnitId[] = ['spearman', 'swordsman', 'archer', 'horseman', 'cataphract', 'siphonarios'];
 
@@ -62,6 +62,16 @@ describe('Town Center arrows against a raid of five (5 idle Villagers beside it)
     expect(r.villagersDeadAt).not.toBeNull();
     expect(r.villagersDeadAt!).toBeLessThan(25);
     expect(r.raidersAlive).toBeGreaterThanOrEqual(4);
+  });
+
+  it('a Horseman raid is not free: the arrows (7 pierce, WP33) cost it a unit', () => {
+    expect(runRaid('horseman').raidersAlive).toBeLessThanOrEqual(4);
+  });
+
+  it('a lone idle Horseman 3 tiles from a Town Center dies to its arrows within 320 ticks (PLAN-M2 8.2 scenario 8: about 300)', () => {
+    const t = runLoneUnitVsTownCenter('horseman');
+    expect(t).not.toBeNull();
+    expect(t!).toBeLessThanOrEqual(320);
   });
 });
 

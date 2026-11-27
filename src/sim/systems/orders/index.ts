@@ -14,6 +14,7 @@ import { holdOrderHandler } from './hold';
 import { moveOrderHandler } from './move';
 import { repairOrderHandler } from './repair';
 import { findEntity } from '../../entities';
+import { unitsThisTick } from '../combat/spatial';
 import { reject, type CommandHandler } from '../common';
 import type { Command, EntityId, Order, OrderState, OrderType, SimContext, UnitEntity } from '../../types';
 
@@ -123,7 +124,7 @@ function beginNext(ctx: SimContext, unit: UnitEntity, front: Order | null): void
 
 /** Run one tick of every unit's order state machine, ascending id. */
 export function runOrders(ctx: SimContext): void {
-  for (const entity of ctx.state.entities) {
+  for (const entity of unitsThisTick(ctx) ?? ctx.state.entities) {
     if (entity.kind !== 'unit') continue;
     if (entity.currentOrder === null) {
       if (entity.orderQueue.length === 0) continue;

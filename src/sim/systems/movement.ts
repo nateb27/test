@@ -1,6 +1,7 @@
 /** Tick step 6: movement integration and idle separation (plan 4.3). Owned by WP2. */
 
 import { segmentWalkable } from '../path/follow';
+import { unitsThisTick } from './combat/spatial';
 import { gridOf, isWalkable, type PathGrid } from '../path/grid';
 import { COMBAT_SEPARATION_RADIUS, SEPARATION_RADIUS, TICK_RATE, type Facing, type SimContext, type UnitEntity } from '../types';
 
@@ -132,7 +133,7 @@ const SPLIT_Y: readonly number[] = [0, Math.SQRT1_2, 1, Math.SQRT1_2, 0, -Math.S
  */
 export function separateIdleUnits(ctx: SimContext, grid: PathGrid): void {
   const idle: UnitEntity[] = [];
-  for (const e of ctx.state.entities) {
+  for (const e of unitsThisTick(ctx) ?? ctx.state.entities) {
     // A unit winding up is not pushed either (PLAN-M2 4.3). It is left out of the pass entirely, so every pair
     // still moves apart symmetrically.
     if (e.kind === 'unit' && e.combat.windup === 0 && (isIdle(e) || isStationaryAttacker(e))) idle.push(e);
@@ -217,13 +218,14 @@ export function separateIdleUnits(ctx: SimContext, grid: PathGrid): void {
  * Units with a pending path request stand still.
  */
 export function runMovement(ctx: SimContext): void {
-  for (const entity of ctx.state.entities) {
+  const units = unitsThisTick(ctx) ?? ctx.state.entities;
+  for (const entity of units) {
     if (entity.kind !== 'unit') continue;
     entity.prevPos.x = entity.pos.x;
     entity.prevPos.y = entity.pos.y;
   }
   const grid = gridOf(ctx);
-  for (const entity of ctx.state.entities) {
+  for (const entity of units) {
     if (entity.kind !== 'unit') continue;
     moveAlongPath(ctx, grid, entity);
   }

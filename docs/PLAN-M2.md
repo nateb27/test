@@ -784,9 +784,17 @@ Attacks therefore land `windupTicks` after the swing starts and repeat exactly e
 | 0 | `lastAttackerId`, if valid and within the retaliation rule |
 | 1 | Enemy units with `autoAcquire` and `targets: 'any'` (fighting units) |
 | 2 | Other enemy units (villagers, siege) |
-| 3 | Enemy buildings (foundations included) |
+| 3 | Enemy buildings (foundations included) that are not hardened |
+| 4 | Hardened enemy buildings (below) |
 
-Siege uses only tier 3.
+Siege uses only tiers 3 and 4 (it is never hardened against, so in practice tier 3).
+
+**Hardened targets** (WP33). A building is *hardened* against a unit when the unit's damage per blow against it (4.1) is at most `rules.minDamage`: its armour of the unit's attack type is at least the unit's attack and the unit has no bonus against it (with the M2 data: infantry, cavalry and archers against production buildings and the Town Center; never siege, Cataphracts or Siphonarioi). Automatic target choice (acquisition, retaliation, retargeting, hold; not commanded `attack` orders) treats it as follows:
+
+- it is tier 4, below every unit and every other building, so it is chosen only when nothing else is in the scan radius;
+- it is never the tier-0 last attacker (a unit hit by Town Center arrows does not retaliate against the Town Center);
+- it is no candidate at all for an `attackMove` that is still walking (the army walks on past a Town Center and fights the units it meets; once it has arrived and is idle, tier 4 applies);
+- a unit whose auto, attack-move or hold engagement targets a hardened building rescans every interval (within sight; reach for stand ground and hold), whether or not the building is in reach, and switches to any candidate of tier 3 or lower.
 
 **Retargeting** (auto engagements and attack-move engagements only): on each scan, if the current target is not in reach and a candidate of equal or lower tier is in reach, switch to it.
 
@@ -841,7 +849,7 @@ Cleanup frees the footprint and handles orders, rally points and slots as in M1.
 
 ### 4.10 Town Center arrows
 
-- Only completed buildings with `combat.attack` fire. In M2 that is the Town Center: 5 pierce, range 7 (reach 7.75), cooldown 2.0 s (40 ticks), 2 arrows per volley at the same target, no wind-up.
+- Only completed buildings with `combat.attack` fire. In M2 that is the Town Center: 7 pierce (WP33; was 5), range 7 (reach 7.75), cooldown 2.0 s (40 ticks), 2 arrows per volley at the same target, no wind-up.
 - Step 8b per building in ascending id order: `cooldown -= 1` if > 0. If 0 and the target is valid and in reach, fire the arrows and set `cooldown = cooldownTicks`.
 - Scans follow the unit scheduling and budget. Targets are tier 1 (fighting units), then tier 2 (other enemy units), then `d²`, then id. A building cannot target buildings.
 - The building keeps its target while it is in reach.
@@ -942,7 +950,7 @@ Rationale:
 
 | Building | HP (M1 provisional) | MA | PA | Attack |
 |---|---|---|---|---|
-| Town Center | 2400 (600) | 3 | 8 | 5 pierce, range 7, cooldown 2.0 s, 2 arrows |
+| Town Center | 2400 (600) | 3 | 8 | 7 pierce (WP33; was 5), range 7, cooldown 2.0 s, 2 arrows |
 | House | 550 (150) | 1 | 6 | — |
 | Mill, Lumber Camp, Mining Camp | 600 (200) | 1 | 6 | — |
 | Farm | 300 (100) | 0 | 8 | — |
@@ -1372,7 +1380,7 @@ The existing M1 specs keep passing, driven through the setup screen with the opp
 
 ### 8.4 Performance
 
-**Battle scenario.** `createBattleScenario(seed, perSide = 200)` in `src/sim/stress.ts` (WP33) builds a 2-player map with both bases plus 30 buildings each. Per side it adds 60 Spearmen, 40 Swordsmen, 40 Archers, 40 Horsemen, 10 Cataphracts and 10 Siphonarioi, in two lines 14 tiles apart at the map centre, given `attackMove` towards each other. `__game.startBattle()` loads it in the browser.
+**Battle scenario.** `createBattleScenario(seed, perSide = 200)` in `src/sim/stress.ts` (WP33) builds a 2-player map with both bases plus 30 buildings each. Per side it adds 60 Spearmen, 40 Swordsmen, 40 Archers, 40 Horsemen, 10 Cataphracts and 10 Siphonarioi (as built by WP33: 34 Horsemen, plus 4 Rams and 2 Trebuchets so siege is in the fight), in two lines 14 tiles apart at the map centre, given `attackMove` towards each other. `__game.startBattle()` loads it in the browser.
 
 | Budget | Measurement | Target |
 |---|---|---|

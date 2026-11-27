@@ -113,7 +113,8 @@ function runRepair(ctx: SimContext): void {
   const { combat } = ctx.data;
   for (const e of ctx.state.entities) {
     if (e.kind !== 'building' || !e.constructed) continue;
-    e.repairerIds = e.repairerIds.filter((id) => {
+    // Pruning an empty list would only allocate a new empty one (WP33: every completed building, every tick).
+    if (e.repairerIds.length > 0) e.repairerIds = e.repairerIds.filter((id) => {
       const u = findEntity(ctx.state, id);
       return u !== undefined && u.kind === 'unit' && isRepairingNow(u, e.id);
     });

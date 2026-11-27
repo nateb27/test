@@ -140,7 +140,7 @@ describe('isEnemy, distSqToTarget, combat profiles', () => {
     expect(unitCombat(ctx, 1, 'siphonarios').splash).toEqual({ radius: 1.25, percent: 60 });
     expect(buildingCombat(ctx, 1, 'townCenter')).toMatchObject({
       maxHp: 2400, meleeArmor: 8, pierceArmor: 8, classes: ['building'],
-      attack: { attack: 5, attackType: 'pierce', range: 7, reach: 7.75, cooldownTicks: 40, arrows: 2, projectile: 'arrow' },
+      attack: { attack: 7, attackType: 'pierce', range: 7, reach: 7.75, cooldownTicks: 40, arrows: 2, projectile: 'arrow' },
     });
     expect(buildingCombat(ctx, 1, 'house').attack).toBeNull();
     // Upgrades resolve through the stat table and the profiles.

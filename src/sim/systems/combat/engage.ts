@@ -75,6 +75,26 @@ export function baseTier(ctx: SimContext, target: Attackable): 1 | 2 | 3 {
   return p.autoAcquire && p.targets === 'any' ? 1 : 2;
 }
 
+/**
+ * Is `target` hardened against `profile` (WP33, PLAN-M2 4.5)? An enemy building the unit can only scratch: its damage
+ * per blow is at most `minDamage` (the building's armour of the unit's attack type is at least the unit's attack and
+ * the unit has no bonus against it). Siege, Cataphracts and Siphonarioi are never hardened against; infantry, cavalry
+ * and archers are against production buildings and the Town Center.
+ */
+export function isHardened(ctx: SimContext, profile: ResolvedUnitCombat, target: Attackable): boolean {
+  return target.kind === 'building' && damageAgainst(ctx, profile, target) <= ctx.data.combat.minDamage;
+}
+
+/**
+ * Tier of a candidate for automatic target choice by a unit with `profile` (4.5 as amended by WP33), without the
+ * tier-0 retaliation rule: `baseTier`, except that a hardened building (`isHardened`) is tier 4, below everything, and
+ * never a tier-0 last attacker. Explicit `attack` orders ignore tiers.
+ */
+export function autoTier(ctx: SimContext, profile: ResolvedUnitCombat, target: Attackable): 1 | 2 | 3 | 4 {
+  const tier = baseTier(ctx, target);
+  return tier === 3 && isHardened(ctx, profile, target) ? 4 : tier;
+}
+
 /** Stop where the unit stands: drop the path and any outstanding request. */
 export function standStill(unit: UnitEntity): void {
   unit.path = null;
@@ -104,51 +124,100 @@ function throttledRequest(ctx: SimContext, unit: UnitEntity, chase: ChaseState, 
   chase.repathTick = ctx.state.tick + CHASE_REPATH_TICKS;
 }
 
+/** Outcome of one chase tick: still chasing, or the target cannot be reached from here. */
+export type ChaseResult = 'chasing' | 'unreachable';
+
+/**
+ * A served A* path with no waypoints: the search found nothing to walk (the unit already stands on the reachable tile
+ * nearest the goal). Only `computePath` produces such a path (`directPath` always sets one waypoint).
+ */
+function emptyServedPath(unit: UnitEntity): boolean {
+  return unit.pendingPathRequestId === null && unit.path !== null && unit.path.waypoints.length === 0;
+}
+
+/**
+ * Step into reach of a building from beside its footprint (WP33): when the unit has no path to follow (none, used up
+ * or empty) and is out of reach, walk straight towards the nearest point `p` of the footprint and stop at
+ * `standDistance` from it (half the reach; midway between the minimum range and the reach for units with one). A
+ * footprint path ends on a ring tile 8-adjacent to the footprint, and from most of such a tile (a corner tile away
+ * from the corner, the far half of a side tile) the footprint is farther than the base reach of 0.75: without this
+ * step the unit got an empty path there and stood forever. Also covers a stationary attacker pushed out of reach by
+ * separation. The segment towards `p` must be walkable (it stays inside the unit's own tile when the unit is on a
+ * ring tile); returns false (nothing changed) otherwise.
+ */
+function stepIntoReach(ctx: SimContext, unit: UnitEntity, profile: ResolvedUnitCombat, target: BuildingEntity, size: number): boolean {
+  if (unit.pendingPathRequestId !== null) return false;
+  const path = unit.path;
+  if (path !== null && path.nextIndex < path.waypoints.length) return false;
+  const tx = target.tile.tx;
+  const ty = target.tile.ty;
+  const px = Math.min(Math.max(unit.pos.x, tx), tx + size);
+  const py = Math.min(Math.max(unit.pos.y, ty), ty + size);
+  const vx = unit.pos.x - px;
+  const vy = unit.pos.y - py;
+  const len = Math.sqrt(vx * vx + vy * vy);
+  if (len === 0) return false;
+  const stand = profile.minRange > 0 ? (profile.minRange + profile.reach) / 2 : profile.reach / 2;
+  if (len <= stand) return false;
+  // Only from close by: farther away the footprint path (A*) is the way in.
+  if (len > profile.reach + 1.5) return false;
+  return directPath(ctx, unit, px + (vx / len) * stand, py + (vy / len) * stand);
+}
+
 /**
  * One tick of chasing `target` (4.6), for a unit that is out of reach:
  * - too close (inside `minRange`): walk to a point `minRange + 0.5` from the target's nearest point, away from it;
- * - building target: `followPath` to the footprint; if the path is used up without reaching, re-request under the
+ * - building target: beside the footprint with nothing left to follow, step straight into reach (`stepIntoReach`);
+ *   otherwise `followPath` to the footprint, and if the path is used up without reaching, re-request under the
  *   throttle;
  * - unit target within `CHASE_DIRECT_DISTANCE`: `directPath` towards it when the straight segment is walkable;
  * - otherwise a point path to the target's position, re-requested only when `tick >= repathTick` and the target is
  *   more than `CHASE_REPATH_DISTANCE` from the path's goal (or the path is gone or used up).
  * Every A* request obeys the `repathTick` throttle, so a chasing unit requests at most one path per
  * `CHASE_REPATH_TICKS` ticks (the footprint path of `followPath` excepted, which requests only when it has none).
+ *
+ * Returns `unreachable` (WP33) when the last served A* path was empty and no direct step helps: the unit already
+ * stands on the reachable tile nearest the goal and is still out of reach, so waiting would stand still forever.
  */
-export function chase(ctx: SimContext, unit: UnitEntity, profile: ResolvedUnitCombat, target: Attackable, chaseState: ChaseState): void {
+export function chase(ctx: SimContext, unit: UnitEntity, profile: ResolvedUnitCombat, target: Attackable, chaseState: ChaseState): ChaseResult {
   const d2 = distSqToTarget(ctx, unit.pos.x, unit.pos.y, target);
   if (profile.minRange > 0 && d2 < profile.minRange * profile.minRange) {
+    if (emptyServedPath(unit)) return 'unreachable';
     backOff(ctx, unit, profile, target, chaseState, d2);
-    return;
+    return 'chasing';
   }
   if (target.kind === 'building') {
     const size = ctx.data.building(target.typeId).footprint;
+    if (stepIntoReach(ctx, unit, profile, target, size)) return 'chasing';
+    if (emptyServedPath(unit)) return 'unreachable';
     const path = unit.path;
     if (path !== null && path.nextIndex >= path.waypoints.length) {
       // At the footprint but not in reach (crowded or blocked): try again under the throttle.
-      if (ctx.state.tick < chaseState.repathTick) return;
+      if (ctx.state.tick < chaseState.repathTick) return 'chasing';
       unit.path = null;
     }
     if (unit.path === null && unit.pendingPathRequestId === null) {
-      if (ctx.state.tick < chaseState.repathTick) return;
+      if (ctx.state.tick < chaseState.repathTick) return 'chasing';
       chaseState.repathTick = ctx.state.tick + CHASE_REPATH_TICKS;
     }
     followPath(ctx, unit, { kind: 'footprint', tile: { tx: target.tile.tx, ty: target.tile.ty }, size });
-    return;
+    return 'chasing';
   }
   if (d2 <= CHASE_DIRECT_DISTANCE * CHASE_DIRECT_DISTANCE && directPath(ctx, unit, target.pos.x, target.pos.y)) {
     unit.pendingPathRequestId = null;
-    return;
+    return 'chasing';
   }
-  if (unit.pendingPathRequestId !== null) return;
+  if (unit.pendingPathRequestId !== null) return 'chasing';
+  if (emptyServedPath(unit)) return 'unreachable';
   const goal = pathGoal(unit);
   const used = unit.path !== null && unit.path.nextIndex >= unit.path.waypoints.length;
   if (goal !== null && !used) {
     const gx = target.pos.x - goal.x;
     const gy = target.pos.y - goal.y;
-    if (gx * gx + gy * gy <= CHASE_REPATH_DISTANCE * CHASE_REPATH_DISTANCE) return;
+    if (gx * gx + gy * gy <= CHASE_REPATH_DISTANCE * CHASE_REPATH_DISTANCE) return 'chasing';
   }
   throttledRequest(ctx, unit, chaseState, { kind: 'point', x: target.pos.x, y: target.pos.y });
+  return 'chasing';
 }
 
 /** Inside the minimum range: walk away from the target's nearest point (4.6, decided by WP21). */
@@ -194,7 +263,9 @@ export type EngageResult =
   /** Out of reach and chasing. */
   | 'chasing'
   /** Out of reach and not allowed to move (stand-ground auto engagement, hold). */
-  | 'outOfReach';
+  | 'outOfReach'
+  /** Out of reach and no path gets closer (`chase` returned `unreachable`); the unit stands. */
+  | 'unreachable';
 
 /**
  * One tick of an engagement against a valid `target` (4.6). While winding up the unit never moves. In reach it
@@ -220,7 +291,10 @@ export function engage(
     standStill(unit);
     return 'chasing';
   }
-  chase(ctx, unit, profile, target, chaseState);
+  if (chase(ctx, unit, profile, target, chaseState) === 'unreachable') {
+    standStill(unit);
+    return 'unreachable';
+  }
   return 'chasing';
 }
 

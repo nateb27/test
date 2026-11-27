@@ -10,6 +10,13 @@
  * - `hold` without a target in reach (units with `autoAcquire`): scan within reach.
  * Commanded attacks, moves and economic orders never scan; villagers (`autoAcquire: false`) never scan.
  *
+ * Hardened buildings (`isHardened`, WP33: the unit's damage per blow is at most `minDamage`) are tier 4, below every
+ * other candidate, never the tier-0 last attacker, and no candidate at all for an attack-move that is still walking:
+ * an army attack-moving past a Town Center walks on and fights the units it meets; once idle (arrived) it takes the
+ * Town Center only when nothing else is in the scan radius. A unit engaging a hardened building (auto or attack-move; hold in reach)
+ * rescans every interval, whether or not the building is in reach, and switches to anything of tier 3 or lower.
+ * Siege is never hardened against, so it keeps preferring buildings.
+ *
  * Building scans (Town Center) run in the same ascending-id pass (`scanBuildingTarget`, `defence.ts`), with the same
  * due/budget rules and the shared `runtime.acquireBudget` (PLAN-M2 2.2 step 4, 4.10); step 8b only fires.
  */
@@ -23,7 +30,7 @@ import {
   type UnitEntity,
 } from '../../types';
 import { distSqToTarget, unitCombat } from './damage';
-import { baseTier, inReach, inReachSq, standStill, targetFor, type Attackable } from './engage';
+import { autoTier, canTarget, inReach, inReachSq, isHardened, standStill, targetFor, type Attackable } from './engage';
 import { scanBuildingTarget } from '../defence';
 import { rebuildSpatialIndex, visitBuildingsNear, visitUnitsNear } from './spatial';
 
@@ -76,7 +83,8 @@ export function scanForTarget(
   const qualifies = (d2: number, limit2: number): boolean => (opts.inReachOnly ? inReachSq(profile, d2) : d2 <= limit2);
 
   const last = targetFor(ctx, unit, profile, unit.lastAttackerId);
-  if (last !== undefined) {
+  // A hardened last attacker (a Town Center hitting infantry) is no tier-0 target: it competes in tier 4 below.
+  if (last !== undefined && !isHardened(ctx, profile, last)) {
     const d2 = distSqToTarget(ctx, x, y, last);
     const rr = opts.retaliateRadius ?? opts.radius;
     if (qualifies(d2, rr * rr)) return { hit: { target: last, tier: 0, d2 }, checks: 0 };
@@ -86,10 +94,11 @@ export function scanForTarget(
   let checks = 0;
   if (profile.targets === 'any' && opts.maxTier >= 1) {
     checks += visitUnitsNear(ctx, x, y, opts.radius, budget, (u) => {
-      if (u.id === unit.id || targetFor(ctx, unit, profile, u.id) === undefined) return false;
+      // `u` is the state's own entity object (the index holds them), so no id lookup is needed (WP33).
+      if (!canTarget(unit, profile, u)) return false;
       const d2 = distSqToTarget(ctx, x, y, u);
       if (!qualifies(d2, r2)) return false;
-      const tier = baseTier(ctx, u);
+      const tier = autoTier(ctx, profile, u);
       if (tier > opts.maxTier) return false;
       if (better(tier, d2, u.id, best)) best = { target: u, tier, d2 };
       return false;
@@ -98,14 +107,26 @@ export function scanForTarget(
   }
   if (opts.maxTier >= 3) {
     checks += visitBuildingsNear(ctx, x, y, opts.radius, budget - checks, (b) => {
-      if (targetFor(ctx, unit, profile, b.id) === undefined) return false;
+      if (!canTarget(unit, profile, b)) return false;
       const d2 = distSqToTarget(ctx, x, y, b);
       if (!qualifies(d2, r2)) return false;
-      if (better(3, d2, b.id, best)) best = { target: b, tier: 3, d2 };
+      const tier = autoTier(ctx, profile, b);
+      if (tier > opts.maxTier) return false;
+      if (better(tier, d2, b.id, best)) best = { target: b, tier, d2 };
       return false;
     });
   }
   return { hit: best, checks };
+}
+
+/**
+ * Rescan of a unit engaging a hardened building (WP33): every interval, look for anything better (tier 3 or lower)
+ * within `sight` (an aggressive auto engagement or any attack-move) or reach (stand ground), whether or not the
+ * building is in reach, so a unit scratching a Town Center turns on the units that come into sight.
+ */
+function hardenedRescan(unit: UnitEntity, profile: ResolvedUnitCombat, attackMove: boolean): ScanOptions {
+  const sight = attackMove || unit.stance === 'aggressive';
+  return { radius: sight ? profile.sight : profile.reach, inReachOnly: !sight, maxTier: 3, retaliateRadius: null };
 }
 
 /** What a due unit would scan for this tick, or null if it is in no scanning situation. */
@@ -114,29 +135,36 @@ function scanPlan(ctx: SimContext, unit: UnitEntity, profile: ResolvedUnitCombat
   const sightOrReach = unit.stance === 'aggressive' ? profile.sight : profile.reach;
   if (order === null) {
     if (unit.orderQueue.length > 0 || !profile.autoAcquire) return null;
-    if (unit.stance === 'standGround') return { radius: profile.reach, inReachOnly: true, maxTier: 3, retaliateRadius: null };
+    if (unit.stance === 'standGround') return { radius: profile.reach, inReachOnly: true, maxTier: 4, retaliateRadius: null };
     const recent = unit.lastDamagedTick !== null && ctx.state.tick - unit.lastDamagedTick <= RETALIATE_WINDOW_TICKS;
     const retaliate = recent ? Math.max(profile.sight, ctx.data.combat.retaliateRadius) : null;
-    return { radius: sightOrReach, inReachOnly: false, maxTier: 3, retaliateRadius: retaliate };
+    return { radius: sightOrReach, inReachOnly: false, maxTier: 4, retaliateRadius: retaliate };
   }
   switch (order.type) {
     case 'attack': {
       if (!order.auto) return null;
       const target = targetFor(ctx, unit, profile, order.targetId);
-      if (target === undefined || inReach(ctx, unit, profile, target)) return null;
-      return { radius: profile.reach, inReachOnly: true, maxTier: baseTier(ctx, target), retaliateRadius: null };
+      if (target === undefined) return null;
+      if (isHardened(ctx, profile, target)) return hardenedRescan(unit, profile, false);
+      if (inReach(ctx, unit, profile, target)) return null;
+      return { radius: profile.reach, inReachOnly: true, maxTier: autoTier(ctx, profile, target), retaliateRadius: null };
     }
     case 'attackMove': {
+      // Walking: hardened buildings (tier 4) are not candidates; the army walks on past them (WP33).
       if (order.phase !== 'engaging') return { radius: profile.sight, inReachOnly: false, maxTier: 3, retaliateRadius: null };
       const target = targetFor(ctx, unit, profile, order.targetId);
-      if (target === undefined || inReach(ctx, unit, profile, target)) return null;
-      return { radius: profile.reach, inReachOnly: true, maxTier: baseTier(ctx, target), retaliateRadius: null };
+      if (target === undefined) return null;
+      if (isHardened(ctx, profile, target)) return hardenedRescan(unit, profile, true);
+      if (inReach(ctx, unit, profile, target)) return null;
+      return { radius: profile.reach, inReachOnly: true, maxTier: autoTier(ctx, profile, target), retaliateRadius: null };
     }
     case 'hold': {
       if (!profile.autoAcquire) return null;
       const target = targetFor(ctx, unit, profile, order.targetId);
-      if (target !== undefined && inReach(ctx, unit, profile, target)) return null;
-      return { radius: profile.reach, inReachOnly: true, maxTier: 3, retaliateRadius: null };
+      if (target !== undefined && inReach(ctx, unit, profile, target)) {
+        return isHardened(ctx, profile, target) ? { radius: profile.reach, inReachOnly: true, maxTier: 3, retaliateRadius: null } : null;
+      }
+      return { radius: profile.reach, inReachOnly: true, maxTier: 4, retaliateRadius: null };
     }
     default:
       return null;
