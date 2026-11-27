@@ -166,7 +166,7 @@ def build_treb(M):
     # Counterweight box hanging from the short end.
     beam(mb, (0.3, 1.25, 3.1), (0.3, 1.25, 2.4), 0.07, iron, 's_cw')
     beam(mb, (-0.3, 1.25, 3.1), (-0.3, 1.25, 2.4), 0.07, iron, 's_cw')
-    mb.box((0, 1.25, 2.05), (0.8, 0.8, 0.75), wood, 's_cw')
+    mb.box((0, 1.25, 2.05), (0.8, 0.8, 0.75), team, 's_cw')   # painted in the owner's colour: visible from every side
     for k in range(6):
         mb.ellipsoid((0.2 * ((k % 3) - 1), 1.25 + 0.2 * (k // 3) - 0.1, 2.48), (0.16, 0.16, 0.12), stone, 's_cw', 6, 4)
     mb.box((0, 1.25, 1.75), (0.84, 0.84, 0.08), iron, 's_cw')

@@ -16,6 +16,7 @@ import {
   TILE_W,
   type DeepReadonly,
   type EntityId,
+  type Facing,
   type ReadonlyEntity,
   type ReadonlyGameState,
   type Vec2,
@@ -93,6 +94,12 @@ export function animFrame(anim: SpriteAnimation, t: number, dist: number | null,
   if (anim.loop === false) return n - 1;
   if (dist !== null && anim.cycle !== undefined && anim.cycle > 0) return Math.floor((dist / anim.cycle) * n) % n;
   return anim.frameMs > 0 ? Math.floor(t / anim.frameMs) % n : 0;
+}
+
+/** The 8-way facing (0 = +x ... clockwise on screen) closest to the world direction (dx, dy). */
+export function facingToward(dx: number, dy: number): Facing {
+  if (dx === 0 && dy === 0) return 0;
+  return (Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) & 7) as Facing;
 }
 
 /** Construction stage drawn for a building. Under 30% progress it is a bare foundation. */
@@ -506,7 +513,9 @@ export class EntityLayer {
       preview = this.previews.get(e.id);
       animState = resolveUnitState(asset, preview?.state ?? unitAnimDetail(e, (id) => this.typeOf(id)));
     } else if (e.kind === 'building') animState = buildingStage(e);
-    const anim: SpriteAnimation = asset.animation(animState, e.kind === 'unit' ? e.facing : 0, { age: this.players[e.owner]?.age ?? 1, seed: e.id });
+    let facing: Facing = e.kind === 'unit' ? e.facing : 0;
+    if (e.kind === 'unit' && GENERIC_STATE[animState as UnitAnimState] === 'work' && preview === undefined) facing = this.workFacing(e) ?? facing;
+    const anim: SpriteAnimation = asset.animation(animState, facing, { age: this.players[e.owner]?.age ?? 1, seed: e.id });
     if (preview !== undefined && preview.start === null) preview.start = nowMs;
     const frameIdx = animFrame(anim, nowMs + e.id * 137, e.kind === 'unit' ? entry.dist + e.id * 0.37 : null, preview !== undefined ? nowMs - (preview.start ?? nowMs) : null);
     const tex = anim.frames[frameIdx]!;
@@ -561,19 +570,33 @@ export class EntityLayer {
     spr.visible = true;
   }
 
-  /** Type id of an entity by id (binary search: `entities` is sorted by id). */
-  private typeOf(id: EntityId): string | undefined {
+  /** An entity by id (binary search: `entities` is sorted by id). */
+  private entityOf(id: EntityId): ReadonlyEntity | undefined {
     const list = this.entityIndex;
     let lo = 0;
     let hi = list.length - 1;
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
       const v = list[mid]!.id;
-      if (v === id) return list[mid]!.typeId;
+      if (v === id) return list[mid]!;
       if (v < id) lo = mid + 1;
       else hi = mid - 1;
     }
     return undefined;
+  }
+
+  private typeOf(id: EntityId): string | undefined {
+    return this.entityOf(id)?.typeId;
+  }
+
+  /** Facing towards the node or building a working unit works on (drawing only: the swing faces the tree). */
+  private workFacing(u: RUnit): Facing | null {
+    const o = u.currentOrder;
+    const id = o === null ? null : o.type === 'gather' ? o.targetId : o.type === 'build' || o.type === 'assist' ? o.buildingId : null;
+    const t = id === null ? undefined : this.entityOf(id);
+    if (t === undefined || t.kind === 'unit') return null;
+    const c = footprintCenter(t.tile.tx, t.tile.ty, footprintOf(this.registry, t));
+    return facingToward(c.x - u.pos.x, c.y - u.pos.y);
   }
 
   /** Draw (or hide) the separate ground shadow of the frame shown. */

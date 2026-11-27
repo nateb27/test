@@ -4,7 +4,7 @@ import core
 
 
 class Subject:
-    def __init__(self, name, frame, build, anims, props=(), unit=True, samples=20, exposure=1.0, shadow_mul=1.0, icon_zoom=0, icon_facing=1):
+    def __init__(self, name, frame, build, anims, props=(), unit=True, samples=20, exposure=1.0, shadow_mul=1.0, icon_zoom=0, icon_facing=1, ss=3):
         self.name = name
         self.frame = frame          # sub-frame (w, h, ax, ay) at 1x; (ax, ay) is the ground anchor
         self._build = build
@@ -16,6 +16,7 @@ class Subject:
         self.shadow_mul = shadow_mul
         self.icon_zoom = icon_zoom      # >0: also render a larger single-frame HUD portrait ('icon')
         self.icon_facing = icon_facing
+        self.ss = ss                    # supersampling (big sprites need less)
 
     def build(self):
         return self._build()
@@ -81,7 +82,7 @@ def _cavalry(kind):
         arm.scale = (H.SCALE, H.SCALE, H.SCALE)
         return {'arm': arm}
 
-    return Subject(kind, CAV_FRAME, build, lambda: cavalry_anims(kind), props=rp.keys(), icon_zoom=1.5, icon_facing=0)
+    return Subject(kind, CAV_FRAME, build, lambda: cavalry_anims(kind), props=rp.keys(), icon_zoom=1.5, icon_facing=0, ss=2, samples=10)
 
 RAM_FRAME = (144, 112, 66, 72)
 TREB_FRAME = (176, 160, 84, 118)
@@ -101,12 +102,12 @@ def _siege(kind):
         arm.scale = (H.SCALE, H.SCALE, H.SCALE)
         return {'arm': arm}
 
-    return Subject(kind, RAM_FRAME if kind == 'batteringRam' else TREB_FRAME, build, lambda: siege_anims(kind), unit=True, icon_zoom=0.9, icon_facing=0)
+    return Subject(kind, RAM_FRAME if kind == 'batteringRam' else TREB_FRAME, build, lambda: siege_anims(kind), unit=True, icon_zoom=0.9, icon_facing=0, ss=2, samples=10)
 
 
 TREE_FRAME = (176, 136, 60, 118)
 BUSH_FRAME = (80, 56, 32, 38)
-TREE_VARIANTS = {'oak1': ('oak', 11), 'oak2': ('oak2', 23), 'cypress': ('cypress', 5), 'olive': ('olive', 8), 'pine1': ('pine', 4), 'pine2': ('pine', 9)}
+TREE_VARIANTS = {'oak1': ('oak', 11), 'oak2': ('oak2', 23), 'cypress': ('cypress', 5), 'olive': ('olive', 8), 'pine1': ('pine', 4), 'pine2': ('pine_b', 9)}
 
 
 def _vegetation(name):

@@ -639,8 +639,8 @@ def prop_mace(M):
     wood = M('wood_dk', var=0.2, nscale=200)
     iron = M('iron', rough=0.5, metal=0.6, var=0.3, nscale=220)
     g = G_R
-    mb.tube((g[0], g[1], g[2] + 0.08), (g[0], g[1], g[2] - 0.62), 0.03, 0.03, 6, wood, 'hand.R')
+    mb.tube((g[0], g[1], g[2] + 0.08), (g[0], g[1], g[2] - 0.78), 0.036, 0.036, 6, wood, 'hand.R')
     for i in range(6):
         a = i * math.pi / 3
-        mb.box((g[0] + 0.05 * math.cos(a), g[1] + 0.05 * math.sin(a), g[2] - 0.6), (0.05, 0.05, 0.16), iron, 'hand.R', rot=Matrix.Rotation(a, 3, 'Z'))
+        mb.box((g[0] + 0.07 * math.cos(a), g[1] + 0.07 * math.sin(a), g[2] - 0.76), (0.07, 0.07, 0.22), iron, 'hand.R', rot=Matrix.Rotation(a, 3, 'Z'))
     return mb

@@ -230,3 +230,9 @@ def build_berry_bush(seed):
             mb.ellipsoid(q, (0.022, 0.022, 0.022), berry, {}, 6, 4)
         n += 1
     return ob, mb.build('berries%d' % seed)
+
+# Second stone pine: shorter, leaning the other way, with a broader, flatter umbrella.
+SPECS['pine_b'] = dict(SPECS['pine'], trunk_h=1.05, lean=(-0.2, 0.12),
+                       lobes=lambda rng: [(-0.16, 0.1, 1.38, 0.72, 0.7, 0.15), (-0.16, 0.1, 1.46, 0.52, 0.5, 0.12)] +
+                       [(-0.16 + 0.5 * math.cos(a), 0.1 + 0.5 * math.sin(a), 1.42 + 0.04 * math.sin(3 * a), 0.22, 0.22, 0.1) for a in np.linspace(0, 6.28, 8)[:-1] + rng.random()],
+                       inside=lambda p: p[2] > 1.26)

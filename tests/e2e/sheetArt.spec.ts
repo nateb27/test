@@ -84,11 +84,10 @@ test('sheets: a walking villager advances its frames with the distance walked; c
     const id = vs[k + 1]!.id;
     await stepUntil(
       page,
-      `(() => { const e = g.state.entities.find((x) => x.id === ${id}); return e.carried !== null && e.currentOrder !== null && e.currentOrder.phase === 'toDropOff' && e.path !== null && e.path.nextIndex < e.path.waypoints.length - 1; })()`,
+      `(() => { const e = g.state.entities.find((x) => x.id === ${id}); return e.carried !== null && e.currentOrder !== null && e.currentOrder.phase === 'toDropOff' && (e.pos.x !== e.prevPos.x || e.pos.y !== e.prevPos.y); })()`,
       8000,
-      10,
+      1,
     );
-    await step(page, 2);
     expect(await drawn(page, id), res).toMatch(new RegExp(`^sheet\\.villager\\|carry${res}\\|`));
   }
   await shot(page, 'sheets-02-carry');

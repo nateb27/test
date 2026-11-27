@@ -214,6 +214,37 @@ try {
       return { x: tc.tile.tx + 2, y: tc.tile.ty + 2 };
     });
   }
+  /** Open grass near the Town Center: a strip `len` tiles long (screen-horizontal) and `depth` tiles deep, clear of
+   * buildings, nodes and the map edge. */
+  async function openStrip(len, depth, from = 10) {
+    return page.evaluate(([n, d, d0]) => {
+      const s = window.__game.state;
+      const tc = s.entities.find((e) => e.kind === 'building' && e.typeId === 'townCenter' && e.owner === 1);
+      const c = { x: tc.tile.tx + 2, y: tc.tile.ty + 2 };
+      const blocked = (x, y, r) => s.entities.some((e) => e.kind !== 'unit' && Math.hypot(e.tile.tx + 0.5 - x, e.tile.ty + 0.5 - y) < r);
+      for (let dist = d0; dist < 45; dist++)
+        for (let a = 0; a < 40; a++) {
+          const x = c.x + Math.cos((a / 40) * Math.PI * 2) * dist;
+          const y = c.y + Math.sin((a / 40) * Math.PI * 2) * dist;
+          let ok = x > 14 && y > 14 && x < s.map.width - 14 && y < s.map.height - 14;
+          for (let k = -2; k <= n + 2 && ok; k++) for (let j = -1; j <= d + 1 && ok; j++) ok = !blocked(x + k * 0.7 + j * 0.7, y - k * 0.7 + j * 0.7, 2.2);
+          if (ok) return { x, y };
+        }
+      return null;
+    }, [len, depth, from]);
+  }
+  /** Walk units a step in a world direction so they face it (spawned units face +x), then let them stop. */
+  async function turn(ids, dx, dy) {
+    await page.evaluate(([list, ddx, ddy]) => {
+      const g = window.__game;
+      for (const id of list) {
+        const e = g.state.entities.find((x) => x.id === id);
+        if (e !== undefined) window.__art.issue({ type: 'move', unitIds: [id], x: e.pos.x + ddx, y: e.pos.y + ddy, queue: false });
+      }
+      for (let i = 0; i < 12; i++) g.step(5, false);
+      g.step(1);
+    }, [ids, dx, dy]);
+  }
   async function lookAt(x, y, zoom) {
     const tc = await tcTile();
     await focusTC(x - tc.x, y - tc.y, zoom);
@@ -224,20 +255,8 @@ try {
     if (want('lineup')) {
       // Ten unit types in blue (back row) and red (front row): on open grass, then on the Town Center's worn-earth
       // apron (before the town is built up around it).
-      const spots = await page.evaluate((c) => {
-        const s = window.__game.state;
-        const blocked = (x, y, r) => s.entities.some((e) => e.kind !== 'unit' && Math.hypot(e.tile.tx + 0.5 - x, e.tile.ty + 0.5 - y) < r);
-        let grass = null;
-        for (let d = 10; d < 40 && grass === null; d++)
-          for (let a = 0; a < 32 && grass === null; a++) {
-            const x = c.x + Math.cos((a / 32) * Math.PI * 2) * d;
-            const y = c.y + Math.sin((a / 32) * Math.PI * 2) * d;
-            let ok = x > 12 && y > 12 && x < s.map.width - 12 && y < s.map.height - 12;
-            for (let k = -1; k <= 12 && ok; k++) ok = !blocked(x + k * 0.9 - 4.5, y - k * 0.9 + 4.5, 3.2);
-            if (ok) grass = { x, y };
-          }
-        return { grass, dirt: { x: c.x + 1.0, y: c.y + 4.6 } };
-      }, tc);
+      const strip = await openStrip(16, 3);
+      const spots = { grass: strip === null ? null : { x: strip.x + 4.5, y: strip.y - 4.5 }, dirt: { x: tc.x + 1.0, y: tc.y + 4.6 } };
       for (const [tag, at] of [['grass', spots.grass], ['dirt', spots.dirt]]) {
         if (at === null) continue;
         const items = [];
@@ -254,8 +273,10 @@ try {
           list.forEach((id, n) => window.__art.colour(id, n % 2 === 0 ? b : r));
           window.__game.step(1);
         }, [ids, BLUE, RED]);
-        for (const z of [1, 2]) {
-          await lookAt(at.x + 2.0, at.y - 1.4, z);
+        // Three-quarter view (facing south-west) shows every silhouette best.
+        await turn(ids, 0, 0.6);
+        for (const z of [1, 1.5, 2]) {
+          await lookAt(at.x + 2.6, at.y - 2.0, z);
           await shot(`lineup-${tag}-${z}x`);
         }
         // Remove the line-up so later scenes start from the same town.
@@ -312,11 +333,13 @@ try {
     if (want('anims')) {
       const states = ['attack', 'death', 'corpse'];
       const items = [];
-      UNITS.forEach((u, i) => states.forEach((st, k) => items.push([u, tc.x + 10 + i * 1.5 + k * 1.7, tc.y + 6 - i * 1.5 + k * 1.7])));
+      const at = (await openStrip(16, 6)) ?? { x: tc.x + 10, y: tc.y + 6 };
+      UNITS.forEach((u, i) => states.forEach((st, k) => items.push([u, at.x + i * 1.5 + k * 2.0, at.y - i * 1.5 + k * 2.0])));
       const ids = await spawn(items);
+      await turn(ids, 0, 0.6);
       await page.evaluate(([list, sts]) => list.forEach((id, k) => window.__art.preview(id, sts[k % 3])), [ids, states]);
       await page.evaluate(() => window.__game.step(1));
-      await lookAt(tc.x + 18, tc.y - 1, 1);
+      await lookAt(at.x + 7.5, at.y - 5.5, 1);
       await page.evaluate(() => window.__game.advanceClock(250));
       await shot('anims');
     }

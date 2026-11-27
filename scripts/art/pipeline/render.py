@@ -6,7 +6,9 @@ Incremental: before rendering, a digest of everything that reaches the image (ev
 materials, light, camera, render settings, post settings) is compared with the cached one; an unchanged animation
 is skipped.
 
-Usage (venv python): python render.py <subject>[:<anim>,<anim>] ... [--force] [--list]
+Usage (venv python): python render.py <subject>[:<anim>,<anim>] ... [--force] [--list] [--adopt]
+
+--adopt records the current digests for the cached frames without rendering (after changing the digest code).
 """
 import hashlib
 import json
@@ -95,6 +97,10 @@ def scene_digest(extra):
             co = np.empty(len(me.vertices) * 3, np.float32)
             me.vertices.foreach_get('co', co)
             h.update(np.round(co, 4).tobytes())
+            mi = np.empty(len(me.polygons), np.int32)
+            me.polygons.foreach_get('material_index', mi)
+            h.update(mi.tobytes())
+            h.update(' '.join(s.material.name if s.material else '-' for s in ob.material_slots).encode())
             h.update(str(ob.is_shadow_catcher).encode())
             for s in ob.material_slots:
                 if s.material:
@@ -121,7 +127,7 @@ def scene_digest(extra):
     return h.hexdigest()
 
 
-def render_anim(subject, anim, force=False):
+def render_anim(subject, anim, force=False, adopt=False):
     """Render all frames x 8 facings of `anim` for `subject` (see subjects.py). Returns the cache path."""
     w, h, ax, ay = subject.frame
     z = anim.zoom
@@ -133,8 +139,21 @@ def render_anim(subject, anim, force=False):
     meta_path = os.path.join(out_dir, anim.name + '.json')
     facings = anim.facings
     nf = anim.frames
+    core.SS = subject.ss
+    SS = core.SS
     core.reset_scene(subject.samples)
-    core.ground_plane(60)
+    # The copies spread over the ground: big frames need a bigger shadow catcher, and the camera far enough back that
+    # the front rows (towards the viewer) are not behind it.
+    rows = min(nf, max(1, MAX_COPIES // len(facings)))
+    gx0, gy0 = screen_to_game(w * (len(facings) - 1), h * (rows - 1))
+    ext = max(abs(gx0), abs(gy0)) + 6
+    ground = core.ground_plane(60 if ext <= 28 else 2 * ext + 12)
+    if ext > 28:
+        cam = bpy.context.scene.camera
+        vd = cam.location.normalized()
+        cam.location = vd * (3 * ext + 30)
+        cam.data.clip_end = 10 * ext + 200
+    tb = time.time()
     rig = subject.build()
     arm = rig['arm']
     # Copies on a grid: columns = facings, rows = frames; batches of at most MAX_COPIES.
@@ -180,6 +199,15 @@ def render_anim(subject, anim, force=False):
         digests.append(dig)
         renders.append((frames, rows, dig))
     timing = {'ms': anim.frame_ms, 'loop': anim.loop, 'cycle': anim.cycle}
+    if adopt and cached is None and os.path.exists(meta_path) and os.path.exists(path):
+        cached = json.load(open(meta_path))
+    if adopt and cached is not None:
+        # Accept the cached frames as rendered from the current inputs (after a change to the digest itself).
+        cached.update(timing)
+        cached['digests'] = digests
+        json.dump(cached, open(meta_path, 'w'))
+        print('  adopted %s/%s' % (subject.name, anim.name), flush=True)
+        return path, False
     if cached is not None and cached.get('digests') == digests:
         cached.update(timing)
         json.dump(cached, open(meta_path, 'w'))
@@ -207,13 +235,17 @@ def render_anim(subject, anim, force=False):
             if anim.extra is not None:
                 anim.extra(fi, ca, kids)
         bpy.context.view_layer.update()
+        tr = time.time()
         rgba, catcher, team = core.render('%s_%s' % (subject.name, anim.name))
+        tp = time.time()
         for r, fi in enumerate(frames):
             for c in range(len(facings)):
                 sl = (slice(r * h * SS, (r + 1) * h * SS), slice(c * w * SS, (c + 1) * w * SS))
                 results[fi][c] = post.to_layers(rgba[sl], catcher[sl], team[sl], SS, unit=subject.unit,
                                                 exposure_mul=subject.exposure, shadow_mul=subject.shadow_mul)
     dt = time.time() - t0
+    if os.environ.get('ART_VERBOSE'):
+        print('  timing: build+digest %.1fs, last render %.1fs, last post %.1fs' % (t0 - tb, tp - tr, time.time() - tp), flush=True)
     stack = lambda k, dt_: np.stack([np.stack([results[f][c][k] for c in range(len(facings))]) for f in range(nf)]).astype(dt_)
     np.savez_compressed(path, rgb=stack('rgb', np.float16), mask=stack('mask', bool), team=stack('team', np.int8),
                         shadow=stack('shadow', np.float16), outline=stack('outline', np.float16))
@@ -225,6 +257,7 @@ def render_anim(subject, anim, force=False):
 def main(argv):
     import subjects
     force = '--force' in argv
+    adopt = '--adopt' in argv
     args = [a for a in argv if not a.startswith('--')]
     if '--list' in argv:
         for s in subjects.ALL:
@@ -240,7 +273,7 @@ def main(argv):
         for anim in sub.anims():
             if wanted is not None and anim.name not in wanted:
                 continue
-            _, did = render_anim(sub, anim, force)
+            _, did = render_anim(sub, anim, force, adopt)
             n += did
     print('done: %d animations rendered in %.0fs' % (n, time.time() - t), flush=True)
 

@@ -150,8 +150,8 @@ def build_horse(kind, M):
         def scales(th, t, p):
             d = Vector((p.x, 0, p.z - 1.2))
             l = d.length or 1
-            return p + Vector((d.x / l, 0, d.z / l)) * (0.012 * abs(math.sin(p.z * 70 + p.y * 9)))
-        prof = [(0.86, 0.12, 0.2), (0.8, 0.33, 0.38), (0.55, 0.36, 0.42), (0.2, 0.37, 0.44), (-0.15, 0.36, 0.45), (-0.5, 0.34, 0.44), (-0.7, 0.3, 0.42), (-0.8, 0.2, 0.34)]
+            return p + Vector((d.x / l, 0, d.z / l)) * (0.018 * abs(math.sin(p.z * 60 + p.y * 9)))
+        prof = [(0.86, 0.1, 0.18), (0.78, 0.3, 0.35), (0.5, 0.335, 0.39), (0.15, 0.345, 0.4), (-0.2, 0.34, 0.4), (-0.5, 0.33, 0.39), (-0.7, 0.27, 0.35), (-0.82, 0.14, 0.25)]
         rs = []
         nseg = 16
         for y, rx, rz in prof:
@@ -170,7 +170,7 @@ def build_horse(kind, M):
             for k, (y, rx, rz) in enumerate(prof):
                 a = math.pi * (-0.32 + 1.64 * edge / nseg)
                 x = rx * math.cos(a) * 1.04
-                lo.append((mb.add_v((x, y, 0.86), body_w), mb.add_v((x * 1.03, y, 0.6), body_w)))
+                lo.append((mb.add_v((x, y, 0.96), body_w), mb.add_v((x * 1.03, y, 0.74), body_w)))
             for k in range(len(prof) - 1):
                 f = (hi[k], hi[k + 1], lo[k + 1][0], lo[k][0])
                 mb.face(f if edge == 0 else tuple(reversed(f)), lam)

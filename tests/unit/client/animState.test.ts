@@ -2,7 +2,7 @@ import { Texture } from 'pixi.js';
 import { describe, expect, it } from 'vitest';
 import type { SpriteAnimation, SpriteAsset } from '../../../src/client/art/manifest';
 import { makeUnit } from '../../../src/client/render/dev/fixtureState';
-import { animFrame, resolveUnitState, unitAnimDetail } from '../../../src/client/render/entities';
+import { animFrame, facingToward, resolveUnitState, unitAnimDetail } from '../../../src/client/render/entities';
 import type { UnitEntity } from '../../../src/sim/types';
 
 const anim = (n: number, extra: Partial<SpriteAnimation> = {}): SpriteAnimation => ({ frames: Array.from({ length: n }, () => Texture.EMPTY), frameMs: 100, mirrorX: false, ...extra });
@@ -48,5 +48,11 @@ describe('unit animation state', () => {
     expect(animFrame(anim(2), 250, null)).toBe(0);
     expect(animFrame(anim(2), 150, null)).toBe(1);
     expect(animFrame(anim(1), 150, 3)).toBe(0);
+  });
+
+  it('faces a work target with the 8-way facing convention', () => {
+    const dirs: [number, number][] = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];
+    dirs.forEach(([x, y], f) => expect(facingToward(x * 3, y * 3)).toBe(f));
+    expect(facingToward(0, 0)).toBe(0);
   });
 });
