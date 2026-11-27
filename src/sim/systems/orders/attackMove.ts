@@ -3,7 +3,7 @@
 import { followPath } from '../../path/follow';
 import { gridOf } from '../../path/grid';
 import { groupSlots } from '../../path/slots';
-import type { AttackMoveOrderState, SimContext, UnitEntity } from '../../types';
+import { ACQUIRE_INTERVAL_TICKS, type AttackMoveOrderState, type SimContext, type UnitEntity } from '../../types';
 import { unitCombat } from '../combat/damage';
 import { engage, leashBroken, standStill, targetFor } from '../combat/engage';
 import { reject, type CommandHandler } from '../common';
@@ -40,8 +40,10 @@ export const attackMoveOrderHandler: OrderHandler<'attackMove'> = {
       if (target === undefined || (state.anchor !== null && leashBroken(ctx, state.anchor, target))) {
         resumeWalking(ctx, unit, state);
       } else {
-        engage(ctx, unit, profile, target, true, state);
-        return 'running';
+        if (engage(ctx, unit, profile, target, true, state) !== 'unreachable') return 'running';
+        // No path gets closer (WP33): walk on, and do not re-acquire for a full interval.
+        resumeWalking(ctx, unit, state);
+        unit.combat.nextScanTick = ctx.state.tick + ACQUIRE_INTERVAL_TICKS;
       }
     }
     if (unit.combat.windup > 0) {

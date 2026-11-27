@@ -1,6 +1,7 @@
 /** `attack` order and command (PLAN-M2 3.3, 4.5, 4.6, 4.8). Owned by WP21 (Combat core). */
 
 import { findEntity } from '../../entities';
+import { ACQUIRE_INTERVAL_TICKS } from '../../types';
 import { isEnemy, unitCombat } from '../combat/damage';
 import { canTarget, engage, leashBroken, standStill, targetFor } from '../combat/engage';
 import { reject, type CommandHandler } from '../common';
@@ -40,6 +41,11 @@ export const attackOrderHandler: OrderHandler<'attack'> = {
     const result = engage(ctx, unit, profile, target, mayChase, state);
     if (result === 'outOfReach') {
       unit.combat.nextScanTick = ctx.state.tick + 1;
+      return 'done';
+    }
+    if (result === 'unreachable') {
+      // No path gets the unit closer (WP33): give up rather than stand forever; scan again after a full interval.
+      unit.combat.nextScanTick = ctx.state.tick + ACQUIRE_INTERVAL_TICKS;
       return 'done';
     }
     state.phase = result;
