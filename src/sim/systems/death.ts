@@ -3,7 +3,7 @@
  */
 
 import { findEntity } from '../entities';
-import type { Entity, EntityId, PlayerId, SimContext } from '../types';
+import type { Entity, EntityId, PlayerId, SimContext, SimRuntime } from '../types';
 import { emit } from './common';
 import { recordStat } from './matchStats';
 
@@ -15,8 +15,28 @@ function insertSorted(ids: EntityId[], id: EntityId): void {
 }
 
 /**
+ * Owners of the sources of this tick's projectile impacts (scratch per runtime, never state). A hit that brings an
+ * entity to 0 hp in step 9 is resolved by step 11 of the same `step` call, and the scratch is cleared at the end of
+ * `runDeath`, so nothing survives between ticks (or into a save). It lets a projectile credit its owner after the
+ * shooter itself has died and been removed (PLAN-M2 4.4: "credited to sourceId/owner, even if the shooter has died"),
+ * which the projectile-in-flight fallback of 4.9 cannot do once the killing projectile has landed.
+ */
+const impactOwners = new WeakMap<SimRuntime, Map<EntityId, PlayerId>>();
+
+/** Record that a projectile from `sourceId` (owned by `owner`) landed this tick (called by `runProjectiles`). */
+export function noteProjectileImpact(ctx: SimContext, sourceId: EntityId, owner: PlayerId): void {
+  let m = impactOwners.get(ctx.runtime);
+  if (m === undefined) {
+    m = new Map();
+    impactOwners.set(ctx.runtime, m);
+  }
+  m.set(sourceId, owner);
+}
+
+/**
  * Player credited with the death of `e`: the owner of `lastAttackerId` while that entity still exists, else the
- * owner of the lowest-id projectile still in flight from that attacker, else null. Never the victim's own owner.
+ * owner of the lowest-id projectile still in flight from that attacker, else the owner of a projectile from that
+ * attacker that landed this tick, else null. Never the victim's own owner.
  */
 function killerOf(ctx: SimContext, e: Entity): PlayerId | null {
   if (e.kind === 'node') return null;
@@ -32,6 +52,7 @@ function killerOf(ctx: SimContext, e: Entity): PlayerId | null {
         break;
       }
     }
+    if (killer === null) killer = impactOwners.get(ctx.runtime)?.get(attackerId) ?? null;
   }
   return killer === null || killer === 0 || killer === e.owner ? null : killer;
 }
@@ -78,4 +99,5 @@ export function runDeath(ctx: SimContext): void {
     }
     insertSorted(runtime.pendingRemoval, e.id);
   }
+  impactOwners.get(runtime)?.clear();
 }

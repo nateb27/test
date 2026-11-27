@@ -20,6 +20,7 @@ import {
 } from '../types';
 import { applyDamage, buildingCombat, computeDamage, isEnemy, unitCombat } from './combat/damage';
 import { visitBuildingsNear, visitUnitsNear } from './combat/spatial';
+import { noteProjectileImpact } from './death';
 
 /**
  * Fire a projectile: allocate an id, set `ticksLeft = flightTicks` and append (ids only grow, so the list stays
@@ -115,6 +116,7 @@ export function runProjectiles(ctx: SimContext): void {
       keep.push(p);
       continue;
     }
+    noteProjectileImpact(ctx, p.sourceId, p.owner); // kill credit if the shooter is gone (death.ts)
     if (isDamageable(target) && target.hp > 0 && isEnemy(p.owner, target.owner)) {
       applyDamage(ctx, target, p.damage, { id: p.sourceId, owner: p.owner });
     }
