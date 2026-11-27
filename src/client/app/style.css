@@ -279,7 +279,8 @@ body,
 
 .seg {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* Easy / Standard / Hard on one row, "No opponent (sandbox)" across the full width below. */
+  grid-template-columns: repeat(3, 1fr);
   gap: 6px;
 }
 
