@@ -15,6 +15,7 @@ import {
 } from '../../sim/types';
 import type { GameSpeed } from '../app/loop';
 import { isIdleMilitary, isIdleVillager } from '../input/selection';
+import { resolveMaxHp } from '../input/placement/targeting';
 import { buildCommandCard, type HudQueries } from './commandCard';
 import { bonusLines } from './text';
 import type {
@@ -197,7 +198,7 @@ function singleSelection(input: BuildViewModelInput, e: ReadonlyEntity): SingleS
   const { name, icon } = entityName(registry, e);
   let hp: SingleSelectionVM['hp'] = null;
   if (e.kind !== 'node' && def !== undefined && def.kind !== 'node' && def.kind !== 'tech') {
-    hp = { current: e.hp, max: input.query.resolvedStat(e.owner, e.typeId, 'hp') };
+    hp = { current: e.hp, max: resolveMaxHp(input.query, registry, e.owner, e.typeId) };
   }
   return {
     kind: 'single',
@@ -265,7 +266,7 @@ export function buildHudViewModel(input: BuildViewModelInput): HudViewModel {
     banner: input.client.banner,
     menuOpen: input.client.menuOpen,
     placing: input.client.placing,
-    endScreen: null, // STUB (TODO(WP29/WP30)): end screen view-model
+    endScreen: null, // Always null: the end screen is `Match.endScreen` (app/endScreen.ts), the one mechanism
     resignConfirmOpen: input.client.resignConfirmOpen ?? false,
   };
 }

@@ -15,6 +15,7 @@ import { TILE_H, TILE_W, type CommandInput, type EntityId, type PlayerId, type S
 import type { AssetManifest, SpriteAsset } from '../../art/manifest';
 import type { TeamAssetManifest } from '../../art/procedural';
 import type { PlacementGhost } from '../../input/placement/types';
+import { resolveMaxHp } from '../../input/placement/targeting';
 import { footprintOf } from '../entities';
 import { worldToScreen } from '../iso';
 import type { WorldRendererApi } from '../renderer';
@@ -134,14 +135,7 @@ export class WorldOverlays {
     this.barPool = pool(this.above);
     this.hpPool = pool(this.above);
     this.unitTops = new UnitTopCache(deps.registry, deps.manifest);
-    this.maxHp = new MaxHpCache((owner, typeId) => {
-      try {
-        return deps.sim.query.resolvedStat(owner, typeId, 'hp');
-      } catch {
-        const d = deps.registry.def(typeId);
-        return d !== undefined && (d.kind === 'unit' || d.kind === 'building') ? d.combat.hp : 0;
-      }
-    });
+    this.maxHp = new MaxHpCache((owner, typeId) => resolveMaxHp(deps.sim.query, deps.registry, owner, typeId));
     this.carryPool = pool(this.above);
     this.flagPool = pool(this.above);
     this.above.addChild(this.box, this.ghostLabel);

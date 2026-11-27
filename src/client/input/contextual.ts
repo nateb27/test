@@ -24,8 +24,9 @@
  * Shift sets `queue: true` on move, attack, repair, gather and assist.
  */
 
-import type { DataRegistry, UnitDef } from '../../data/schema';
-import { NEUTRAL_PLAYER_ID, type CommandInput, type EntityId, type PlayerId, type ReadonlyEntity, type Vec2 } from '../../sim/types';
+import type { DataRegistry } from '../../data/schema';
+import type { CommandInput, EntityId, PlayerId, ReadonlyEntity, Vec2 } from '../../sim/types';
+import { canTarget, isEnemyOf, repairers as repairerIds, unitDefOf } from './placement/targeting';
 import { entityCentre } from './selection';
 
 export type ContextTarget =
@@ -65,7 +66,7 @@ export function classifyTarget(
 ): ContextTarget {
   if (target === null) return 'ground';
   if (target.kind === 'node') return 'node';
-  const enemy = target.owner !== owner && target.owner !== NEUTRAL_PLAYER_ID && target.hp > 0;
+  const enemy = isEnemyOf(target, owner);
   if (target.kind === 'unit') return enemy ? 'enemyUnit' : 'unit';
   const def = registry.def(target.typeId);
   const bdef = def !== undefined && def.kind === 'building' ? def : null;
@@ -77,10 +78,7 @@ export function classifyTarget(
   return 'otherBuilding';
 }
 
-function unitDef(e: ReadonlyEntity, registry: DataRegistry): UnitDef | null {
-  const d = e.kind === 'unit' ? registry.def(e.typeId) : undefined;
-  return d !== undefined && d.kind === 'unit' ? d : null;
-}
+const unitDef = unitDefOf;
 
 export function resolveContextCommands(input: ContextInput): CommandInput[] {
   const { target, owner, registry } = input;
@@ -89,12 +87,6 @@ export function resolveContextCommands(input: ContextInput): CommandInput[] {
   const kind = classifyTarget(target, owner, registry, input.maxHp);
   if (units.length > 0) return unitCommands(units, input, kind);
   return rallyCommands(own, input, kind);
-}
-
-/** True when a unit of this def may be ordered to attack `target` (siege: buildings only). */
-function canTarget(def: UnitDef | null, target: ReadonlyEntity): boolean {
-  if (def === null || def.combat.attack <= 0) return false;
-  return def.combat.targets === 'any' || target.kind === 'building';
 }
 
 function ids(list: readonly ReadonlyEntity[]): EntityId[] {
@@ -111,16 +103,21 @@ function unitCommands(units: readonly ReadonlyEntity[], input: ContextInput, kin
   };
 
   if (target !== null && (kind === 'enemyUnit' || kind === 'enemyBuilding')) {
-    const attackers = units.filter((u) => canTarget(unitDef(u, registry), target));
+    // The same rule as attack-move mode and the sword cursor (`input/placement/targeting.ts`).
+    const attackers = units.filter((u) => {
+      const d = unitDef(u, registry);
+      return d !== null && canTarget(d, target);
+    });
     if (attackers.length > 0) {
       out.push({ type: 'attack', unitIds: ids(attackers), targetId: target.id, queue: shift });
       take(attackers);
     }
   } else if (target !== null && kind === 'ownDamagedBuilding') {
-    const repairers = units.filter((u) => unitDef(u, registry)?.builds?.includes(target.typeId) === true);
+    // The same rule as repair mode.
+    const repairers = repairerIds(units, target, input.owner, registry);
     if (repairers.length > 0) {
-      out.push({ type: 'repair', unitIds: ids(repairers), buildingId: target.id, queue: shift });
-      take(repairers);
+      out.push({ type: 'repair', unitIds: repairers, buildingId: target.id, queue: shift });
+      for (const id of repairers) handled.add(id);
     }
   } else if (target !== null && (kind === 'node' || kind === 'ownFarm')) {
     const def = registry.def(target.typeId);

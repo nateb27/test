@@ -4,7 +4,7 @@
  */
 
 import type { DataRegistry, UnitDef } from '../../../data/schema';
-import type { CommandInput, EntityId, PlayerId, ReadonlyEntity, Vec2 } from '../../../sim/types';
+import type { CommandInput, EntityId, PlayerId, ReadonlyEntity, SimQuery, Vec2 } from '../../../sim/types';
 import { entityCentre } from '../selection';
 
 export function unitDefOf(e: ReadonlyEntity, registry: DataRegistry): UnitDef | null {
@@ -12,9 +12,25 @@ export function unitDefOf(e: ReadonlyEntity, registry: DataRegistry): UnitDef | 
   return d !== undefined && d.kind === 'unit' ? d : null;
 }
 
-/** A unit or building of another real player (nodes and neutral things are not enemies). */
+/**
+ * A living unit or building of another real player (nodes, neutral things and hp-0 entities are not enemies).
+ * The one rule the contextual right click, the attack-move mode and the sword cursor share.
+ */
 export function isEnemyOf(target: ReadonlyEntity | null | undefined, owner: PlayerId): target is ReadonlyEntity {
-  return target !== null && target !== undefined && target.kind !== 'node' && target.owner !== 0 && target.owner !== owner;
+  return target !== null && target !== undefined && target.kind !== 'node' && target.owner !== 0 && target.owner !== owner && target.hp > 0;
+}
+
+/**
+ * Maximum hp of an entity type for its owner (upgrades included): `query.resolvedStat(owner, typeId, 'hp')`, else the
+ * def's base hp. The one resolution used by the health bars, the selection panel, the right click and repair mode.
+ */
+export function resolveMaxHp(query: Pick<SimQuery, 'resolvedStat'>, registry: DataRegistry, owner: PlayerId, typeId: string): number {
+  try {
+    return query.resolvedStat(owner, typeId, 'hp');
+  } catch {
+    const d = registry.def(typeId);
+    return d !== undefined && (d.kind === 'unit' || d.kind === 'building') ? d.combat.hp : 0;
+  }
 }
 
 /** Whether a unit def can attack at all (every M2 unit, villagers included, has attack > 0). */
