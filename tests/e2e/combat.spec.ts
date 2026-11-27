@@ -545,3 +545,21 @@ test('save mid-fight, load: the state hash continues identically', async ({ page
   expect(b).toEqual(a);
   expect(errors).toEqual([]);
 });
+
+test('scenario 17: rendered-art battle gallery: death poses, corpses, fires, rubble, projectiles, both colours, at 0.5x, 1x and 2x', async ({ page }) => {
+  test.skip(true, 'Needs the WP27 effect layer (death animations, corpses, fires, rubble, projectiles are not drawn yet)');
+  test.setTimeout(240_000);
+  await startMatch(page, { ...OPPONENT, art: 'rendered' });
+  const g = await clearSpot(page, (await townCenter(page)).x, (await townCenter(page)).y, 13, 3);
+  await centreCamera(page, g.x, g.y);
+  await spawn(page, [['archer', g.x, g.y], ['spearman', g.x + 1, g.y], ['batteringRam', g.x, g.y + 1.5]]);
+  await spawn(page, [['archer', g.x + 5, g.y], ['swordsman', g.x + 4, g.y + 1]], ENEMY);
+  await stepUntil(page, 'g.state.projectiles.length > 0', 400, 1);
+  for (const zoom of [0.5, 1, 2]) {
+    await page.evaluate((z) => window.__game!.setZoom(z), zoom);
+    await step(page, 40);
+    const fx = await page.evaluate(() => window.__game!.effects());
+    expect(fx.projectiles + fx.corpses).toBeGreaterThan(0);
+    await shot(page, `m2-17-gallery-${zoom}x`);
+  }
+});
