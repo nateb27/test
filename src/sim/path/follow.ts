@@ -75,8 +75,17 @@ export function followPath(ctx: SimContext, unit: UnitEntity, goal: PathGoal): F
  * Chase helper (PLAN-M2 4.6): if the straight segment from the unit to (x, y) is walkable, set a one-waypoint path
  * to it (no A*) and return true; otherwise change nothing and return false (callers then use `followPath`).
  *
- * STUB (TODO(WP24)): always returns false.
+ * A request still queued for the unit is dropped (it would overwrite the direct path). Callers re-issue this each
+ * tick they want the path refreshed; `followPath`'s stale-path check keeps a direct path honest in between.
  */
-export function directPath(_ctx: SimContext, _unit: UnitEntity, _x: number, _y: number): boolean {
-  return false;
+export function directPath(ctx: SimContext, unit: UnitEntity, x: number, y: number): boolean {
+  const target: Vec2 = { x, y };
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+  if (!segmentWalkable(gridOf(ctx), unit.pos, target)) return false;
+  if (unit.pendingPathRequestId !== null) {
+    ctx.state.pathQueue = ctx.state.pathQueue.filter((r) => r.unitId !== unit.id);
+    unit.pendingPathRequestId = null;
+  }
+  unit.path = { waypoints: [target], nextIndex: 0, occupancyVersion: ctx.state.occupancyVersion };
+  return true;
 }
