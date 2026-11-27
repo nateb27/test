@@ -12,12 +12,13 @@ import { perf } from '../debug/perf';
 import type { AssetManifest } from '../art/manifest';
 import { registry as defaultRegistry } from '../../data';
 import type { DataRegistry } from '../../data/schema';
-import type { EntityId, ReadonlyGameState, SimEvent, Vec2 } from '../../sim/types';
+import { TICK_RATE, type EntityId, type ReadonlyGameState, type SimEvent, type Vec2 } from '../../sim/types';
 import { Camera, CameraInput, type CameraInputOptions, type WorldPxRect } from './camera';
 import { EntityLayer, footprintOf, type DrawnEntity } from './entities';
 import { mapScreenBounds, screenToWorld, worldToScreen, type ScreenPoint } from './iso';
 import { pickDrawn, pickRect } from './picking';
 import { TerrainLayer } from './terrain';
+import { drawOnChange } from './redraw';
 
 export interface WorldRenderer {
   readonly canvas: HTMLCanvasElement;
@@ -110,6 +111,8 @@ export async function createWorldRenderer(options: RendererOptions): Promise<Wor
   });
   app.canvas.classList.add('world-canvas');
   options.parent.appendChild(app.canvas);
+  // Draw only frames whose scene changed (a paused, idle world costs no GPU time; see redraw.ts).
+  drawOnChange(app);
 
   if (DEBUG_HOOKS_ENABLED) {
     // Time Pixi's own draw (scene graph traversal and command submission) between the first and last ticker callbacks.
@@ -169,7 +172,8 @@ export async function createWorldRenderer(options: RendererOptions): Promise<Wor
       terrain.update(rect, state.map, state.mapSeed, state.entities);
       const t1 = perf.start();
       perf.end('render.terrain', t0);
-      entities.update(state, alpha, rect, now);
+      // Sprite animations run on game time (tick + alpha), so a paused match is a still picture (and is not redrawn).
+      entities.update(state, alpha, rect, ((state.tick + alpha) * 1000) / TICK_RATE);
       perf.end('render.entities', t1);
     },
     worldToCanvas: (x, y) => camera.worldToCanvas(x, y),
