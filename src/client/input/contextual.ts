@@ -6,21 +6,26 @@
  *
  * Resolution table (units selected):
  *
- * | target                          | villagers (can gather/build)   | other units |
- * |---------------------------------|--------------------------------|-------------|
- * | ground / unit / other building  | move                           | move        |
- * | resource node                   | gather                         | move        |
- * | own unfinished building         | assist (build)                 | move        |
- * | own completed farm              | gather (on the farm)           | move        |
- * | own drop-off, carrying a load   | dropOff                        | move        |
+ * | target                              | villagers (can gather/build)   | other units |
+ * |-------------------------------------|--------------------------------|-------------|
+ * | ground / own unit / other building  | move                           | move        |
+ * | enemy unit or building (M2)         | attack                         | attack      |
+ * | own damaged completed building (M2) | repair                         | move        |
+ * | resource node                       | gather                         | move        |
+ * | own unfinished building             | assist (build)                 | move        |
+ * | own completed farm                  | gather (on the farm)           | move        |
+ * | own drop-off, carrying a load       | dropOff                        | move        |
+ *
+ * An `attack` goes to the units that can target the entity (siege: buildings only); the others `move` to the
+ * target's position. A `repair` goes to the units that can build that building type.
  *
  * Buildings selected (and no units): own completed production buildings get
  * `setRally` (onto the target when it is a node or farm, else the ground point).
- * Shift sets `queue: true` on move, gather and assist.
+ * Shift sets `queue: true` on move, attack, repair, gather and assist.
  */
 
 import type { DataRegistry, UnitDef } from '../../data/schema';
-import type { CommandInput, EntityId, PlayerId, ReadonlyEntity, Vec2 } from '../../sim/types';
+import { NEUTRAL_PLAYER_ID, type CommandInput, type EntityId, type PlayerId, type ReadonlyEntity, type Vec2 } from '../../sim/types';
 import { entityCentre } from './selection';
 
 export type ContextTarget =
@@ -30,7 +35,12 @@ export type ContextTarget =
   | 'ownFarm'
   | 'ownDropOff'
   | 'otherBuilding'
-  | 'unit';
+  | 'unit'
+  /** M2: a unit or building of another real player. */
+  | 'enemyUnit'
+  | 'enemyBuilding'
+  /** M2: own completed building with hp below its maximum. */
+  | 'ownDamagedBuilding';
 
 export interface ContextInput {
   /** Selected entities (any owner; foreign ones are ignored). */
@@ -42,17 +52,26 @@ export interface ContextInput {
   shift: boolean;
   owner: PlayerId;
   registry: DataRegistry;
+  /** Resolved maximum hp of an entity (`query.resolvedStat(owner, typeId, 'hp')`). Without it nothing counts as damaged. */
+  maxHp?(e: ReadonlyEntity): number;
 }
 
-/** What the right click landed on. */
-export function classifyTarget(target: ReadonlyEntity | null, owner: PlayerId, registry: DataRegistry): ContextTarget {
+/** What the right click landed on. `maxHp` lets own completed buildings below it classify as damaged. */
+export function classifyTarget(
+  target: ReadonlyEntity | null,
+  owner: PlayerId,
+  registry: DataRegistry,
+  maxHp?: (e: ReadonlyEntity) => number,
+): ContextTarget {
   if (target === null) return 'ground';
-  if (target.kind === 'unit') return 'unit';
   if (target.kind === 'node') return 'node';
+  const enemy = target.owner !== owner && target.owner !== NEUTRAL_PLAYER_ID && target.hp > 0;
+  if (target.kind === 'unit') return enemy ? 'enemyUnit' : 'unit';
   const def = registry.def(target.typeId);
   const bdef = def !== undefined && def.kind === 'building' ? def : null;
-  if (target.owner !== owner) return 'otherBuilding';
+  if (target.owner !== owner) return enemy ? 'enemyBuilding' : 'otherBuilding';
   if (!target.constructed) return 'ownUnfinishedBuilding';
+  if (maxHp !== undefined && target.hp > 0 && target.hp < maxHp(target)) return 'ownDamagedBuilding';
   if (bdef?.farm !== undefined) return 'ownFarm';
   if (bdef !== null && bdef.dropOff.length > 0) return 'ownDropOff';
   return 'otherBuilding';
@@ -67,8 +86,15 @@ export function resolveContextCommands(input: ContextInput): CommandInput[] {
   const { target, owner, registry } = input;
   const own = input.selected.filter((e) => e.owner === owner);
   const units = own.filter((e) => e.kind === 'unit');
-  if (units.length > 0) return unitCommands(units, input, classifyTarget(target, owner, registry));
-  return rallyCommands(own, input, classifyTarget(target, owner, registry));
+  const kind = classifyTarget(target, owner, registry, input.maxHp);
+  if (units.length > 0) return unitCommands(units, input, kind);
+  return rallyCommands(own, input, kind);
+}
+
+/** True when a unit of this def may be ordered to attack `target` (siege: buildings only). */
+function canTarget(def: UnitDef | null, target: ReadonlyEntity): boolean {
+  if (def === null || def.combat.attack <= 0) return false;
+  return def.combat.targets === 'any' || target.kind === 'building';
 }
 
 function ids(list: readonly ReadonlyEntity[]): EntityId[] {
@@ -84,7 +110,19 @@ function unitCommands(units: readonly ReadonlyEntity[], input: ContextInput, kin
     for (const u of list) handled.add(u.id);
   };
 
-  if (target !== null && (kind === 'node' || kind === 'ownFarm')) {
+  if (target !== null && (kind === 'enemyUnit' || kind === 'enemyBuilding')) {
+    const attackers = units.filter((u) => canTarget(unitDef(u, registry), target));
+    if (attackers.length > 0) {
+      out.push({ type: 'attack', unitIds: ids(attackers), targetId: target.id, queue: shift });
+      take(attackers);
+    }
+  } else if (target !== null && kind === 'ownDamagedBuilding') {
+    const repairers = units.filter((u) => unitDef(u, registry)?.builds?.includes(target.typeId) === true);
+    if (repairers.length > 0) {
+      out.push({ type: 'repair', unitIds: ids(repairers), buildingId: target.id, queue: shift });
+      take(repairers);
+    }
+  } else if (target !== null && (kind === 'node' || kind === 'ownFarm')) {
     const def = registry.def(target.typeId);
     const gatherKind = def !== undefined && def.kind === 'node' ? def.gatherKind : def !== undefined && def.kind === 'building' ? def.farm?.gatherKind : undefined;
     const gatherers = units.filter((u) => {
@@ -115,7 +153,8 @@ function unitCommands(units: readonly ReadonlyEntity[], input: ContextInput, kin
   if (movers.length > 0) {
     // Moving onto a node or building walks to its footprint centre; the
     // pathfinder takes the unit to the nearest reachable tile.
-    const dest = target !== null && target.kind !== 'unit' && kind !== 'otherBuilding' ? entityCentre(target, registry) : point;
+    // Units that cannot attack an enemy walk to it; an own unit or a plain building is moved to at the clicked point.
+    const dest = target !== null && (kind === 'enemyUnit' || (target.kind !== 'unit' && kind !== 'otherBuilding')) ? entityCentre(target, registry) : point;
     out.push({ type: 'move', unitIds: ids(movers), x: dest.x, y: dest.y, queue: shift });
   }
   return out;

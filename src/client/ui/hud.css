@@ -924,3 +924,138 @@ button.card-slot:not(:has(.cost-row)) {
   background: rgba(60, 130, 60, 0.35);
   border: 1px solid #5fcf63;
 }
+
+/* ------------------------------------------------------- combat (M2) */
+
+.player-swatch {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  box-sizing: border-box;
+}
+
+/* The combat line: attack, range and armour on one row that wraps in a narrow panel, then bonus lines and the note. */
+.combat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.combat-row {
+  flex-wrap: wrap;
+  gap: 1px 10px;
+  font-size: 12px;
+}
+
+.combat-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+}
+
+.combat-type {
+  color: var(--hud-muted);
+  font-size: 11px;
+}
+
+.combat-sep {
+  color: var(--hud-muted);
+}
+
+.combat-bonus,
+.combat-note {
+  font-size: 12px;
+  color: var(--hud-gold);
+}
+
+.combat-note {
+  color: var(--hud-muted);
+}
+
+.tag.owner-tag {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The current stance on the command card. */
+.card-slot.active {
+  border-color: #fff;
+  background: linear-gradient(180deg, #7a52b8, #4a2f78);
+  box-shadow: 0 0 0 2px var(--hud-gold), inset 0 0 8px rgba(255, 224, 140, 0.45);
+}
+
+/* Alerts and banners never outgrow a narrow window. */
+.toasts {
+  max-width: calc(100% - 32px);
+}
+
+.toast {
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.banner {
+  box-sizing: border-box;
+  max-width: calc(100% - 32px);
+  overflow-wrap: anywhere;
+}
+
+.banner-defeated .banner-title {
+  font-size: 24px;
+}
+
+.banner-defeated {
+  padding: 12px 28px;
+}
+
+/*
+ * The selection panel is only about 220 px wide at 800 x 600, and M2 adds a combat line, a note and a stance to it.
+ * Below 1024 px the minimap gives up some width, the portrait and name shrink, and values never wrap, so a Town
+ * Center with a full queue still fits the 188 px panel without scrolling.
+ */
+.stat .stat-value {
+  white-space: nowrap;
+}
+
+@media (max-width: 1023px) {
+  .minimap-frame {
+    width: 200px;
+  }
+  .selection {
+    padding: 6px 8px;
+  }
+  .single-head {
+    gap: 8px;
+  }
+  .portrait .icon {
+    width: 44px !important;
+    height: 44px !important;
+  }
+  .single-name {
+    font-size: 16px;
+    gap: 6px;
+  }
+  .stat-label {
+    width: auto;
+    min-width: 24px;
+  }
+  .bar {
+    min-width: 36px;
+  }
+  .single-info {
+    gap: 2px;
+  }
+  .queue {
+    margin-top: 2px;
+  }
+  .queue-title {
+    margin-bottom: 2px;
+  }
+}

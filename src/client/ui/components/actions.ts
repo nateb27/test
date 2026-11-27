@@ -7,6 +7,7 @@ export interface HudActions {
   narrowSelection(id: EntityId): void;
   cancelQueueItem(buildingId: EntityId, index: number): void;
   cycleIdleVillager(): void;
+  cycleIdleMilitary(): void;
   setSpeed(speed: GameSpeed): void;
   togglePause(): void;
 }

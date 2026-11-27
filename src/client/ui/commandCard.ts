@@ -43,6 +43,12 @@ export const SLOT_CORNER = CARD_SLOTS - 1;
 const SLOT_PAGE_ECONOMY = 0;
 const SLOT_PAGE_MILITARY = 1;
 const SLOT_STOP = 2;
+/** Military and villager commands of the M2 card (plan 7.1): fixed slots, so the keys never move. */
+const SLOT_REPAIR = 3;
+const SLOT_ATTACK_MOVE = 5;
+const SLOT_HOLD = 6;
+const SLOT_AGGRESSIVE = 10;
+const SLOT_STAND_GROUND = 11;
 
 export interface CardInput {
   playerId: PlayerId;
@@ -115,7 +121,7 @@ function plainItem(
   slot: number,
 ): Item {
   return {
-    key: action.type === 'page' ? `page:${action.page}` : action.type,
+    key: action.type === 'page' ? `page:${action.page}` : action.type === 'stance' ? `stance:${action.stance}` : action.type,
     fixedSlot: slot,
     preferredSlot: null,
     body: {
@@ -163,6 +169,34 @@ function buildItems(input: CardInput, page: Exclude<CardPage, 'main'>): Item[] {
   return items;
 }
 
+/** Attack-move, Hold and the two stances: the commands of every unit that fights on its own. */
+function militaryItems(): Item[] {
+  return [
+    plainItem(
+      { type: 'attackMove' },
+      'Attack-move',
+      'icon.command.attackMove',
+      'Then click the ground: walk there and fight enemies met on the way. Click an enemy to attack it.',
+      SLOT_ATTACK_MOVE,
+    ),
+    plainItem({ type: 'hold' }, 'Hold position', 'icon.command.hold', 'Stand still and attack only enemies within reach.', SLOT_HOLD),
+    plainItem(
+      { type: 'stance', stance: 'aggressive' },
+      'Aggressive',
+      'icon.command.aggressive',
+      'Attack enemies in sight and chase them a short way.',
+      SLOT_AGGRESSIVE,
+    ),
+    plainItem(
+      { type: 'stance', stance: 'standGround' },
+      'Stand ground',
+      'icon.command.standGround',
+      'Attack only enemies within reach and never chase.',
+      SLOT_STAND_GROUND,
+    ),
+  ];
+}
+
 function unitItems(input: CardInput, e: ReadonlyEntity, page: CardPage): Item[] {
   const items: Item[] = [];
   if (page === 'main') {
@@ -185,6 +219,19 @@ function unitItems(input: CardInput, e: ReadonlyEntity, page: CardPage): Item[] 
       );
     }
     items.push(plainItem({ type: 'stop' }, 'Stop', 'icon.command.stop', 'Stop what you are doing and stand still.', SLOT_STOP));
+    if (isBuilder(e, input.registry)) {
+      items.push(
+        plainItem(
+          { type: 'repair' },
+          'Repair',
+          'icon.command.repair',
+          'Then click a damaged building of yours to repair it. Shift keeps repairing more.',
+          SLOT_REPAIR,
+        ),
+      );
+    }
+    const def = input.registry.def(e.typeId);
+    if (def?.kind === 'unit' && def.combat.autoAcquire) items.push(...militaryItems());
     return items;
   }
   return buildItems(input, page);
@@ -301,5 +348,12 @@ export function buildCommandCard(input: CardInput): CommandCardVM | null {
       common = common.filter((i) => keys.has(i.key));
     }
   }
-  return { page, title: PAGE_TITLE[page], buttons: assignSlots(common ?? []) };
+  const buttons = assignSlots(common ?? []);
+  // The current stance is highlighted when every selected unit has it.
+  for (const b of buttons) {
+    if (b.action.type !== 'stance') continue;
+    const wanted = b.action.stance;
+    b.active = input.selected.every((e) => e.kind === 'unit' && e.stance === wanted);
+  }
+  return { page, title: PAGE_TITLE[page], buttons };
 }

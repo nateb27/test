@@ -21,6 +21,7 @@ import {
   clickSelection,
   entityCentre,
   findTownCenter,
+  nextIdleMilitary,
   nextIdleVillager,
   sameTypeSelection,
   trackClick,
@@ -97,6 +98,8 @@ export class GameInput {
   private lastClick: ClickRecord | null = null;
   private lastGroupTap: { group: number; time: number } | null = null;
   private lastIdle: EntityId | null = null;
+  private lastIdleMilitary: EntityId | null = null;
+  private lastAlert: Vec2 | null = null;
   private pendingDemolish: { key: string; time: number } | null = null;
 
   constructor(deps: GameInputDeps) {
@@ -150,6 +153,11 @@ export class GameInput {
     return () => this.uiListeners.delete(listener);
   }
 
+  /** An `UnderAttack` alert happened here: `Space` centres the camera on the latest one (the HUD reports them). */
+  noteAlert(x: number, y: number): void {
+    this.lastAlert = { x, y };
+  }
+
   /** Per-frame, before rendering: drop selected entities that no longer exist. */
   update(): void {
     this.selection.prune((id) => this.sim.query.entityById(id) !== undefined);
@@ -169,6 +177,7 @@ export class GameInput {
       shift,
       owner: this.playerId,
       registry: this.registry,
+      maxHp: (e) => this.sim.query.resolvedStat(e.owner, e.typeId, 'hp'),
     });
     for (const c of cmds) this.commands.issue(c);
     return cmds;
@@ -195,6 +204,25 @@ export class GameInput {
           const c = entityCentre(e, this.registry);
           this.renderer.jumpTo(c.x, c.y);
         }
+        return;
+      }
+      case 'cycleIdleMilitary': {
+        const id = nextIdleMilitary(this.sim.state.entities, this.playerId, this.lastIdleMilitary, this.registry);
+        this.lastIdleMilitary = id;
+        if (id === null) return;
+        this.selection.set([id]);
+        const e = this.sim.query.entityById(id);
+        if (e !== undefined) {
+          const c = entityCentre(e, this.registry);
+          this.renderer.jumpTo(c.x, c.y);
+        }
+        return;
+      }
+      case 'jumpToAlert': {
+        // A focused HUD button would otherwise be clicked again by the space bar.
+        const active = typeof document === 'undefined' ? null : document.activeElement;
+        if (active instanceof HTMLElement && active.tagName === 'BUTTON') active.blur();
+        if (this.lastAlert !== null) this.renderer.jumpTo(this.lastAlert.x, this.lastAlert.y);
         return;
       }
       case 'deleteSelection': {
